@@ -1,0 +1,119 @@
+1. Scoring multi-critères
+Objectif : Remplacer le score fixe « 1 » par un tri lexicographique qui compare, pour chaque option de déplacement+attaque, quatre indicateurs dans un ordre précis.
+
+Collecte des métriques
+
+Dans targeting.py et movement.py, ajoute du code pour calculer à chaque tuile candidate :
+
+DPS potentiel : combien de dégâts on infligerait en attaquant ici.
+
+Menace future : nombre d’ennemis qui pourraient riposter en mêlée après qu’on se soit placé.
+
+Mobilité : nombre de cases libres autour de cette tuile pour bouger encore après.
+
+Distance : éloignement par rapport à la cible.
+
+Cache des options
+
+Pour éviter de recalculer plusieurs fois les mêmes métriques dans un même tour, stocke-les dans un petit dictionnaire {tuile: (dps, menace, mobi, dist)} dès la première simulation.
+
+Lorsqu’on revisite la même tuile, on relit le cache au lieu de re-simuler le chemin.
+
+Tri lexicographique
+
+Implémente dans targeting.py une fonction de comparaison :
+
+DPS (on veut maximiser les dégâts)
+
+Sécurité (on veut minimiser la menace)
+
+Mobilité (on veut le plus de cases libres possible)
+
+Proximité (on veut se rapprocher autant que possible de la cible)
+
+Parcours toutes les options, trie-les selon cet ordre, et prends la meilleure.
+
+Tests unitaires
+
+Dans tests/test_targeting.py, écris des cas où deux options diffèrent uniquement par un critère (p. ex. même DPS mais différence de menace) pour valider qu’on choisit bien la “bonne” tuile.
+
+2. Réservation de tuiles
+Objectif : Lorsqu’une IA choisit une tuile pour bouger, empêcher les IA suivantes de réserver la même tuile dans le même round.
+
+Calcul de l’état statique
+
+Dans utils.py et movement.py, écris une fonction qui rassemble en début de round toutes les positions occupées : alliés, ennemis, obstacles. Stocke-les dans occupied_static.
+
+Initialisation du set reserved
+
+Au début du round (dans action_system.py), crée une variable globale temporaire reserved = set() pour y ajouter les cases choisies.
+
+Filtrage des tuiles atteignables
+
+Dans la fonction de calcul des reachable_tiles (généralement dans movement.py), avant de renvoyer la liste, retire toutes les tuiles qui sont dans occupied_static ∪ reserved.
+
+Ajout à la réservation
+
+Quand une IA valide son choix de tuile finale (toujours dans action_system.py après simulate_move*), fais reserved.add(tile_final).
+
+Ainsi, la prochaine IA qui jouera verra cette tuile comme déjà prise.
+
+3. Cibles déjà engagées
+Objectif : Autoriser systématiquement les attaques mêlée sur des ennemis déjà entourés, et ne laisser le tir à distance sur des cibles engagées qu’en dernier recours.
+
+Flag ignore_engaged pour la mêlée
+
+Dans targeting.py, modifie choose_melee_target pour qu’il prenne un paramètre ignore_engaged=True par défaut. Ne filtre plus les cibles engagées.
+
+Double passe pour le tir
+
+Toujours dans targeting.py, change choose_ranged_target en deux phases :
+
+Phase 1 : ignore_engaged=False (on cherche isolés)
+
+Phase 2 : si aucune cible trouvée, rappel avec ignore_engaged=True (on accepte d’achever un ennemi déjà entouré).
+
+4. Prévision sur deux tours (repli stratégique)
+Objectif : Si l’IA ne peut pas attaquer ce tour, la faire se déplacer vers la tuile qui maximise son potentiel offensif tout en minimisant le danger du prochain tour.
+
+Détection du cas sans DPS
+
+Dans action_system.py, teste si la somme des dégâts potentiels (sum DPS) pour ce tour est zéro. Si oui, on passe en phase de prévision au lieu de simplement “fin de tour”.
+
+Simulation de la menace
+
+Dans movement.py et utils.py, ajoute une fonction qui, pour chaque ennemi, calcule ses reachable_tiles par BFS et voit s’il peut atteindre en mêlée la tuile candidate T. La somme des ennemis capables d’attaquer T est la “menace_after”.
+
+Calcul du DPS suivant
+
+Réutilise ta logique de scoring lexicographique (étape 1) pour estimer, si l’IA reste sur la tuile T au tour 2, combien de dégâts elle pourrait infliger à ce moment-là (dps_next).
+
+Choix de la meilleure tuile
+
+Dans action_system.py, parcours toutes les tuiles atteignables T, calcule Score2 = dps_next – menace_after, et choisis la tuile qui maximise Score2.
+
+L’IA se déplace là-dessus et termine son tour (sans attaquer).
+
+5. Fallback en posture de couverture
+Objectif : Quand l’IA ne peut attaquer ni en mêlée ni à distance de façon satisfaisante, la faire se mettre à l’abri plutôt que rester bloquée.
+
+Détection du fallback
+
+Toujours dans action_system.py, détecte si ni simulate_move_and_find_melee ni simulate_move_and_find_ranged (avec allow_engaged=True) n’ont retourné d’action valable.
+
+Sélection de la tuile de couverture
+
+Dans movement.py, évalue chaque tuile atteignable T selon :
+
+Nombre de cases libres autour de T (plus c’est grand, plus c’est sûr).
+
+Menace_after comme en 4) (moins d’ennemis proches = mieux).
+
+Exclut T si elle est alignée ou adjacente à un allié (pour éviter l’encerclement par tes propres alliés).
+
+Parmi celles qui restent, privilégie celle la plus proche d’un obstacle pour faire “couverture”.
+
+Action Wait
+
+Dans action_system.py, fais se déplacer l’IA sur T_couv puis appelle l’action “Wait” ou “EndTurn” pour la laisser en posture défensive.
+

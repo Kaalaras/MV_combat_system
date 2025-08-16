@@ -1,0 +1,272 @@
+# entities.base_object.py
+
+class BaseObject:
+    """
+    Base pour tous les objets du jeu nécessitant un ID unique et un registre global.
+    """
+
+    _id_counter = {}
+    _registry = {}
+
+    def __init__(self, sprite_path: str = None):
+        cls = self.__class__
+        if cls not in BaseObject._id_counter:
+            BaseObject._id_counter[cls] = 0
+            BaseObject._registry[cls] = {}
+
+        BaseObject._id_counter[cls] += 1
+        self.id = BaseObject._id_counter[cls]
+        BaseObject._registry[cls][self.id] = self
+        self.sprite_path = sprite_path
+
+    @classmethod
+    def get_by_id(cls, id_):
+        """
+        Retourne l'objet correspondant à l'ID pour une classe donnée.
+        """
+        return BaseObject._registry.get(cls, {}).get(id_)
+
+    @classmethod
+    def all_instances(cls):
+        """
+        Retourne toutes les instances enregistrées pour une classe donnée.
+        """
+        return list(BaseObject._registry.get(cls, {}).values())
+
+#entities.characters.py
+
+from utils.logger import log_calls
+from entities.base_object import BaseObject
+import copy
+import json
+from utils.character_utils import GENERATION_LIMIT, find_position_trait_in_dictionary
+
+class Character(BaseObject):
+    __slots__ = (
+        "name", "clan", "generation", "archetype",
+        "traits", "base_traits", "clan_disciplines",
+        "_health_damage", "_willpower_damage", "states",
+        "orientation"
+    )
+
+    def __init__(self, name: str = '', clan: str = '', generation: int = 13,
+                 archetype: str = '', traits=None, base_traits=None,
+                 clan_disciplines=None, sprite_path: str=  None) -> None:
+        super().__init__()
+        self.name = name
+        self.clan = clan
+        self.archetype = archetype
+        self.generation = generation
+        self.traits = traits or {}  # à compléter selon création perso
+        self.base_traits = base_traits or {}
+        self.clan_disciplines = clan_disciplines or {}
+        self._health_damage = {'superficial': 0, 'aggravated': 0}
+        self._willpower_damage = {'superficial': 0, 'aggravated': 0}
+        self.states = set()
+        self.orientation = 'up'
+        self.sprite_path = sprite_path
+
+    @log_calls
+    def modify_points(self, trait: str, points: int) -> bool:
+        """Modifie les points d'un trait, en respectant les limites."""
+        try:
+            keys = find_position_trait_in_dictionary(trait)
+            current_trait = self.traits
+            current_base_trait = self.base_traits
+
+            for key in keys[:-1]:
+                current_trait = current_trait[key]
+                current_base_trait = current_base_trait[key]
+
+            trait_name = keys[-1]
+            new_value = current_trait[trait_name] + points
+
+            if not (current_base_trait[trait_name] <= new_value <= self.generation_limit):
+                return False
+
+            current_trait[trait_name] = new_value
+            return True
+
+        except Exception as e:
+            print(f"Error modifying {trait}: {e}")
+            return False
+
+    @log_calls
+    def take_damage(self, amount: int, damage_type: str = 'superficial', target: str = 'health') -> None:
+        """Applique des dégâts à la santé ou à la volonté."""
+        damage = self._health_damage if target == 'health' else self._willpower_damage
+        damage[damage_type] += amount
+        self._check_affliction(target)
+
+    @log_calls
+    def heal_damage(self, amount: int, damage_type: str = 'superficial', target: str = 'health') -> None:
+        """Soigne des dégâts superficiels ou aggravés."""
+        damage = self._health_damage if target == 'health' else self._willpower_damage
+        damage[damage_type] = max(0, damage[damage_type] - amount)
+        self._check_affliction(target)
+
+    def _check_affliction(self, target: str):
+        """Vérifie si l'entité devient affaiblie."""
+        damage = self._health_damage if target == 'health' else self._willpower_damage
+        max_value = self.max_health if target == 'health' else self.max_willpower
+
+        if (damage['superficial'] + damage['aggravated']) >= max_value:
+            self.states.add('affaibli')
+
+    @property
+    def generation_limit(self) -> int:
+        return GENERATION_LIMIT[self.generation]
+
+    @property
+    def max_health(self) -> int:
+        return 3 + self.traits.get("Attributes", {}).get("Physical", {}).get("Stamina", 0)
+
+    @property
+    def max_willpower(self) -> int:
+        return 3 + self.traits.get("Virtues", {}).get("Courage", 0)
+
+    @log_calls
+    def copy(self):
+        return Character(
+            name=self.name,
+            clan=self.clan,
+            generation=self.generation,
+            archetype=self.archetype,
+            traits=copy.deepcopy(self.traits),
+            base_traits=copy.deepcopy(self.base_traits),
+            clan_disciplines=copy.deepcopy(self.clan_disciplines)
+        )
+
+    @log_calls
+    def save_to_json(self) -> str:
+        return json.dumps({slot: getattr(self, slot) for slot in self.__slots__}, indent=4, sort_keys=True)
+
+    @log_calls
+    def set_orientation(self, direction: str) -> None:
+        """
+        Définit l'orientation du personnage parmi : 'up', 'down', 'left', 'right'.
+        """
+        valid_directions = {"up", "down", "left", "right"}
+        if direction not in valid_directions:
+            raise ValueError(f"Invalid orientation: {direction}. Must be one of {valid_directions}.")
+        self.orientation = direction
+
+    @log_calls
+    def rotate_left(self) -> None:
+        """Tourne l'orientation du personnage vers la gauche (anti-horaire)."""
+        rotation_map = {"up": "left", "left": "down", "down": "right", "right": "up"}
+        self.orientation = rotation_map[self.orientation]
+
+    @log_calls
+    def rotate_right(self) -> None:
+        """Tourne l'orientation du personnage vers la droite (horaire)."""
+        rotation_map = {"up": "right", "right": "down", "down": "left", "left": "up"}
+        self.orientation = rotation_map[self.orientation]
+
+#entities.dice.py
+from utils.logger import log_calls
+import random
+
+
+class Dice:
+    __slots__ = ()
+
+    @log_calls
+    def roll_die(self) -> int:
+        """ Lance un seul dé D10. """
+        return random.randint(1, 10)
+
+    @log_calls
+    def roll_pool(self, pool_size: int, hunger_dice: int = 0) -> dict:
+        """
+        Lance un pool de dés de 10 faces.
+        - pool_size : nombre total de dés à jeter.
+        - hunger_dice : nombre de dés de soif (doit être <= pool_size).
+
+        Retourne un dictionnaire contenant :
+          - successes
+          - bestial_failures
+          - critical_successes
+          - hunger_bestial_successes
+          - hunger_bestial_failures
+        """
+        if hunger_dice > pool_size:
+            raise ValueError("hunger_dice cannot exceed pool_size.")
+
+        normal_dice = pool_size - hunger_dice
+        dice_results = [self.roll_die() for _ in range(pool_size)]
+
+        successes = 0
+        bestial_failures = 0
+        critical_successes = 0
+        hunger_bestial_successes = 0
+        hunger_bestial_failures = 0
+
+        for idx, die in enumerate(dice_results):
+            is_hunger = idx >= normal_dice
+
+            if die >= 6:
+                successes += 1
+            if die == 10:
+                if is_hunger:
+                    hunger_bestial_successes += 1
+                else:
+                    critical_successes += 1
+            if die == 1 and is_hunger:
+                hunger_bestial_failures += 1
+            if die == 1 and not is_hunger:
+                bestial_failures += 1
+
+        return {
+            "successes": successes,
+            "bestial_failures": bestial_failures,
+            "critical_successes": critical_successes,
+            "hunger_bestial_successes": hunger_bestial_successes,
+            "hunger_bestial_failures": hunger_bestial_failures
+        }
+
+#entities.weapons.py
+from entities.base_object import BaseObject
+from utils.logger import log_calls
+from typing import Optional
+
+class Weapon(BaseObject):
+    __slots__ = ("name", "damage_bonus", "weapon_range", "damage_type", "icon_path",)
+
+    VALID_DAMAGE_TYPES = {"superficial", "aggravated", "mixed"}
+
+    @log_calls
+    def __init__(self, name: str,
+                 damage_bonus: int,
+                 weapon_range: int,
+                 damage_type: str,
+                 icon_path: Optional[str] = None) -> None:
+        super().__init__()
+        if damage_type not in self.VALID_DAMAGE_TYPES:
+            raise ValueError(f"Invalid damage type '{damage_type}'. Must be one of {self.VALID_DAMAGE_TYPES}.")
+        self.name = name
+        self.damage_bonus = damage_bonus
+        self.weapon_range = weapon_range
+        self.damage_type = damage_type
+        self.icon_path = icon_path  # chemin pour affichage futur, pas sprite immédiat
+
+        # to implement later
+        self._effective_range = 0
+        self._damage_drop = 0
+        self._maximum_range = 0
+        self._initiative_bonus = 0
+
+    @log_calls
+    def get_damage_bonus(self) -> int:
+        """
+        Retourne le bonus de dégâts de l'arme.
+        Extensible plus tard pour des modificateurs dynamiques.
+        """
+        return self.damage_bonus
+
+#ecs.ecs_manager.py
+
+import esper
+
+# Initialisation du monde ECS
+world = esper.World()

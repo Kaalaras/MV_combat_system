@@ -1,0 +1,406 @@
+from typing import Dict, Optional, Any, List
+from tests.manual.battle_map_utils import draw_battle_map
+import os
+
+
+class GameSystem:
+    """
+    Main game loop controller that coordinates turn-based gameplay, action resolution,
+    AI decision making, and game state management.
+
+    The GameSystem orchestrates the flow of a turn-based game by managing:
+    - Turn order and round progression
+    - Player and AI action selection and execution
+    - Event handling through an event bus
+    - Game state visualization (battle map drawing)
+    - End condition checking
+
+    Example usage:
+    ```python
+    # Setup game components
+    game_state = GameState()
+    prep_manager = PreparationManager()
+    event_bus = EventBus()
+    ecs_manager = ECSManager()
+
+    # Initialize the game system
+    game_system = GameSystem(
+        game_state=game_state,
+        preparation_manager=prep_manager,
+        event_bus=event_bus,
+        ecs_manager=ecs_manager
+    )
+
+    # Set up required subsystems
+    turn_order_system = TurnOrderSystem(game_state)
+    action_system = ActionSystem(game_state, event_bus)
+    ai_system = BasicAISystem(game_state, event_bus)
+
+    game_system.set_turn_order_system(turn_order_system)
+    game_system.set_action_system(action_system)
+    game_system.register_ai_system("basic", ai_system)
+
+    # Set map output directory
+    game_system.set_map_directory("./battle_maps")
+
+    # Start the game loop with a maximum of 30 rounds
+    game_system.run_game_loop(max_rounds=30)
+    ```
+    """
+
+    def __init__(
+            self,
+            game_state: Any,
+            preparation_manager: Any,
+            event_bus: Optional[Any] = None,
+            ecs_manager: Optional[Any] = None,
+            enable_map_drawing: bool = True
+    ) -> None:
+        """
+        Initialize the GameSystem with game state and required managers.
+
+        Args:
+            game_state: The central GameState object containing all entity and world data
+            preparation_manager: Manager for game setup and preparation phase
+            event_bus: Optional event bus for communication between systems;
+                       if None, will attempt to use game_state.event_bus
+            ecs_manager: Optional Entity-Component-System manager for game logic processing
+            enable_map_drawing: Whether to save battle map visualizations between rounds
+
+        Example:
+            ```python
+            game_system = GameSystem(
+                game_state=game_state,
+                preparation_manager=prep_manager,
+                event_bus=event_bus,
+                enable_map_drawing=True
+            )
+            ```
+        """
+        self.game_state = game_state
+        self.preparation_manager = preparation_manager
+        self.event_bus = event_bus or getattr(game_state, "event_bus", None)
+        self.ecs_manager = ecs_manager
+        self.enable_map_drawing = enable_map_drawing
+        self.map_dir: Optional[str] = None  # Will be set later
+
+        self.turn_order_system: Optional[Any] = None
+        self.action_system: Optional[Any] = None
+        self.ai_systems: Dict[str, Any] = {}
+
+        self._current_turn_entity_id: Optional[str] = None
+        self._turn_ended_flag: bool = False
+
+        if self.event_bus:
+            self.event_bus.subscribe("action_performed", self.handle_action_resolved)
+            self.event_bus.subscribe("action_failed", self.handle_action_resolved)
+            self.event_bus.subscribe("request_end_turn", self.handle_request_end_turn)
+
+    def set_map_directory(self, map_dir: str) -> None:
+        """
+        Set the directory where battle maps will be saved.
+        Creates the directory if it doesn't exist.
+
+        Args:
+            map_dir: Path to the directory where maps will be saved
+
+        Example:
+            ```python
+            game_system.set_map_directory("./output/battle_maps")
+            ```
+        """
+        self.map_dir = map_dir
+        # Create directory if it doesn't exist
+        if self.map_dir and not os.path.exists(self.map_dir):
+            os.makedirs(self.map_dir)
+
+    def set_turn_order_system(self, turn_order_system: Any) -> None:
+        """
+        Set the system responsible for determining entity turn order.
+
+        Args:
+            turn_order_system: The turn order management system
+
+        Example:
+            ```python
+            turn_system = TurnOrderSystem(game_state)
+            game_system.set_turn_order_system(turn_system)
+            ```
+        """
+        self.turn_order_system = turn_order_system
+
+    def set_action_system(self, action_system: Any) -> None:
+        """
+        Set the system responsible for managing and executing entity actions.
+
+        Args:
+            action_system: The action management system
+
+        Example:
+            ```python
+            action_system = ActionSystem(game_state, event_bus)
+            game_system.set_action_system(action_system)
+            ```
+        """
+        self.action_system = action_system
+
+    def register_ai_system(self, name: str, ai_system: Any) -> None:
+        """
+        Register an AI system with the game system to handle AI-controlled entities.
+
+        Args:
+            name: Identifier for the AI system type
+            ai_system: The AI system instance
+
+        Example:
+            ```python
+            # Register different AI systems for different behaviors
+            basic_ai = BasicAISystem(game_state, event_bus)
+            advanced_ai = TacticalAISystem(game_state, event_bus)
+
+            game_system.register_ai_system("basic", basic_ai)
+            game_system.register_ai_system("tactical", advanced_ai)
+            ```
+        """
+        self.ai_systems[name] = ai_system
+
+    def handle_action_resolved(self, entity_id: str, action_name: str, **kwargs: Any) -> None:
+        """
+        Event handler for when an action is completed or fails.
+        Specifically identifies "End Turn" actions to mark the turn as ended.
+
+        Args:
+            entity_id: The entity that performed or attempted the action
+            action_name: The name of the action performed or attempted
+            **kwargs: Additional event parameters
+
+        Note:
+            This method is typically called by the event bus and not directly.
+        """
+        if entity_id == self._current_turn_entity_id:
+            if action_name == "End Turn":
+                self._turn_ended_flag = True
+
+    def handle_request_end_turn(self, entity_id: str) -> None:
+        """
+        Event handler for explicit requests to end the current turn.
+
+        Args:
+            entity_id: The entity requesting to end their turn
+
+        Note:
+            This method is typically called by the event bus and not directly.
+        """
+        if entity_id == self._current_turn_entity_id:
+            self._turn_ended_flag = True
+
+    def run_game_loop(self, max_rounds: int = 100) -> None:
+        """
+        Execute the main game loop for a specified maximum number of rounds.
+
+        This method runs the core turn-based gameplay loop:
+        1. Start a new round
+        2. Process each entity's turn in order
+        3. Allow players/AI to select and perform actions
+        4. Check for game end conditions
+        5. Render battle map (if enabled)
+        6. Repeat until game end or max rounds reached
+
+        Args:
+            max_rounds: Maximum number of rounds to execute before ending (default: 100)
+
+        Example:
+            ```python
+            # Run a quick game with 10 rounds maximum
+            game_system.run_game_loop(max_rounds=10)
+
+            # Run a standard game with default 100 rounds maximum
+            game_system.run_game_loop()
+            ```
+        """
+        for round_num in range(1, max_rounds + 1):
+            print(f"\n=== Round {round_num} ===")
+            if self.event_bus:
+                self.event_bus.publish("round_start", round_number=round_num)
+
+            self.turn_order_system.start_new_round()
+            if self.action_system:
+                self.action_system.decrement_cooldowns()
+
+            for entity_id in self.turn_order_system.get_turn_order():
+                self._current_turn_entity_id = entity_id
+                self._turn_ended_flag = False
+
+                entity_data = self.game_state.get_entity(entity_id)
+                if not entity_data or "character_ref" not in entity_data:
+                    print(f"Skipping turn for entity {entity_id}: missing data.")
+                    continue
+
+                char_ref = entity_data["character_ref"]
+                char = char_ref.character
+                if char.is_dead:
+                    continue
+
+                print(f"\n-- {char.name}'s turn (ID: {entity_id}) --")
+                if self.event_bus:
+                    self.event_bus.publish("turn_start", entity_id=entity_id)
+                if self.action_system:
+                    self.action_system.reset_counters(entity_id)
+
+                # Handle AI-controlled vs player-controlled entities differently
+                if char.is_ai_controlled:
+                    # Get the appropriate AI system based on the character's AI script
+                    ai_name = getattr(char, "ai_script", "basic")
+                    ai_system = self.ai_systems.get(ai_name)
+
+                    if ai_system:
+                        # Let the AI choose and execute an action
+                        # The updated AI returns True if it successfully chose an action
+                        action_success = ai_system.choose_action(entity_id)
+                        if not action_success:
+                            print(f"AI for {char.name} failed to choose a valid action. Ending turn.")
+                            if self.event_bus:
+                                self.event_bus.publish("request_end_turn", entity_id=entity_id)
+                    else:
+                        print(f"AI script '{ai_name}' not found for {char.name}. Ending turn.")
+                        if self.event_bus:
+                            self.event_bus.publish("request_end_turn", entity_id=entity_id)
+                else:
+                    # Handle player-controlled entities (interactive mode)
+                    self._handle_player_turn(entity_id, char)
+
+                # Process ECS systems if available
+                if self.ecs_manager:
+                    self.ecs_manager.process(game_state=self.game_state, event_bus=self.event_bus)
+
+                print(f"{char.name} ends their turn.")
+                if self.event_bus:
+                    self.event_bus.publish("turn_end", entity_id=entity_id)
+                self._current_turn_entity_id = None
+
+            # Draw the battle map if enabled
+            if self.enable_map_drawing and self.map_dir:
+                teamA_ids = self.game_state.get_teams().get("A", [])
+                teamB_ids = self.game_state.get_teams().get("B", [])
+                draw_battle_map(
+                    self.game_state,
+                    self.game_state.terrain,
+                    teamA_ids,
+                    teamB_ids,
+                    round_num=round_num + 1,
+                    out_dir=self.map_dir,
+                    grid_size=self.game_state.terrain.height,
+                    px_size=8
+                )
+
+            if self.event_bus:
+                self.event_bus.publish("round_end", round_number=round_num)
+
+            if self.check_end_conditions():
+                print("Game ended!")
+                if self.event_bus:
+                    self.event_bus.publish("game_end")
+                break
+
+    def _handle_player_turn(self, entity_id: str, char: Any) -> None:
+        """
+        Handle a turn for a player-controlled entity.
+
+        Args:
+            entity_id: The ID of the entity taking its turn
+            char: The character object associated with the entity
+        """
+        while not self._turn_ended_flag:
+            if not self.action_system:
+                print("ActionSystem not available for player. Ending turn.")
+                self._turn_ended_flag = True
+                break
+
+            # Get available actions
+            available_actions = [
+                action for action in self.action_system.available_actions.get(entity_id, [])
+                if self.action_system.can_perform_action(entity_id, action)
+            ]
+
+            if not available_actions:
+                print("No available actions. Ending turn.")
+                if self.event_bus:
+                    self.event_bus.publish("request_end_turn", entity_id=entity_id)
+                break
+
+            # Display available actions
+            print("Available actions:")
+            for idx, action_obj in enumerate(available_actions):
+                print(f"{idx + 1}. {action_obj.name} - {action_obj.description}")
+            print(f"{len(available_actions) + 1}. End Turn")
+
+            # Get player choice
+            try:
+                raw_choice = input(f"{char.name}, choose action: ")
+                choice_idx = int(raw_choice) - 1
+            except ValueError:
+                print("Invalid input. Please enter a number.")
+                continue
+
+            # Handle player choice
+            if choice_idx == len(available_actions):
+                if self.event_bus:
+                    self.event_bus.publish("request_end_turn", entity_id=entity_id)
+            elif 0 <= choice_idx < len(available_actions):
+                selected_action = available_actions[choice_idx]
+                action_params = {}
+
+                # Parameter gathering would go here (simplified for this refactoring)
+                # In a full implementation, we'd handle various parameter types based on action
+
+                if self.event_bus:
+                    self.event_bus.publish(
+                        "action_requested",
+                        entity_id=entity_id,
+                        action_name=selected_action.name,
+                        **action_params
+                    )
+            else:
+                print("Invalid choice.")
+
+    def check_end_conditions(self) -> bool:
+        """
+        Determine if the game has reached an end state by checking if only 0 or 1 teams
+        have surviving entities.
+
+        Returns:
+            True if game end conditions are met, False otherwise
+
+        Example:
+            ```python
+            # Inside a custom game loop
+            if game_system.check_end_conditions():
+                print("Game over!")
+                break
+            ```
+        """
+        self.game_state.update_teams()
+        teams_data = self.game_state.get_teams()
+        if not teams_data or len(teams_data) < 1:
+            return False
+
+        active_teams = 0
+        for team_name, team_members in teams_data.items():
+            if not team_members:
+                continue
+            team_alive = False
+            for entity_id in team_members:
+                entity = self.game_state.get_entity(entity_id)
+                if not entity or "character_ref" not in entity:
+                    continue
+                char = entity["character_ref"].character
+                if not char.is_dead:
+                    team_alive = True
+                    break
+            if team_alive:
+                active_teams += 1
+
+        if active_teams <= 1 and len(teams_data) > 1:
+            print(f"End condition met: {active_teams} active team(s) remaining.")
+            return True
+        return False

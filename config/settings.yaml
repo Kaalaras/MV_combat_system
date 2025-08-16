@@ -1,0 +1,42 @@
+game:
+  screen_width: 1280
+  screen_height: 720
+  title: "VTM Tactical Combat"
+  grid_cols: 20
+  grid_rows: 15
+  hud_height: 120
+
+colors:
+  faction:
+    player: "#00FF00"  # Vert
+    ally: "#0000FF"    # Bleu
+    enemy: "#FF0000"   # Rouge
+  move_highlight: "#00FFAA"  # Vert pâle pour déplacement
+  attack_highlight: "#FF6666" # Rouge pâle pour attaque
+
+combat:
+  default_move: 7
+  default_run: 12
+  default_sprint: 20
+  default_melee_range: 1
+
+character:
+  base_health: 3
+  base_willpower: 3
+
+shortcuts:
+  move: "M"
+  attack: "A"
+  block: "B"
+  dodge: "D"
+  parry: "P"
+
+logging:
+  level: "DETAILED"
+
+assets:
+  portraits:
+    default: "assets/placeholders/portrait.png"
+  sprites:
+    player: "assets/placeholders/player.png"
+    enemy: "assets/placeholders/enemy.png"
