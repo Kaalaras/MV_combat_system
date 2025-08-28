@@ -60,6 +60,11 @@ class GameState:
         self.event_bus: Optional[Any] = None  # Optional: reference to EventBus, replace Any
         self.teams: Dict[str, List[str]] = {}
         self.movement: Optional[Any] = None  # Optional: reference to MovementSystem, replace Any
+        self.movement_turn_usage: Dict[str, Dict[str, Any]] = {}  # {'distance':int}
+        self.condition_system: Any = None  # New: reference to ConditionSystem
+        self.cover_system: Any = None  # New: reference to CoverSystem
+        self.terrain_version = 0  # increments on wall add/remove
+        self.blocker_version = 0  # increments on blocking entity move / cover changes
         # Add other global state or system references as needed
         # e.g., self.action_system_ref for quick access if needed by some non-ECS logic
 
@@ -243,6 +248,48 @@ class GameState:
         """
         self.movement = movement_system
 
+    def set_condition_system(self, condition_system: Any) -> None:
+        """
+        Set the condition system reference for the game.
+
+        Args:
+            condition_system: Condition system instance for managing timed conditions
+
+        Returns:
+            None
+
+        Example:
+            ```python
+            # Create and set condition system
+            condition_system = ConditionSystem()
+            game_state.set_condition_system(condition_system)
+
+            # Now the game state has a reference to the condition system
+            ```
+        """
+        self.condition_system = condition_system
+
+    def set_cover_system(self, cover_system: Any) -> None:
+        """
+        Set the cover system reference for the game.
+
+        Args:
+            cover_system: Cover system instance for managing entity cover states
+
+        Returns:
+            None
+
+        Example:
+            ```python
+            # Create and set cover system
+            cover_system = CoverSystem()
+            game_state.set_cover_system(cover_system)
+
+            # Now the game state has a reference to the cover system
+            ```
+        """
+        self.cover_system = cover_system
+
     def get_component(self, entity_id: str, component_name: str) -> Optional[Any]:
         """
         Get a specific component for an entity.
@@ -291,6 +338,25 @@ class GameState:
             pos_comp = entity["position"]
             return getattr(pos_comp, 'width', 1), getattr(pos_comp, 'height', 1)
         return 1, 1  # Default size if entity doesn't exist or has no position
+
+    def reset_movement_usage(self, entity_id: str):
+        """Reset per-turn movement tracking for an entity (called at turn start)."""
+        self.movement_turn_usage[entity_id] = {"distance": 0}
+
+    def add_movement_steps(self, entity_id: str, steps: int):
+        if entity_id not in self.movement_turn_usage:
+            self.reset_movement_usage(entity_id)
+        self.movement_turn_usage[entity_id]["distance"] += steps
+
+    def get_movement_used(self, entity_id: str) -> int:
+        return self.movement_turn_usage.get(entity_id, {}).get("distance", 0)
+
+    # Version bump helpers for LOS / cover caching
+    def bump_terrain_version(self):
+        self.terrain_version += 1
+
+    def bump_blocker_version(self):
+        self.blocker_version += 1
 
     # ------------------------------------------------------------------
     # Convenience helpers (used by AI and other high-level systems)

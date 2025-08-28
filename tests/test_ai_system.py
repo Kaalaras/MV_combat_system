@@ -1,11 +1,9 @@
 import unittest
-import unittest.mock
-from unittest.mock import MagicMock, PropertyMock
+from unittest.mock import MagicMock, patch, PropertyMock
 
-# Import the modules we want to test
+from MV_combat_system.tests.test_fixtures import BaseAITestCase, MockWeapon
 from ecs.systems.ai.main import BasicAISystem, AITurnContext
-from ecs.systems.ai import targeting, movement, utils
-from tests.test_fixtures import BaseAITestCase, MockWeapon
+from ecs.systems.ai import utils, targeting, movement
 
 class TestAISystem(BaseAITestCase):
 

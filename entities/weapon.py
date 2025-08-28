@@ -1,9 +1,9 @@
 from entities.base_object import BaseObject
 from utils.logger import log_calls
-from typing import Optional, Dict, Tuple, List
+from typing import Optional, List
 from entities.effects import AttackEffect
-
 from enum import Enum
+from utils.damage_types import VALID_DAMAGE_TYPES  # centralized
 
 class WeaponType(Enum):
     BRAWL = "brawl"
@@ -15,9 +15,9 @@ class Weapon(BaseObject):
     __slots__ = ("name", "damage_bonus", "weapon_range", "damage_type", "icon_path",
                  "weapon_type", "attack_traits", "attack_actions",
                  "ammunition", "max_ammunition", "infinite_ammunition", "reloadable", "reload_action_type",
-                 "maximum_range", "effects")
+                 "maximum_range", "effects", "damage_components")
 
-    VALID_DAMAGE_TYPES = {"superficial", "aggravated", "mixed"}
+    VALID_DAMAGE_TYPES = VALID_DAMAGE_TYPES  # backward compatibility
 
     @log_calls
     def __init__(self, name: str,
@@ -32,26 +32,24 @@ class Weapon(BaseObject):
                  reloadable: bool = True,
                  reload_action_type: str = "secondary",
                  maximum_range_multiplier: Optional[int] = None,
-                 effects: Optional[List[AttackEffect]] = None) -> None:
+                 effects: Optional[List[AttackEffect]] = None,
+                 damage_components: Optional[List[dict]] = None) -> None:
         super().__init__()
-        if damage_type not in self.VALID_DAMAGE_TYPES:
-            raise ValueError(f"Invalid damage type '{damage_type}'. Must be one of {self.VALID_DAMAGE_TYPES}.")
+        # Enforce strict validation: invalid types must raise (tests rely on ValueError)
+        if damage_type not in VALID_DAMAGE_TYPES:
+            raise ValueError(f"Invalid damage type '{damage_type}'. Must be one of {VALID_DAMAGE_TYPES}.")
         self.name = name
         self.damage_bonus = damage_bonus
         self.weapon_range = weapon_range
         self.damage_type = damage_type
         self.weapon_type = weapon_type
-        self.icon_path = icon_path  # chemin pour affichage futur, pas sprite immédiat
+        self.icon_path = icon_path
+        self.damage_components = damage_components  # list of {'damage_bonus':int,'damage_type':str}
 
-        # Define which traits to use based on weapon type
         self.attack_traits = self._get_attack_traits()
-
-        # List of attack actions (can be extended for multiple attack types per weapon)
         self.attack_actions = attack_actions or ["default_attack"]
 
-        # New attributes for range and effects
         if maximum_range_multiplier is None:
-            # Default max range multiplier
             if self.weapon_type in [WeaponType.BRAWL, WeaponType.MELEE]:
                 maximum_range_multiplier = 1
             else:
@@ -59,10 +57,9 @@ class Weapon(BaseObject):
         self.maximum_range = self.weapon_range * maximum_range_multiplier
         self.effects = effects or []
 
-        # Ammunition system
         self.infinite_ammunition = infinite_ammunition
         self.reloadable = reloadable
-        self.reload_action_type = reload_action_type  # "primary" or "secondary"
+        self.reload_action_type = reload_action_type
         self.max_ammunition = max_ammunition if max_ammunition is not None else (float('inf') if infinite_ammunition else 0)
         self.ammunition = self.max_ammunition
 
@@ -78,8 +75,7 @@ class Weapon(BaseObject):
             return ("Attributes.Physical.Dexterity", "Abilities.Skills.Athletics")
         elif self.weapon_type == WeaponType.FIREARM:
             return ("Attributes.Physical.Dexterity", "Abilities.Skills.Firearms")
-        else:
-            return ("Attributes.Physical.Dexterity", "Abilities.Talents.Brawl")
+        return ("Attributes.Physical.Dexterity", "Abilities.Talents.Brawl")
 
     @log_calls
     def get_damage_bonus(self) -> int:
@@ -109,3 +105,10 @@ class Weapon(BaseObject):
             return False
         self.ammunition = self.max_ammunition
         return True
+
+    @log_calls
+    def get_damage_components(self):
+        """Return iterable of damage components. Falls back to single component."""
+        if self.damage_components:
+            return self.damage_components
+        return [{"damage_bonus": self.damage_bonus, "damage_type": self.damage_type}]

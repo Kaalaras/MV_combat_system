@@ -5,3 +5,4 @@ pyyaml
 psutil
 tqdm==4.67.1
 numba==0.61.2
+tcod>=19.0.0,<20.0.0

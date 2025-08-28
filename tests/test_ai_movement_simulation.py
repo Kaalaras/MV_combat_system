@@ -2,10 +2,9 @@ import unittest
 import unittest.mock
 from unittest.mock import MagicMock, PropertyMock
 
-# Import the modules we want to test
-from ecs.systems.ai.main import BasicAISystem, AITurnContext
+from MV_combat_system.tests.test_fixtures import BaseAITestCase, MockWeapon
 from ecs.systems.ai import targeting, movement, utils
-from tests.test_fixtures import BaseAITestCase, MockWeapon
+from ecs.systems.ai.main import BasicAISystem, AITurnContext
 
 class TestAIMovementSimulation(BaseAITestCase):
     """
@@ -63,14 +62,14 @@ class TestAIMovementSimulation(BaseAITestCase):
         ctx.enemies = ["enemy_1", "enemy_2_damaged"]
 
         # Mock metrics with isolated scope
-        def mock_dps(ctx, weapon, target_id):
+        def mock_dps(ctx_, weapon, target_id):
             return 11.0 if target_id == "enemy_2_damaged" else 10.0
 
-        def mock_threats(ctx, tile):
+        def mock_threats(ctx_, tile):
             # Simulate that moving to (8,8) is riskier
             return 2 if tile == (8, 8) else 0
 
-        def mock_mobility(ctx, tile):
+        def mock_mobility(ctx_, tile):
             # Simulate that (2,2) offers more tactical options
             return 2 if tile == (8, 8) else 5
 
@@ -97,4 +96,3 @@ class TestAIMovementSimulation(BaseAITestCase):
         ctx = self.create_fresh_context("player_1")
         result = movement.simulate_move_and_find_ranged(ctx)
         self.assertIsNone(result)
-

@@ -91,6 +91,8 @@ class GameSystem:
         self._current_turn_entity_id: Optional[str] = None
         self._turn_ended_flag: bool = False
 
+        self.player_controller: Optional[Any] = None  # Optional PlayerTurnController
+
         if self.event_bus:
             self.event_bus.subscribe("action_performed", self.handle_action_resolved)
             self.event_bus.subscribe("action_failed", self.handle_action_resolved)
@@ -194,6 +196,38 @@ class GameSystem:
         if entity_id == self._current_turn_entity_id:
             self._turn_ended_flag = True
 
+    def set_player_controller(self, controller: Any) -> None:
+        """Attach a PlayerTurnController (non-blocking UI mediation).
+
+        If set, player-controlled entities will no longer invoke the legacy
+        _handle_player_turn() blocking console input; instead the controller
+        is given the turn and expected to emit UI intent events that result
+        in action_requested / request_end_turn publications.
+        """
+        self.player_controller = controller
+
+    def _process_player_turn_with_controller(self, entity_id: str, char: Any) -> None:
+        """Handle a player-controlled entity's turn via an attached controller.
+
+        Sequence:
+          1. begin_player_turn(entity_id)
+          2. If controller provides auto_play_turn(), invoke it (headless/scripted tests)
+          3. If still not ended, fallback safety publishes request_end_turn to avoid hang
+        """
+        if not self.player_controller:
+            return
+        if hasattr(self.player_controller, "begin_player_turn"):
+            self.player_controller.begin_player_turn(entity_id)
+        # Optional scripted auto play for headless tests
+        if hasattr(self.player_controller, "auto_play_turn"):
+            try:
+                self.player_controller.auto_play_turn(entity_id, self.game_state, self.action_system)
+            except Exception as e:  # pragma: no cover - defensive
+                print(f"[PlayerController] auto_play_turn error: {e}")
+        # Safety: if no end-turn yet, force end to keep loop progressing
+        if not self._turn_ended_flag and self.event_bus:
+            self.event_bus.publish("request_end_turn", entity_id=entity_id)
+
     def run_game_loop(self, max_rounds: int = 100) -> None:
         """
         Execute the main game loop for a specified maximum number of rounds.
@@ -246,6 +280,8 @@ class GameSystem:
                     self.event_bus.publish("turn_start", entity_id=entity_id)
                 if self.action_system:
                     self.action_system.reset_counters(entity_id)
+                if hasattr(self.game_state, 'reset_movement_usage'):
+                    self.game_state.reset_movement_usage(entity_id)
 
                 # Handle AI-controlled vs player-controlled entities differently
                 if char.is_ai_controlled:
@@ -257,17 +293,18 @@ class GameSystem:
                         # Let the AI choose and execute an action
                         # The updated AI returns True if it successfully chose an action
                         action_success = ai_system.choose_action(entity_id)
-                        if not action_success:
+                        if not action_success and self.event_bus:
                             print(f"AI for {char.name} failed to choose a valid action. Ending turn.")
-                            if self.event_bus:
-                                self.event_bus.publish("request_end_turn", entity_id=entity_id)
+                            self.event_bus.publish("request_end_turn", entity_id=entity_id)
                     else:
                         print(f"AI script '{ai_name}' not found for {char.name}. Ending turn.")
                         if self.event_bus:
                             self.event_bus.publish("request_end_turn", entity_id=entity_id)
                 else:
-                    # Handle player-controlled entities (interactive mode)
-                    self._handle_player_turn(entity_id, char)
+                    if self.player_controller is not None:
+                        self._process_player_turn_with_controller(entity_id, char)
+                    else:
+                        self._handle_player_turn(entity_id, char)
 
                 # Process ECS systems if available
                 if self.ecs_manager:

@@ -1,801 +1,829 @@
-import numpy as np
+"""
+Efficient hierarchical pathfinding with local BFS and LRU caching.
+
+This module implements a hierarchical pathfinding algorithm suitable for large
+grid‑based maps.  The map is divided into rectangular clusters based on a
+configurable `min_region_size`.  Portals are automatically detected along
+cluster boundaries wherever contiguous run(s) of walkable tiles exist.
+Within each cluster, the shortest paths between all pairs of portals are
+computed using a flood‑fill (breadth‑first search) constrained to that
+cluster.  A high‑level graph of portals is constructed without computing
+all‑pairs shortest paths globally (no Floyd–Warshall), and A* search over
+this graph stitches together a complete path between clusters.
+
+To control memory usage when many paths are requested, two LRU caches are
+employed:
+
+* ``path_cache`` stores recently computed paths between arbitrary start and
+  end positions.  When its size exceeds ``MAX_CACHE_SIZE``, the least
+  recently used entry is evicted.
+* ``reachable_cache`` stores recently computed reachable tile sets for
+  given starting positions and movement distances.  Its size is limited by
+  ``MAX_REACH_CACHE_SIZE``.
+
+The public API consists of:
+
+* ``precompute_paths()`` – Build the cluster structure, detect portals, and
+  precompute local portal paths.  Must be called before any pathfinding.
+* ``_compute_path_astar(start, end)`` – Return a list of coordinates
+  representing the optimal path from ``start`` to ``end``.  If ``start``
+  equals ``end``, a single‑element list is returned.  Out‑of‑bounds or
+  blocked start/end points yield an empty list.
+* ``_compute_reachable_bfs(start, move_distance)`` – Return the set of
+  positions reachable from ``start`` within ``move_distance`` steps using
+  four‑directional movement.  Does not consult or update the reachable
+  cache; call ``_update_reachable_cache`` afterwards to cache results.
+* ``_update_reachable_cache(key, reachable)`` – Insert a reachable set into
+  the LRU cache, evicting old entries if necessary.
+* ``_cluster_id_for_position(pos)`` – Return the cluster identifier for a
+  position, or ``None`` if out of bounds.
+* ``_bfs_path_within_cluster(start, end, cluster_id)`` – Compute a path
+  within a single cluster from ``start`` to ``end`` using BFS.
+
+This implementation does not include expensive global preprocessing like
+Floyd–Warshall.  Instead, it computes portal‑to‑portal routes lazily on
+demand via A* over the high‑level portal graph.  Consequently, it scales
+better to large maps and dynamic usage patterns typical of game AI systems.
+"""
+
+from __future__ import annotations
+
+from collections import defaultdict, deque, OrderedDict
+from typing import Any, Dict, List, Optional, Tuple, Set
 import heapq
-from functools import lru_cache
-from collections import defaultdict, deque
-from typing import List, Tuple, Dict, Set, Optional, Any
-import numba
-from tqdm import tqdm
-import multiprocessing
-
-
-def _calculate_reachable_for_position(args):
-    """Helper function for multiprocessing pool to compute reachable tiles."""
-    start_pos, move_distance, wall_matrix, width, height = args
-    # This function is called in a separate process, so it cannot use instance methods directly.
-    # We pass all necessary data from the main process.
-    reachable = OptimizedPathfinding._compute_reachable_bfs_static(start_pos, move_distance, wall_matrix, width, height)
-    return start_pos, move_distance, reachable
+import numpy as np
 
 
 class OptimizedPathfinding:
-    """
-    Advanced pathfinding optimization class for terrain navigation using spatial partitioning
-    and hierarchical approaches.
+    """Hierarchical pathfinding with local BFS and LRU caches."""
 
-    This class implements optimized pathfinding algorithms to improve performance in large grid-based
-    terrain maps, using techniques such as:
-    - Spatial partitioning to divide the map into manageable regions
-    - Path caching with hierarchical waypoints
-    - NumPy optimizations for grid operations
-    - Floyd-Warshall algorithm for all-pairs shortest paths
-    - A* search with optimizations
-    - Pre-computation of commonly used paths and reachable tiles
-
-    Attributes:
-        terrain: The terrain object containing grid data and entity positions
-        wall_matrix: NumPy boolean array representing wall positions for fast lookups
-
-    Example usage:
-    ```python
-    # Create and initialize terrain
-    terrain = TerrainGrid(100, 100)
-    terrain.load_from_file("desert_map.json")
-
-    # Apply optimizations
-    optimizer = OptimizedPathfinding(terrain)
-
-    # Precompute paths and reachable tiles for performance
-    optimizer.precompute_paths()
-    optimizer.precompute_reachable_tiles()
-
-    # Find path between positions
-    path = optimizer._compute_path_astar((10, 10), (50, 50))
-
-    # Get all tiles reachable within 7 movement points
-    reachable = optimizer._compute_reachable_bfs((10, 10), 7)
-    ```
-    """
+    # Maximum number of entries to retain in the path cache.  When this
+    # threshold is exceeded, the least recently used entry is dropped.  Tests
+    # override this value to exercise eviction logic.
+    MAX_CACHE_SIZE: int = 1000
+    # Maximum number of entries to retain in the reachable tiles cache.
+    MAX_REACH_CACHE_SIZE: int = 1000
 
     def __init__(self, terrain: Any) -> None:
+        """Initialise the optimiser for a given terrain.
+
+        Parameters
+        ----------
+        terrain : Any
+            A terrain object providing at least the following attributes:
+            ``width``, ``height``, ``walls`` (an iterable of (x, y) tuples),
+            and ``is_walkable(x, y)``.
         """
-        Initialize the pathfinding optimizer with a terrain instance.
+        self.terrain: Any = terrain
+        self.width: int = terrain.width
+        self.height: int = terrain.height
+        # Build a wall matrix for O(1) walkability checks
+        self.wall_matrix: np.ndarray = np.zeros((self.width, self.height), dtype=np.bool_)
+        for (wx, wy) in getattr(terrain, "walls", []):
+            if 0 <= wx < self.width and 0 <= wy < self.height:
+                self.wall_matrix[wx, wy] = True
 
-        Creates a NumPy boolean matrix of walls for efficient collision detection.
-
-        Args:
-            terrain: The terrain object to optimize, typically a grid-based map
-
-        Example:
-            ```python
-            terrain = TerrainGrid(100, 100)
-            optimizer = OptimizedPathfinding(terrain)
-            ```
-        """
-        self.terrain = terrain
-        self.wall_matrix = np.zeros((terrain.width, terrain.height), dtype=np.bool_)
-        for x, y in terrain.walls:
-            if 0 <= x < terrain.width and 0 <= y < terrain.height:
-                self.wall_matrix[x, y] = True
-
-        # New attributes for hierarchical pathfinding
-        self.regions: Dict[Any, Any] = {}
-        self.portal_graph: Dict[Tuple[int, int], Dict[Tuple[int, int], int]] = defaultdict(dict)
+        # Cluster configuration; can be adjusted before calling precompute_paths
         self.min_region_size: int = 50
-        self.leaf_regions: Dict[Tuple[int, int], Any] = {}  # Cache for position to leaf region
 
-    @lru_cache(maxsize=1024)
-    def manhattan_distance(self, a: Tuple[int, int], b: Tuple[int, int]) -> int:
-        """
-        Calculate Manhattan distance between two points with caching.
+        # Data structures for hierarchical decomposition
+        # Map cluster id (cx, cy) → (x_start, y_start, w, h)
+        self.cluster_bounds: Dict[Tuple[int, int], Tuple[int, int, int, int]] = {}
+        # Map cluster id → list of portal positions (x, y)
+        self.cluster_portals: Dict[Tuple[int, int], List[Tuple[int, int]]] = {}
+        # Local paths between portals inside a cluster; keyed by cluster id
+        # mapping (pos_a, pos_b) → list of (x, y)
+        self.local_portal_paths: Dict[Tuple[int, int], Dict[Tuple[Tuple[int, int], Tuple[int, int]], List[Tuple[int, int]]]] = {}
+        # High‑level graph of portals: node→{neighbour: (cost, path_list)}
+        # Node is (cx, cy, x, y)
+        self.portal_graph: Dict[Tuple[int, int, int, int], Dict[Tuple[int, int, int, int], Tuple[int, List[Tuple[int, int]]]]] = defaultdict(dict)
 
-        Uses Python's lru_cache for memoization to avoid recalculating
-        frequently used distances.
+        # Path cache (LRU).  Keys are ((start_x, start_y), (end_x, end_y)) and
+        # values are lists of coordinates representing the path.  The cache is
+        # shared with terrain.path_cache for backwards compatibility.
+        self.path_cache: OrderedDict[Tuple[Tuple[int, int], Tuple[int, int]], List[Tuple[int, int]]] = OrderedDict()
+        # Ensure terrain.path_cache refers to this LRU cache
+        try:
+            self.terrain.path_cache = self.path_cache
+        except Exception:
+            # If terrain does not allow attribute assignment, ignore
+            pass
 
-        Args:
-            a: First position as (x, y) tuple
-            b: Second position as (x, y) tuple
+        # Reachable tiles cache (LRU).  Keys are ((x, y), move_distance) and
+        # values are sets of reachable positions.
+        self.reachable_cache: OrderedDict[Tuple[Tuple[int, int], int], Set[Tuple[int, int]]] = OrderedDict()
+        # Also mirror into terrain.reachable_tiles_cache if available
+        try:
+            self.terrain.reachable_tiles_cache = self.reachable_cache
+        except Exception:
+            pass
 
-        Returns:
-            Integer distance (sum of x and y differences)
-
-        Example:
-            ```python
-            # Calculate distance between two points
-            dist = optimizer.manhattan_distance((10, 5), (15, 8))
-            print(f"Distance: {dist}")  # Output: Distance: 8
-            ```
-        """
+    # ------------------------------------------------------------------
+    # Distance helper
+    #
+    @staticmethod
+    def manhattan_distance(a: Tuple[int, int], b: Tuple[int, int]) -> int:
+        """Return the Manhattan distance between two points."""
         return abs(a[0] - b[0]) + abs(a[1] - b[1])
 
+    # ------------------------------------------------------------------
+    # Precomputation
+    #
     def precompute_paths(self) -> None:
+        """Prepare cluster structure and portal graph for pathfinding.
+
+        This method must be called before requesting any paths.  It divides
+        the terrain into clusters of size at most ``min_region_size`` along
+        each axis, detects portals along cluster borders, computes local
+        paths between portals inside clusters, and builds a high‑level
+        portal graph.  It also resets the caches.
         """
-        Precomputes paths using a hierarchical, recursive approach.
-        1. Recursively subdivides the map into regions (quadtree).
-        2. Identifies "portals" (walkable connections) between regions.
-        3. Precomputes paths between all portals.
-        This avoids the N^2 problem of the flat waypoint system on large maps.
+        # Reset caches and data structures
+        self.path_cache.clear()
+        self.reachable_cache.clear()
+        self.portal_graph.clear()
+        self.cluster_bounds.clear()
+        self.cluster_portals.clear()
+        self.local_portal_paths.clear()
+
+        # Determine cluster grid
+        size = max(1, self.min_region_size)
+        cluster_cols = (self.width + size - 1) // size
+        cluster_rows = (self.height + size - 1) // size
+
+        # Create cluster bounds
+        for cy in range(cluster_rows):
+            for cx in range(cluster_cols):
+                x_start = cx * size
+                y_start = cy * size
+                w = min(size, self.width - x_start)
+                h = min(size, self.height - y_start)
+                cid = (cx, cy)
+                self.cluster_bounds[cid] = (x_start, y_start, w, h)
+                self.cluster_portals[cid] = []
+                self.local_portal_paths[cid] = {}
+
+        # Detect portals along borders
+        for (cx, cy), bounds in self.cluster_bounds.items():
+            x_start, y_start, w, h = bounds
+            # Left border: cluster to the left
+            if x_start > 0:
+                nb = (cx - 1, cy)
+                if nb in self.cluster_bounds:
+                    self._find_portals_between_clusters((cx, cy), nb, vertical=True, at_left=True)
+            # Right border
+            if x_start + w < self.width:
+                nb = (cx + 1, cy)
+                if nb in self.cluster_bounds:
+                    self._find_portals_between_clusters((cx, cy), nb, vertical=True, at_left=False)
+            # Top border
+            if y_start > 0:
+                nb = (cx, cy - 1)
+                if nb in self.cluster_bounds:
+                    self._find_portals_between_clusters((cx, cy), nb, vertical=False, at_left=True)
+            # Bottom border
+            if y_start + h < self.height:
+                nb = (cx, cy + 1)
+                if nb in self.cluster_bounds:
+                    self._find_portals_between_clusters((cx, cy), nb, vertical=False, at_left=False)
+
+        # Deduplicate portal lists per cluster
+        for cid, plist in self.cluster_portals.items():
+            # Use dict.fromkeys to preserve order but remove duplicates
+            self.cluster_portals[cid] = list(dict.fromkeys(plist))
+        # Compute local portal paths for each cluster
+        for cid, portals in self.cluster_portals.items():
+            if portals:
+                self._compute_local_portal_paths(cid, portals)
+        # Build portal graph by adding local edges
+        self._build_portal_graph()
+
+    # ------------------------------------------------------------------
+    # Portal detection
+    #
+    def _find_portals_between_clusters(
+        self,
+        cid_a: Tuple[int, int],
+        cid_b: Tuple[int, int],
+        *,
+        vertical: bool,
+        at_left: bool
+    ) -> None:
+        """Detect portals along the border between two adjacent clusters.
+
+        Parameters
+        ----------
+        cid_a : Tuple[int, int]
+            Cluster id on one side of the border.
+        cid_b : Tuple[int, int]
+            Cluster id on the other side of the border.
+        vertical : bool
+            ``True`` if the border is vertical (clusters side by side).  ``False`` if horizontal.
+        at_left : bool
+            When ``vertical`` is True, indicates whether cluster_b is to the left of cluster_a.
+            When ``vertical`` is False (horizontal border), indicates whether cluster_b is above
+            cluster_a.
+
+        For each contiguous run of walkable tiles along the border where movement between
+        clusters is possible, a portal is created at the midpoint of the segment.  Two
+        portal nodes are recorded (one in each cluster) and a cross edge of cost 1 is
+        added to the portal graph.  Portal positions are appended to the portal list
+        for each cluster.
         """
-        self.regions = {}
-        self.portal_graph = defaultdict(dict)
-        self.terrain.path_cache = {}
-        map_bounds = (0, 0, self.terrain.width, self.terrain.height)
+        bounds_a = self.cluster_bounds[cid_a]
+        bounds_b = self.cluster_bounds[cid_b]
+        x_a, y_a, w_a, h_a = bounds_a
+        x_b, y_b, w_b, h_b = bounds_b
+        segment: List[Tuple[int, int]] = []
 
-        print("[Terrain] Starting hierarchical waypoint creation...")
-        self._create_hierarchical_waypoints(map_bounds)
+        if vertical:
+            # Shared vertical border: y ranges overlap, x border is between clusters
+            if at_left:
+                # cluster_b is to the left of cluster_a
+                border_x_a = x_a
+                border_x_b = x_a - 1
+            else:
+                # cluster_b is to the right of cluster_a
+                border_x_a = x_a + w_a - 1
+                border_x_b = border_x_a + 1
+            y_start = max(y_a, y_b)
+            y_end = min(y_a + h_a, y_b + h_b)
+            for yy in range(y_start, y_end):
+                cell_a = (border_x_a, yy)
+                cell_b = (border_x_b, yy)
+                if (
+                    0 <= cell_a[0] < self.width and 0 <= cell_a[1] < self.height
+                    and 0 <= cell_b[0] < self.width and 0 <= cell_b[1] < self.height
+                    and not self.wall_matrix[cell_a]
+                    and not self.wall_matrix[cell_b]
+                ):
+                    segment.append(cell_a)
+                else:
+                    if segment:
+                        self._add_portal_pair(segment, cid_a, cid_b, vertical, at_left)
+                        segment = []
+            if segment:
+                self._add_portal_pair(segment, cid_a, cid_b, vertical, at_left)
+        else:
+            # Shared horizontal border: x ranges overlap, y border is between clusters
+            if at_left:
+                # cluster_b is above cluster_a
+                border_y_a = y_a
+                border_y_b = y_a - 1
+            else:
+                # cluster_b is below cluster_a
+                border_y_a = y_a + h_a - 1
+                border_y_b = border_y_a + 1
+            x_start = max(x_a, x_b)
+            x_end = min(x_a + w_a, x_b + w_b)
+            for xx in range(x_start, x_end):
+                cell_a = (xx, border_y_a)
+                cell_b = (xx, border_y_b)
+                if (
+                    0 <= cell_a[0] < self.width and 0 <= cell_a[1] < self.height
+                    and 0 <= cell_b[0] < self.width and 0 <= cell_b[1] < self.height
+                    and not self.wall_matrix[cell_a]
+                    and not self.wall_matrix[cell_b]
+                ):
+                    segment.append(cell_a)
+                else:
+                    if segment:
+                        self._add_portal_pair(segment, cid_a, cid_b, vertical, at_left)
+                        segment = []
+            if segment:
+                self._add_portal_pair(segment, cid_a, cid_b, vertical, at_left)
 
-        all_portals = list(self.portal_graph.keys())
-        print(f"[Terrain] Found {len(all_portals)} portals. Precomputing paths between them...")
+    def _add_portal_pair(
+        self,
+        segment: List[Tuple[int, int]],
+        cid_a: Tuple[int, int],
+        cid_b: Tuple[int, int],
+        vertical: bool,
+        at_left: bool
+    ) -> None:
+        """Create portal nodes for a contiguous open segment.
 
-        if all_portals:
-            self._compute_paths_floyd_warshall(all_portals)
+        The portal is placed at the midpoint of ``segment``. Two portal nodes are
+        recorded (one in each cluster) using the *adjacent* walkable cells that
+        sit on either side of the border. A cross edge with cost 1 (one step to
+        move across the boundary) together with its explicit two‑cell path is
+        added to the portal graph. Portal positions (cluster‑local entry cells)
+        are appended to the ``cluster_portals`` list for each cluster.
 
-        print("[Terrain] Hierarchical path precomputation complete.")
-
-    def _create_hierarchical_waypoints(self, bounds: Tuple[int, int, int, int], level: int = 0) -> None:
+        Previous logic attempted to *unify* the coordinate across both clusters
+        (so tests could compare raw positions). That collapsed the actual step
+        required to cross a cluster boundary, producing paths that were shorter
+        than the true Manhattan distance (missing one step per boundary
+        crossing). Keeping distinct cells per side preserves correct path
+        length accounting.
         """
-        Recursively subdivides the map, finds portals, and builds the portal graph.
-        """
-        x, y, width, height = bounds
-        region_id = bounds
-
-        self.regions[region_id] = {'bounds': bounds, 'children': [], 'portals': set()}
-
-        # Base Case: If region is small enough, stop subdividing.
-        if width <= self.min_region_size or height <= self.min_region_size:
-            # When we reach a leaf, we can map all its cells to it for quick lookup
-            for i in range(x, x + width):
-                for j in range(y, y + height):
-                    self.leaf_regions[(i, j)] = region_id
+        if not segment:
             return
+        mid_idx = len(segment) // 2
+        cell_a = segment[mid_idx]  # Cell inside cluster A
+        x_a, y_a = cell_a
+        # Determine the adjacent cell inside cluster B
+        if vertical:
+            if at_left:
+                x_b, y_b = x_a - 1, y_a
+            else:
+                x_b, y_b = x_a + 1, y_a
+        else:
+            if at_left:
+                x_b, y_b = x_a, y_a - 1
+            else:
+                x_b, y_b = x_a, y_a + 1
+        # Guard: ensure adjacent cell is in bounds & walkable
+        if not (0 <= x_b < self.width and 0 <= y_b < self.height):
+            return
+        if self.wall_matrix[x_b, y_b]:
+            return
+        cell_b = (x_b, y_b)
+        # Record portal entry cells separately for each cluster
+        self.cluster_portals[cid_a].append(cell_a)
+        self.cluster_portals[cid_b].append(cell_b)
+        # Create portal nodes (cluster id + concrete cell)
+        node_a = (cid_a[0], cid_a[1], x_a, y_a)
+        node_b = (cid_b[0], cid_b[1], x_b, y_b)
+        # Cross edge path: explicit two cells (inside A then inside B)
+        path_ab = [cell_a, cell_b]
+        existing = self.portal_graph[node_a].get(node_b)
+        if existing is None or existing[0] > 1:
+            self.portal_graph[node_a][node_b] = (1, path_ab)
+            self.portal_graph[node_b][node_a] = (1, path_ab[::-1])
 
-        # Recursive Step: Subdivide into four quadrants.
-        mid_x = x + width // 2
-        mid_y = y + height // 2
+    # ------------------------------------------------------------------
+    # Local portal paths
+    #
+    def _compute_local_portal_paths(self, cid: Tuple[int, int], portals: List[Tuple[int, int]]) -> None:
+        """Compute shortest paths between portal pairs inside a cluster via BFS.
 
-        child_bounds_nw = (x, y, mid_x - x, mid_y - y)
-        child_bounds_ne = (mid_x, y, x + width - mid_x, mid_y - y)
-        child_bounds_sw = (x, mid_y, mid_x - x, y + height - mid_y)
-        child_bounds_se = (mid_x, mid_y, x + width - mid_x, y + height - mid_y)
-
-        children = [child_bounds_nw, child_bounds_ne, child_bounds_sw, child_bounds_se]
-        self.regions[region_id]['children'] = children
-
-        for child_bound in children:
-            self._create_hierarchical_waypoints(child_bound, level + 1)
-
-        # Find Portals between child regions
-        # Vertical border between NW/SW and NE/SE
-        portals_v1 = self._find_portals_between(child_bounds_nw, child_bounds_ne)
-        portals_v2 = self._find_portals_between(child_bounds_sw, child_bounds_se)
-        # Horizontal border between NW/NE and SW/SE
-        portals_h1 = self._find_portals_between(child_bounds_nw, child_bounds_sw)
-        portals_h2 = self._find_portals_between(child_bounds_ne, child_bounds_se)
-
-        all_new_portals = set(portals_v1 + portals_v2 + portals_h1 + portals_h2)
-        self.regions[region_id]['portals'].update(all_new_portals)
-
-        # Add portals to the graph and connect them with local paths
-        for p1 in all_new_portals:
-            for p2 in all_new_portals:
-                if p1 != p2:
-                    # Path is constrained to the current region's bounds
-                    path = self._astar_search(p1, p2, bounds=bounds)
-                    if path:
-                        self.portal_graph[p1][p2] = len(path) - 1
-                        self.portal_graph[p2][p1] = len(path) - 1 # Assuming symmetric paths
-
-    def _find_portals_between(self, bounds1: Tuple[int, int, int, int], bounds2: Tuple[int, int, int, int]) -> List[Tuple[int, int]]:
+        For each portal, a BFS is run within the cluster bounds to compute
+        shortest paths to all other portals.  The results are stored in
+        ``self.local_portal_paths[cid]`` as lists of coordinates.
         """
-        Finds walkable connections (portals) on the border of two adjacent regions.
-        Groups contiguous walkable tiles into single portals at their center.
-        """
-        portals = []
-        x1, y1, w1, h1 = bounds1
-        x2, y2, w2, h2 = bounds2
+        bounds = self.cluster_bounds[cid]
+        x_start, y_start, w, h = bounds
+        min_x, min_y = x_start, y_start
+        max_x, max_y = x_start + w, y_start + h
 
-        # Determine shared border
-        # Vertical border
-        if x1 + w1 == x2:
-            border_x = x1 + w1 - 1
-            border_y_start = max(y1, y2)
-            border_y_end = min(y1 + h1, y2 + h2)
-
-            current_segment = []
-            for y in range(border_y_start, border_y_end):
-                if not self.wall_matrix[border_x, y] and not self.wall_matrix[border_x + 1, y]:
-                    current_segment.append((border_x, y))
-                else:
-                    if current_segment:
-                        portal_pos = current_segment[len(current_segment) // 2]
-                        portals.append(portal_pos)
-                        current_segment = []
-            if current_segment:
-                portals.append(current_segment[len(current_segment) // 2])
-
-        # Horizontal border
-        elif y1 + h1 == y2:
-            border_y = y1 + h1 - 1
-            border_x_start = max(x1, x2)
-            border_x_end = min(x1 + w1, x2 + w2)
-
-            current_segment = []
-            for x in range(border_x_start, border_x_end):
-                if not self.wall_matrix[x, border_y] and not self.wall_matrix[x, border_y + 1]:
-                    current_segment.append((x, border_y))
-                else:
-                    if current_segment:
-                        portal_pos = current_segment[len(current_segment) // 2]
-                        portals.append(portal_pos)
-                        current_segment = []
-            if current_segment:
-                portals.append(current_segment[len(current_segment) // 2])
-
-        return portals
-
-    def _identify_key_waypoints(self, region_size: int) -> List[Tuple[int, int]]:
-        """
-        DEPRECATED: This method is no longer used in the hierarchical system.
-        It is replaced by _create_hierarchical_waypoints.
-        """
-        pass
-
-    def _compute_paths_floyd_warshall(self, waypoints: List[Tuple[int, int]]) -> None:
-        """
-        Compute all-pairs shortest paths using the Floyd-Warshall algorithm.
-
-        Efficiently finds the shortest path between all pairs of waypoints and
-        stores them in the terrain's path cache. This is most efficient when
-        the number of waypoints is relatively small (< 300).
-
-        Args:
-            waypoints: List of waypoint positions as (x, y) tuples
-
-        Example:
-            ```python
-            waypoints = optimizer._identify_key_waypoints(10)
-            optimizer._compute_paths_floyd_warshall(waypoints)
-
-            # Now paths are available in the cache
-            print(f"Cached {len(terrain.path_cache)} paths")
-            ```
-        """
-        # Initialize distance matrix
-        n = len(waypoints)
-        dist = {}
-        next_node = {}
-
-        waypoint_map = {wp: i for i, wp in enumerate(waypoints)}
-
-        # Build the initial graph from the portal_graph or direct A*
-        for i in range(n):
-            for j in range(n):
-                if i == j:
-                    dist[(i, j)] = 0
+        for p_idx, p_start in enumerate(portals):
+            # BFS from p_start within cluster
+            queue: deque[Tuple[Tuple[int, int], int]] = deque()
+            queue.append((p_start, 0))
+            visited: Dict[Tuple[int, int], int] = {p_start: 0}
+            parent: Dict[Tuple[int, int], Tuple[int, int]] = {}
+            while queue:
+                (cx, cy), dist = queue.popleft()
+                # Expand neighbours
+                for dx, dy in ((0, 1), (1, 0), (0, -1), (-1, 0)):
+                    nx, ny = cx + dx, cy + dy
+                    if not (min_x <= nx < max_x and min_y <= ny < max_y):
+                        continue
+                    if self.wall_matrix[nx, ny]:
+                        continue
+                    if (nx, ny) in visited:
+                        continue
+                    visited[(nx, ny)] = dist + 1
+                    parent[(nx, ny)] = (cx, cy)
+                    queue.append(((nx, ny), dist + 1))
+            # Reconstruct paths to other portals
+            for p_end in portals:
+                if p_end == p_start or p_end not in visited:
                     continue
+                # Build path from p_start to p_end
+                path: List[Tuple[int, int]] = []
+                cur = p_end
+                while cur != p_start:
+                    path.append(cur)
+                    cur = parent[cur]
+                path.append(p_start)
+                path.reverse()
+                self.local_portal_paths[cid][(p_start, p_end)] = path
 
-                p1 = waypoints[i]
-                p2 = waypoints[j]
+    def _build_portal_graph(self) -> None:
+        """Populate portal_graph with local intra‑cluster edges."""
+        for cid, path_map in self.local_portal_paths.items():
+            cx, cy = cid
+            for (p_start, p_end), path in path_map.items():
+                cost = len(path) - 1
+                node_start = (cx, cy, p_start[0], p_start[1])
+                node_end = (cx, cy, p_end[0], p_end[1])
+                existing = self.portal_graph[node_start].get(node_end)
+                if existing is None or cost < existing[0]:
+                    self.portal_graph[node_start][node_end] = (cost, path)
+                    # reverse path for opposite direction
+                    self.portal_graph[node_end][node_start] = (cost, path[::-1])
 
-                # Check if a direct path exists in the pre-computed portal graph
-                if p1 in self.portal_graph and p2 in self.portal_graph[p1]:
-                    dist[(i, j)] = self.portal_graph[p1][p2]
-                    next_node[(i, j)] = j
-                else:
-                    # Fallback to A* for portals that are not directly connected
-                    # This might happen for portals in non-adjacent sub-regions
-                    path = self._astar_search(p1, p2) # Search without bounds for global connectivity
-                    if path:
-                        dist[(i, j)] = len(path) - 1
-                        next_node[(i, j)] = j
-                    else:
-                        dist[(i, j)] = float('inf')
+    # ------------------------------------------------------------------
+    # Cluster helpers
+    #
+    def _cluster_id_for_position(self, pos: Tuple[int, int]) -> Optional[Tuple[int, int]]:
+        """Return the cluster identifier containing ``pos`` or ``None`` if out of bounds."""
+        x, y = pos
+        if not (0 <= x < self.width and 0 <= y < self.height):
+            return None
+        size = max(1, self.min_region_size)
+        cx = x // size
+        cy = y // size
+        cid = (cx, cy)
+        return cid if cid in self.cluster_bounds else None
 
-        # Floyd-Warshall main loop
-        for k in tqdm(range(n), desc="Floyd-Warshall on Portals"):
-            for i in range(n):
-                for j in range(n):
-                    if (i, k) in dist and (k, j) in dist:
-                        if (i, j) not in dist or dist[(i, k)] + dist[(k, j)] < dist[(i, j)]:
-                            dist[(i, j)] = dist[(i, k)] + dist[(k, j)]
-                            if (i, k) in next_node:
-                                next_node[(i, j)] = next_node[(i, k)]
-
-        # Store all paths in the cache
-        for i in range(n):
-            for j in range(n):
-                if i != j and (i, j) in dist and dist[(i, j)] < float('inf'):
-                    # Reconstruct path
-                    path = [waypoints[i]]
-                    current_i = i
-                    while current_i != j:
-                        next_i = next_node.get((current_i, j))
-                        if next_i is None:
-                            # This path is impossible, break
-                            path = []
-                            break
-                        # To reconstruct the full path, we need to A* between intermediate portals
-                        # For now, we store the sequence of portals. The full path is stitched together on-demand.
-                        path.append(waypoints[next_i])
-                        current_i = next_i
-
-                    if path:
-                        # Store in cache
-                        self.terrain.path_cache[(waypoints[i], waypoints[j])] = path
-
-    def _get_leaf_region_for_position(self, pos: Tuple[int, int]) -> Optional[Any]:
-        """Finds the leaf region containing a given position."""
-        if pos in self.leaf_regions:
-            return self.leaf_regions[pos]
-
-        # Fallback for positions not in cache (should be rare)
-        for region_id, region_data in self.regions.items():
-            if not region_data['children']: # It's a leaf
-                x, y, w, h = region_data['bounds']
-                if x <= pos[0] < x + w and y <= pos[1] < y + h:
-                    self.leaf_regions[pos] = region_id
-                    return region_id
-        return None
-
-    def _compute_path_astar(self, start: Tuple[int, int], end: Tuple[int, int]) -> List[Tuple[int, int]]:
-        """
-        Compute optimal path using the hierarchical portal system.
-        """
-        # --- FIX: Return [] if start or end is not walkable ---
-        if not self.terrain.is_walkable(*start) or not self.terrain.is_walkable(*end):
-            return []
-
+    # ------------------------------------------------------------------
+    # BFS within cluster
+    #
+    def _bfs_path_within_cluster(
+        self,
+        start: Tuple[int, int],
+        end: Tuple[int, int],
+        cluster_id: Tuple[int, int]
+    ) -> List[Tuple[int, int]]:
+        """Return a path within a cluster using BFS, or empty if unreachable."""
         if start == end:
             return [start]
-
-        # Check if path is already cached
-        if (start, end) in self.terrain.path_cache:
-            return self.terrain.path_cache[(start, end)]
-
-        start_region_id = self._get_leaf_region_for_position(start)
-        end_region_id = self._get_leaf_region_for_position(end)
-
-        # Case 1: Path is within a single leaf region
-        if start_region_id == end_region_id and start_region_id is not None:
-            bounds = self.regions[start_region_id]['bounds']
-            path = self._astar_search(start, end, bounds=bounds)
-            if path:
-                self.terrain.path_cache[(start, end)] = path
-            return path
-
-        # Case 2: Path crosses region boundaries
-        # Find all portals of the parent regions until a common ancestor is found
-        start_portals = self._get_portals_up_to_common_ancestor(start_region_id, end_region_id)
-        end_portals = self._get_portals_up_to_common_ancestor(end_region_id, start_region_id)
-
-        if not start_portals or not end_portals:
-            # Fallback to a global A* if portal pathfinding fails
-            return self._astar_search(start, end)
-
-        # Find best entry and exit portals
-        best_entry_portal, path_to_entry = self._find_best_path_to_portal(start, start_portals, self.regions[start_region_id]['bounds'])
-        best_exit_portal, path_from_exit = self._find_best_path_to_portal(end, end_portals, self.regions[end_region_id]['bounds'])
-
-        if not best_entry_portal or not best_exit_portal:
-            return self._astar_search(start, end) # Fallback
-
-        # Look up the high-level path between the entry and exit portals
-        inter_portal_sequence = self.terrain.path_cache.get((best_entry_portal, best_exit_portal))
-
-        if not inter_portal_sequence:
-             # If the direct portal path isn't cached, something is wrong with the portal graph.
-             # Fallback to a global A* search as a last resort.
-             return self._astar_search(start, end)
-
-        # --- Path Stitching Logic ---
-        # 1. Start with the path from the starting point to the first portal.
-        final_path = path_to_entry
-
-        # 2. Stitch together the path between the portals in the sequence.
-        # The inter_portal_sequence is a list of portal coordinates, e.g., [p1, p2, p3].
-        # We need to run A* between each consecutive pair (p1-p2, p2-p3, etc.).
-        for i in range(len(inter_portal_sequence) - 1):
-            p1 = inter_portal_sequence[i]
-            p2 = inter_portal_sequence[i+1]
-
-            # Find a common ancestor to bound the search, making it faster.
-            p1_region_id = self._get_leaf_region_for_position(p1)
-            p2_region_id = self._get_leaf_region_for_position(p2)
-            ancestor_id = self._find_common_ancestor(p1_region_id, p2_region_id)
-            search_bounds = self.regions[ancestor_id]['bounds'] if ancestor_id else None
-
-            segment = self._astar_search(p1, p2, bounds=search_bounds)
-            if not segment:
-                # If a segment can't be found, the portal graph is inconsistent. Fallback.
-                return self._astar_search(start, end)
-
-            # Append the segment, removing the first element to avoid duplicating the portal node.
-            final_path.extend(segment[1:])
-
-        # 3. Stitch the final segment from the last portal to the destination.
-        last_portal = inter_portal_sequence[-1]
-
-        # We already calculated the path from the end to the exit portal.
-        # We just need to reverse it and append.
-        path_from_exit.reverse()
-        final_path.extend(path_from_exit[1:])
-
-        if final_path:
-            self.terrain.path_cache[(start, end)] = final_path
-        return final_path
-
-    def _find_common_ancestor(self, r1_id, r2_id):
-        """Finds the lowest common ancestor region for two given regions."""
-        if not r1_id or not r2_id:
-            return self.regions.keys()[0] if self.regions else None # Return root if cant find
-
-        path1 = []
-        curr = r1_id
-        while curr is not None:
-            path1.append(curr)
-            curr = self._get_parent_region(curr)
-
-        curr = r2_id
-        while curr is not None:
-            if curr in path1:
-                return curr
-            curr = self._get_parent_region(curr)
-
-        return self.regions.keys()[0] if self.regions else None # Fallback to root
-
-    def _get_portals_up_to_common_ancestor(self, r1_id, r2_id):
-        """Helper to collect all portals from a region up to the common ancestor with another region."""
-        portals = set()
-
-        # Find path of regions from r1_id up to the root
-        path1 = []
-        curr = r1_id
-        while curr is not None:
-            path1.append(curr)
-            curr = self._get_parent_region(curr)
-
-        # Find path of regions from r2_id up to the root
-        path2 = []
-        curr = r2_id
-        while curr is not None:
-            path2.append(curr)
-            curr = self._get_parent_region(curr)
-
-        # Find common ancestor
-        common_ancestor = None
-        for r in path1:
-            if r in path2:
-                common_ancestor = r
-                break
-
-        if common_ancestor:
-            # Collect portals from r1_id up to the child of the common ancestor
-            curr = r1_id
-            while curr and curr != common_ancestor:
-                portals.update(self.regions[curr]['portals'])
-                # Also add portals of the parent, as they are entry/exit points for the level above
-                parent = self._get_parent_region(curr)
-                if parent:
-                    portals.update(self.regions[parent]['portals'])
-                curr = parent
-
-        return list(portals)
-
-    def _get_parent_region(self, region_id):
-        """Find the parent of a given region."""
-        for pid, data in self.regions.items():
-            if region_id in data['children']:
-                return pid
-        return None
-
-    def _find_best_path_to_portal(self, start_pos, portals, bounds):
-        """Finds the shortest path from a position to any of the given portals."""
-        best_portal = None
-        shortest_path = []
-        min_len = float('inf')
-
-        for portal in portals:
-            path = self._astar_search(start_pos, portal, bounds=bounds)
-            if path and len(path) < min_len:
-                min_len = len(path)
-                shortest_path = path
-                best_portal = portal
-
-        return best_portal, shortest_path
-
-    @numba.njit
-    def _astar_search_numba(self, start_x: int, start_y: int, goal_x: int, goal_y: int,
-                            wall_matrix: np.ndarray, width: int, height: int) -> List[Tuple[int, int]]:
-        """
-        JIT-compiled A* search implementation using Numba for performance optimization.
-
-        This method would contain a Numba-optimized version of the A* algorithm.
-        Currently a placeholder for the JIT-compiled function.
-
-        Args:
-            start_x: Starting X coordinate
-            start_y: Starting Y coordinate
-            goal_x: Destination X coordinate
-            goal_y: Destination Y coordinate
-            wall_matrix: Boolean NumPy array of wall positions
-            width: Width of the terrain grid
-            height: Height of the terrain grid
-
-        Returns:
-            List of (x, y) tuples representing the path
-        """
-        # This is a placeholder for the JIT-compiled function
-        # The actual implementation would be similar to _astar_search but optimized for Numba
-        pass
-
-    def _astar_search(self, start: Tuple[int, int], end: Tuple[int, int], bounds: Optional[Tuple[int, int, int, int]] = None) -> List[Tuple[int, int]]:
-        """
-        A* search algorithm implementation using a heap queue for performance.
-        Can be constrained to a bounding box.
-        Args:
-            start: Starting position as (x, y) tuple
-            end: Destination position as (x, y) tuple
-            bounds: Optional (x, y, width, height) tuple to constrain the search area.
-        Returns:
-            List of (x, y) tuples representing the path from start to end,
-            or an empty list if no path exists
-        """
-        if bounds:
-            min_x, min_y, width, height = bounds
-            max_x = min_x + width
-            max_y = min_y + height
-        else:
-            min_x, min_y = 0, 0
-            max_x, max_y = self.terrain.width, self.terrain.height
-
-        open_set = []
-        heapq.heappush(open_set, (0, start))
-
-        came_from = {}
-        g_score = {start: 0}
-        f_score = {start: self.manhattan_distance(start, end)}
-
-        open_set_hash = {start}
-
-        while open_set:
-            _, current = heapq.heappop(open_set)
-            open_set_hash.remove(current)
-
-            if current == end:
-                # Reconstruct path
-                path = []
-                while current in came_from:
-                    path.append(current)
-                    current = came_from[current]
-                path.append(start)
+        bounds = self.cluster_bounds.get(cluster_id)
+        if bounds is None:
+            return []
+        x_start, y_start, w, h = bounds
+        min_x, min_y = x_start, y_start
+        max_x, max_y = x_start + w, y_start + h
+        sx, sy = start
+        ex, ey = end
+        if not (min_x <= sx < max_x and min_y <= sy < max_y):
+            return []
+        if not (min_x <= ex < max_x and min_y <= ey < max_y):
+            return []
+        if self.wall_matrix[sx, sy] or self.wall_matrix[ex, ey]:
+            return []
+        queue: deque[Tuple[Tuple[int, int], int]] = deque()
+        queue.append(((sx, sy), 0))
+        visited: Set[Tuple[int, int]] = {(sx, sy)}
+        parent: Dict[Tuple[int, int], Tuple[int, int]] = {}
+        while queue:
+            (cx, cy), dist = queue.popleft()
+            if (cx, cy) == (ex, ey):
+                # reconstruct
+                path: List[Tuple[int, int]] = []
+                cur = (cx, cy)
+                while cur != (sx, sy):
+                    path.append(cur)
+                    cur = parent[cur]
+                path.append((sx, sy))
                 path.reverse()
                 return path
-
-            x, y = current
-            for dx, dy in [(0, 1), (1, 0), (0, -1), (-1, 0)]:
-                neighbor = (x + dx, y + dy)
-                nx, ny = neighbor
-
+            for dx, dy in ((0, 1), (1, 0), (0, -1), (-1, 0)):
+                nx, ny = cx + dx, cy + dy
                 if not (min_x <= nx < max_x and min_y <= ny < max_y):
-                    continue  # Out of bounds (either map or region)
-
+                    continue
                 if self.wall_matrix[nx, ny]:
-                    continue  # Wall
+                    continue
+                if (nx, ny) in visited:
+                    continue
+                visited.add((nx, ny))
+                parent[(nx, ny)] = (cx, cy)
+                queue.append(((nx, ny), dist + 1))
+        return []
 
-                tentative_g = g_score[current] + 1
-
-                if neighbor not in g_score or tentative_g < g_score[neighbor]:
-                    came_from[neighbor] = current
-                    g_score[neighbor] = tentative_g
-                    f_score[neighbor] = tentative_g + self.manhattan_distance(neighbor, end)
-
-                    if neighbor not in open_set_hash:
-                        heapq.heappush(open_set, (f_score[neighbor], neighbor))
-                        open_set_hash.add(neighbor)
-
-        return []  # No path found
-
-    def precompute_reachable_tiles(self, move_distances: Tuple[int, ...] = (7, 15)) -> None:
-        """
-        Precompute and cache reachable tiles for common movement distances using multiprocessing.
-
-        For performance optimization, this method:
-        1. Identifies important positions (entity positions and surrounding areas)
-        2. Computes reachable tiles from these positions for given movement distances in parallel
-        3. Stores results in the terrain's reachable_tiles_cache
-
-        Args:
-            move_distances: Tuple of movement distances to precompute
-                           (default: (7, 15) for standard and sprint moves)
-
-        Example:
-            ```python
-            # Precompute reachable tiles for standard movement (7) and sprint (15)
-            optimizer.precompute_reachable_tiles()
-
-            # Precompute for custom movement distances
-            optimizer.precompute_reachable_tiles((5, 10, 20))
-
-            # Later, retrieve precomputed reachable tiles
-            reachable = terrain.reachable_tiles_cache.get((entity_pos, 7), set())
-            ```
-        """
-        width, height = self.terrain.width, self.terrain.height
-
-        self.terrain.reachable_tiles_cache = {}
-        print("[Terrain] Precomputing reachable tiles...")
-
-        # Focus on key positions (entity positions + surrounding areas)
-        important_positions = set()
-
-        # Add entity positions
-        for entity_pos in self.terrain.entity_positions.values():
-            important_positions.add(entity_pos)
-
-            # Add surrounding area (20 squares radius)
-            x, y = entity_pos
-            for dx in range(-20, 21):
-                for dy in range(-20, 21):
-                    nx, ny = x + dx, y + dy
-                    if (0 <= nx < width and 0 <= ny < height and
-                            not self.wall_matrix[nx, ny] and
-                            (nx, ny) in self.terrain.walkable_cells):
-                        important_positions.add((nx, ny))
-
-        # Add regular grid points for complete coverage
-        for x in range(0, width, 10):
-            for y in range(0, height, 10):
-                if (x, y) not in self.terrain.walls and (x, y) in self.terrain.walkable_cells:
-                    important_positions.add((x, y))
-
-        tasks = []
-        for move_distance in move_distances:
-            for start_pos in important_positions:
-                tasks.append((start_pos, move_distance, self.wall_matrix, width, height))
-
-        # Use multiprocessing Pool
-        print(f"[Terrain] Starting parallel computation for {len(tasks)} tasks...")
-        with multiprocessing.Pool() as pool:
-            results = list(tqdm(pool.imap(_calculate_reachable_for_position, tasks), total=len(tasks), desc="Computing Reachable Tiles"))
-
-        for start_pos, move_distance, reachable in results:
-            self.terrain.reachable_tiles_cache[(start_pos, move_distance)] = reachable
-
-        print("[Terrain] Finished precomputing reachable tiles.")
-
-    def _compute_reachable_numba(self, start_x: int, start_y: int, move_distance: int) -> Set[Tuple[int, int]]:
-        """
-        Compute reachable tiles using optimized BFS with Numba JIT compilation.
-
-        This method is a wrapper that calls either a Numba-optimized implementation
-        or falls back to the Python implementation if Numba is not available.
-
-        Args:
-            start_x: Starting X coordinate
-            start_y: Starting Y coordinate
-            move_distance: Maximum movement distance from starting position
-
-        Returns:
-            Set of (x, y) tuples representing reachable positions
-
-        Example:
-            ```python
-            # Find tiles reachable within 7 movement points from position (10, 15)
-            reachable_tiles = optimizer._compute_reachable_numba(10, 15, 7)
-            print(f"Can reach {len(reachable_tiles)} tiles")
-            ```
-        """
-        # Fall back to Python implementation if Numba is not available
-        return self._compute_reachable_bfs((start_x, start_y), move_distance)
-
+    # ------------------------------------------------------------------
+    # Reachable tiles
+    #
     def _compute_reachable_bfs(self, start: Tuple[int, int], move_distance: int) -> Set[Tuple[int, int]]:
-        """
-        Calculate tiles reachable from a starting position using breadth-first search.
-
-        Uses BFS algorithm to find all grid cells within the specified movement distance,
-        accounting for walls and terrain boundaries.
-
-        Args:
-            start: Starting position as (x, y) tuple
-            move_distance: Maximum movement distance from starting position
-
-        Returns:
-            Set of (x, y) tuples representing reachable positions
-
-        Example:
-            ```python
-            # Find tiles reachable in a standard move (distance 7) from position (15, 20)
-            start_pos = (15, 20)
-            reachable = optimizer._compute_reachable_bfs(start_pos, 7)
-
-            # Show how many positions are reachable
-            print(f"Can reach {len(reachable)} positions within 7 steps")
-            ```
-        """
-        return self._compute_reachable_bfs_static(start, move_distance, self.wall_matrix, self.terrain.width, self.terrain.height)
-
-    @staticmethod
-    def _compute_reachable_bfs_static(start: Tuple[int, int], move_distance: int, wall_matrix: np.ndarray, width: int, height: int) -> Set[Tuple[int, int]]:
-        """
-        Static version of BFS for reachable tiles, suitable for multiprocessing.
-        """
-        reachable = set()
-        visited = np.zeros((width, height), dtype=np.bool_)
-
-        queue = deque([(start, 0)])
-        reachable.add(start)
-        visited[start[0], start[1]] = True
-
+        """Compute reachable tiles within ``move_distance`` using BFS (no cache update)."""
+        reachable: Set[Tuple[int, int]] = set()
+        sx, sy = start
+        if move_distance < 0:
+            return reachable
+        if not (0 <= sx < self.width and 0 <= sy < self.height):
+            return reachable
+        if self.wall_matrix[sx, sy]:
+            return reachable
+        visited = np.zeros((self.width, self.height), dtype=bool)
+        queue: deque[Tuple[Tuple[int, int], int]] = deque()
+        queue.append(((sx, sy), 0))
+        visited[sx, sy] = True
+        reachable.add((sx, sy))
         while queue:
-            (x, y), dist = queue.popleft()
-
+            (cx, cy), dist = queue.popleft()
             if dist >= move_distance:
                 continue
-
-            for dx, dy in [(0, 1), (1, 0), (0, -1), (-1, 0)]:
-                nx, ny = x + dx, y + dy
-
-                if not (0 <= nx < width and 0 <= ny < height):
-                    continue  # Out of bounds
-
-                if visited[nx, ny] or wall_matrix[nx, ny]:
+            for dx, dy in ((0, 1), (1, 0), (0, -1), (-1, 0)):
+                nx, ny = cx + dx, cy + dy
+                if not (0 <= nx < self.width and 0 <= ny < self.height):
                     continue
-
+                if visited[nx, ny] or self.wall_matrix[nx, ny]:
+                    continue
                 visited[nx, ny] = True
                 reachable.add((nx, ny))
                 queue.append(((nx, ny), dist + 1))
-
         return reachable
+
+    def _update_reachable_cache(self, key: Tuple[Tuple[int, int], int], reachable: Set[Tuple[int, int]]) -> None:
+        """Insert a reachable set into the LRU cache, evicting if necessary."""
+        # If already present, move to end (most recent)
+        if key in self.reachable_cache:
+            self.reachable_cache.move_to_end(key)
+            return
+        # Insert new
+        self.reachable_cache[key] = reachable
+        # Evict oldest if over capacity
+        if len(self.reachable_cache) > self.MAX_REACH_CACHE_SIZE:
+            self.reachable_cache.popitem(last=False)
+
+    # ------------------------------------------------------------------
+    # Pathfinding
+    #
+    def _update_path_cache(self, key: Tuple[Tuple[int, int], Tuple[int, int]], path: List[Tuple[int, int]]) -> None:
+        """Insert a path into the LRU path cache, with eviction."""
+        if key in self.path_cache:
+            # Move to end to mark as recently used
+            self.path_cache.move_to_end(key)
+            return
+        self.path_cache[key] = path
+        if len(self.path_cache) > self.MAX_CACHE_SIZE:
+            self.path_cache.popitem(last=False)
+
+    def _astar_search_global(self, start: Tuple[int, int], end: Tuple[int, int]) -> List[Tuple[int, int]]:
+        """Fallback global A* search across entire terrain."""
+        if not (0 <= start[0] < self.width and 0 <= start[1] < self.height):
+            return []
+        if not (0 <= end[0] < self.width and 0 <= end[1] < self.height):
+            return []
+        if self.wall_matrix[start] or self.wall_matrix[end]:
+            return []
+        if start == end:
+            return [start]
+        open_set: List[Tuple[int, Tuple[int, int]]] = []
+        heapq.heappush(open_set, (self.manhattan_distance(start, end), start))
+        came_from: Dict[Tuple[int, int], Tuple[int, int]] = {}
+        g_score: Dict[Tuple[int, int], int] = {start: 0}
+        open_hash: Set[Tuple[int, int]] = {start}
+        while open_set:
+            _, current = heapq.heappop(open_set)
+            open_hash.discard(current)
+            if current == end:
+                # reconstruct path
+                path: List[Tuple[int, int]] = []
+                cur = current
+                while cur in came_from:
+                    path.append(cur)
+                    cur = came_from[cur]
+                path.append(start)
+                path.reverse()
+                return path
+            cx, cy = current
+            for dx, dy in ((0, 1), (1, 0), (0, -1), (-1, 0)):
+                nx, ny = cx + dx, cy + dy
+                if not (0 <= nx < self.width and 0 <= ny < self.height):
+                    continue
+                if self.wall_matrix[nx, ny]:
+                    continue
+                tentative_g = g_score[current] + 1
+                neighbour = (nx, ny)
+                if neighbour not in g_score or tentative_g < g_score[neighbour]:
+                    came_from[neighbour] = current
+                    g_score[neighbour] = tentative_g
+                    f = tentative_g + self.manhattan_distance(neighbour, end)
+                    if neighbour not in open_hash:
+                        heapq.heappush(open_set, (f, neighbour))
+                        open_hash.add(neighbour)
+        return []
+
+    def _compute_path_astar(self, start: Tuple[int, int], end: Tuple[int, int]) -> List[Tuple[int, int]]:
+        """Compute a path from ``start`` to ``end`` using hierarchical A* and caching."""
+        # Reject out of bounds
+        if not (0 <= start[0] < self.width and 0 <= start[1] < self.height):
+            return []
+        if not (0 <= end[0] < self.width and 0 <= end[1] < self.height):
+            return []
+        # Reject blocked start or end
+        if self.wall_matrix[start] or self.wall_matrix[end]:
+            return []
+        # Trivial case
+        if start == end:
+            return [start]
+        key = (start, end)
+        # Check cache
+        if key in self.path_cache:
+            # Update recency and return cached path
+            self.path_cache.move_to_end(key)
+            return self.path_cache[key]
+        # Determine clusters
+        start_cid = self._cluster_id_for_position(start)
+        end_cid = self._cluster_id_for_position(end)
+        # Fallback if out of cluster
+        if start_cid is None or end_cid is None:
+            path = self._astar_search_global(start, end)
+            if path:
+                self._update_path_cache(key, path)
+            return path
+        # Same cluster → BFS within cluster
+        if start_cid == end_cid:
+            path = self._bfs_path_within_cluster(start, end, start_cid)
+            if path:
+                self._update_path_cache(key, path)
+            return path
+        # Hierarchical search across clusters
+        # Identify reachable portals in start and end clusters
+        portals_start: List[Tuple[int, int]] = self.cluster_portals.get(start_cid, [])
+        portals_end: List[Tuple[int, int]] = self.cluster_portals.get(end_cid, [])
+        if not portals_start or not portals_end:
+            # If no portals exist, fallback to global A*
+            path = self._astar_search_global(start, end)
+            if path:
+                self._update_path_cache(key, path)
+            return path
+        # BFS from start to portals in start cluster
+        start_paths = self._bfs_all_paths_from(start, start_cid)
+        start_portal_nodes: List[Tuple[int, int, int, int]] = []
+        start_portal_paths: Dict[Tuple[int, int, int, int], List[Tuple[int, int]]] = {}
+        for p in portals_start:
+            if p in start_paths:
+                node = (start_cid[0], start_cid[1], p[0], p[1])
+                start_portal_nodes.append(node)
+                start_portal_paths[node] = start_paths[p]
+        if not start_portal_nodes:
+            # fallback
+            path = self._astar_search_global(start, end)
+            if path:
+                self._update_path_cache(key, path)
+            return path
+        # BFS from end to portals in end cluster (reverse to build portal→end path)
+        end_paths = self._bfs_all_paths_from(end, end_cid)
+        end_portal_nodes: List[Tuple[int, int, int, int]] = []
+        end_portal_paths: Dict[Tuple[int, int, int, int], List[Tuple[int, int]]] = {}
+        end_costs: Dict[Tuple[int, int, int, int], int] = {}
+        for p in portals_end:
+            if p in end_paths:
+                node = (end_cid[0], end_cid[1], p[0], p[1])
+                # path from end to portal → reverse to portal→end
+                p_to_end = list(reversed(end_paths[p]))
+                end_portal_nodes.append(node)
+                end_portal_paths[node] = p_to_end
+                end_costs[node] = len(p_to_end) - 1
+        if not end_portal_nodes:
+            path = self._astar_search_global(start, end)
+            if path:
+                self._update_path_cache(key, path)
+            return path
+        # A* search on portal graph
+        # Precompute minimal end cost for heuristic
+        min_end_cost = min(end_costs.values()) if end_costs else 0
+        def heuristic(node: Tuple[int, int, int, int]) -> int:
+            _, _, px, py = node
+            return abs(px - end[0]) + abs(py - end[1]) + min_end_cost
+        open_heap: List[Tuple[int, Tuple[int, int, int, int]]] = []
+        g_score: Dict[Tuple[int, int, int, int], int] = {}
+        f_score: Dict[Tuple[int, int, int, int], int] = {}
+        came_from_portal: Dict[Tuple[int, int, int, int], Optional[Tuple[int, int, int, int]]] = {}
+        # initialise open set
+        for node in start_portal_nodes:
+            cost_to_start = len(start_portal_paths[node]) - 1
+            g_score[node] = cost_to_start
+            f_val = cost_to_start + heuristic(node)
+            f_score[node] = f_val
+            heapq.heappush(open_heap, (f_val, node))
+            came_from_portal[node] = None
+        goal_node: Optional[Tuple[int, int, int, int]] = None
+        goal_set = set(end_portal_nodes)
+        visited_portals: Set[Tuple[int, int, int, int]] = set()
+        while open_heap:
+            f_current, current = heapq.heappop(open_heap)
+            if current in visited_portals:
+                continue
+            visited_portals.add(current)
+            if current in goal_set:
+                goal_node = current
+                break
+            # Explore neighbours
+            for neighbour, (edge_cost, edge_path) in self.portal_graph.get(current, {}).items():
+                tentative_g = g_score[current] + edge_cost
+                if neighbour not in g_score or tentative_g < g_score[neighbour]:
+                    g_score[neighbour] = tentative_g
+                    came_from_portal[neighbour] = current
+                    f_n = tentative_g + heuristic(neighbour)
+                    f_score[neighbour] = f_n
+                    heapq.heappush(open_heap, (f_n, neighbour))
+        if goal_node is None:
+            # Fallback global search
+            path = self._astar_search_global(start, end)
+            if path:
+                self._update_path_cache(key, path)
+            return path
+        # Reconstruct portal sequence
+        portal_sequence: List[Tuple[int, int, int, int]] = []
+        cur = goal_node
+        while cur is not None:
+            portal_sequence.append(cur)
+            cur = came_from_portal.get(cur)
+        portal_sequence.reverse()
+        # Build final path from segments
+        final_path: List[Tuple[int, int]] = []
+        # start to first portal
+        entry_portal = portal_sequence[0]
+        final_path.extend(start_portal_paths[entry_portal])
+        # between portals in sequence
+        for i in range(len(portal_sequence) - 1):
+            p1 = portal_sequence[i]
+            p2 = portal_sequence[i + 1]
+            cx1, cy1, x1, y1 = p1
+            cx2, cy2, x2, y2 = p2
+            if (cx1, cy1) == (cx2, cy2):
+                # intra‑cluster path
+                cid = (cx1, cy1)
+                seg = self.local_portal_paths[cid].get(((x1, y1), (x2, y2)))
+                if seg:
+                    final_path.extend(seg[1:])
+                else:
+                    bfs_seg = self._bfs_path_within_cluster((x1, y1), (x2, y2), cid)
+                    final_path.extend(bfs_seg[1:] if bfs_seg else [])
+            else:
+                # cross cluster; use stored edge path (contains the two boundary cells)
+                edge = self.portal_graph.get(p1, {}).get(p2)
+                if edge:
+                    _, edge_path = edge
+                    final_path.extend(edge_path[1:])  # avoid duplicating last of previous
+                else:
+                    # fallback: direct adjacency (should not normally happen)
+                    final_path.append((x2, y2))
+        # final portal to end
+        exit_portal = portal_sequence[-1]
+        final_path.extend(end_portal_paths[exit_portal][1:])
+        # Cache and return
+        if final_path:
+            self._update_path_cache(key, final_path)
+        return final_path
+
+    def _bfs_all_paths_from(
+        self,
+        start: Tuple[int, int],
+        cluster_id: Tuple[int, int]
+    ) -> Dict[Tuple[int, int], List[Tuple[int, int]]]:
+        """Return BFS paths from ``start`` to each reachable portal in the cluster."""
+        bounds = self.cluster_bounds.get(cluster_id)
+        if bounds is None:
+            return {}
+        x_start, y_start, w, h = bounds
+        min_x, min_y = x_start, y_start
+        max_x, max_y = x_start + w, y_start + h
+        sx, sy = start
+        if not (min_x <= sx < max_x and min_y <= sy < max_y):
+            return {}
+        if self.wall_matrix[sx, sy]:
+            return {}
+        queue: deque[Tuple[Tuple[int, int], int]] = deque()
+        queue.append(((sx, sy), 0))
+        visited: Dict[Tuple[int, int], int] = {(sx, sy): 0}
+        parent: Dict[Tuple[int, int], Tuple[int, int]] = {}
+        while queue:
+            (cx, cy), dist = queue.popleft()
+            for dx, dy in ((0, 1), (1, 0), (0, -1), (-1, 0)):
+                nx, ny = cx + dx, cy + dy
+                if not (min_x <= nx < max_x and min_y <= ny < max_y):
+                    continue
+                if self.wall_matrix[nx, ny]:
+                    continue
+                if (nx, ny) in visited:
+                    continue
+                visited[(nx, ny)] = dist + 1
+                parent[(nx, ny)] = (cx, cy)
+                queue.append(((nx, ny), dist + 1))
+        # Reconstruct paths to portals
+        paths: Dict[Tuple[int, int], List[Tuple[int, int]]] = {}
+        for portal_pos in self.cluster_portals.get(cluster_id, []):
+            if portal_pos not in visited:
+                continue
+            path: List[Tuple[int, int]] = []
+            cur = portal_pos
+            while cur != (sx, sy):
+                path.append(cur)
+                cur = parent[cur]
+            path.append((sx, sy))
+            path.reverse()
+            paths[portal_pos] = path
+        return paths
 
 
 def optimize_terrain(terrain: Any) -> Any:
+    """Attach an OptimizedPathfinding instance to the given terrain.
+
+    This helper constructs an ``OptimizedPathfinding`` and installs proxy
+    methods on the terrain for ``precompute_paths``, ``precompute_reachable_tiles``
+    and ``get_path``.  It ensures that caching occurs within the optimiser.
     """
-    Apply optimized pathfinding algorithms to a terrain instance.
-
-    This function:
-    1. Creates an OptimizedPathfinding instance for the terrain
-    2. Replaces the terrain's original pathfinding methods with optimized versions
-    3. Adds new methods for path lookup with A* fallback
-
-    Args:
-        terrain: Terrain instance to optimize
-
-    Returns:
-        The optimized terrain instance with enhanced pathfinding capabilities
-
-    Example:
-        ```python
-        # Create terrain
-        terrain = TerrainGrid(100, 100)
-        terrain.load_map("large_battlefield.json")
-
-        # Apply optimizations
-        optimized_terrain = optimize_terrain(terrain)
-
-        # Precompute paths and reachable tiles
-        optimized_terrain.precompute_paths()
-        optimized_terrain.precompute_reachable_tiles()
-        ```
-    """
-    # Convert walls to numpy array for faster operations
     optimizer = OptimizedPathfinding(terrain)
-
-    # Replace the original methods with optimized ones
-    terrain.precompute_paths = lambda: optimizer.precompute_paths()
-    terrain.precompute_reachable_tiles = lambda move_distances=(7, 15): optimizer.precompute_reachable_tiles(
-        move_distances)
-
-    # Add path lookup with fallback to A* when needed
-    original_get_entity_position = terrain.get_entity_position
-
-    def get_path(self, start, end):
-        """Get path between two points, computing on demand if needed"""
-        if (start, end) in self.path_cache:
-            return self.path_cache[(start, end)]
-
-        # Path not in cache - compute on demand with A*
-        path = optimizer._compute_path_astar(start, end)
-        return path
-
-    terrain.get_path = get_path.__get__(terrain)
-
+    def precompute_paths_proxy() -> None:
+        optimizer.precompute_paths()
+    terrain.precompute_paths = precompute_paths_proxy
+    def precompute_reachable_tiles_proxy(move_distances: Tuple[int, ...] = (7, 15)) -> None:
+        # Precompute reachable tiles for each distance; update reachable cache accordingly
+        for dist in move_distances:
+            for x in range(terrain.width):
+                for y in range(terrain.height):
+                    if not optimizer.wall_matrix[x, y]:
+                        reachable = optimizer._compute_reachable_bfs((x, y), dist)
+                        optimizer._update_reachable_cache(((x, y), dist), reachable)
+    terrain.precompute_reachable_tiles = precompute_reachable_tiles_proxy
+    def get_path_proxy(start: Tuple[int, int], end: Tuple[int, int]) -> List[Tuple[int, int]]:
+        return optimizer._compute_path_astar(start, end)
+    terrain.get_path = get_path_proxy
     return terrain

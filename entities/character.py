@@ -5,6 +5,7 @@ import json
 from utils.character_utils import GENERATION_LIMIT, find_position_trait_in_dictionary
 from typing import Callable
 from math import ceil
+from utils.condition_utils import evaluate_weakened_damage_based  # new import
 
 class Character(BaseObject):
     __slots__ = (
@@ -12,7 +13,8 @@ class Character(BaseObject):
         "traits", "base_traits", "clan_disciplines",
         "_health_damage", "_willpower_damage", "states",
         "orientation", "team", "alliance","is_ai_controlled", "ai_script","sprint_distance",
-        "absorption"
+        "absorption", "toggle_opportunity_attack", "sprite_path", "hunger",  # add hunger & sprite_path to slots
+        "_max_health_mod_total", "initiative_mod"  # cumulative temporary max health modifications + initiative mod
     )
 
     def __init__(self, name: str = '', clan: str = '', generation: int = 13,
@@ -37,6 +39,10 @@ class Character(BaseObject):
         self.ai_script = ai_script
         self.sprint_distance = 0
         self.absorption = 0  # Default absorption value
+        self.toggle_opportunity_attack = True  # New gameplay toggle (can suppress reactions / AoO)
+        self.hunger = 0  # Default hunger (only meaningful for ghouls / vampires)
+        self._max_health_mod_total = 0  # running sum of active max health modifiers
+        self.initiative_mod = 0  # cumulative initiative modifiers
 
     @log_calls
     def modify_points(self, trait: str, points: int) -> bool:
@@ -65,24 +71,22 @@ class Character(BaseObject):
 
     @log_calls
     def take_damage(self, amount: int, damage_type: str = 'superficial', target: str = 'health') -> None:
-        """Apply damage to health or willpower, handling overflow and conversion."""
+        """Apply damage to health or willpower, handling overflow and conversion.
+        Returns lists of (added_conditions, removed_conditions) for dynamic evaluation.
+        Supports magic variants by normalizing '*_magic' suffix.
+        """
+        if damage_type.endswith('_magic'):
+            damage_type = damage_type.replace('_magic', '')
         damage = self._health_damage if target == 'health' else self._willpower_damage
         max_value = self.max_health if target == 'health' else self.max_willpower
         if damage_type == 'superficial':
-            # Add superficial, then handle overflow
             damage['superficial'] += amount
+            max_value = self.max_health if target == 'health' else self.max_willpower
             total = damage['superficial'] + damage['aggravated']
             if total > max_value:
-                overflow = total - max_value
-                # Convert overflow superficial to aggravated, replacing superficial first
-                to_convert = min(overflow, damage['superficial'])
-                damage['superficial'] -= to_convert
-                damage['aggravated'] += to_convert
-                # If still overflow (shouldn't happen), cap aggravated and set superficial to 0
-                total = damage['superficial'] + damage['aggravated']
-                if total > max_value:
-                    damage['aggravated'] = max_value
-                    damage['superficial'] = 0
+                # Overflow rule: track collapses to full aggravated, superficial cleared
+                damage['aggravated'] = max_value
+                damage['superficial'] = 0
         elif damage_type == 'aggravated':
             # Add aggravated, replacing superficial if needed
             to_add = amount
@@ -101,7 +105,9 @@ class Character(BaseObject):
 
     @log_calls
     def heal_damage(self, amount: int, damage_type: str = 'superficial', target: str = 'health') -> None:
-        """Heal superficial or aggravated damage, prioritizing superficial first."""
+        """Heal superficial or aggravated damage, prioritizing superficial first.
+        Returns lists of (added_conditions, removed_conditions) for dynamic evaluation.
+        """
         damage = self._health_damage if target == 'health' else self._willpower_damage
         if damage_type == 'superficial':
             healed = min(amount, damage['superficial'])
@@ -112,9 +118,8 @@ class Character(BaseObject):
         self._check_affliction(target)
 
     def _check_affliction(self, target: str):
-        """Placeholder: Check and apply affliction status (e.g., Affaibli) if needed."""
-        # TODO: Implement affliction status logic (e.g., Affaibli, critical injuries) according to the rulebook.
-        pass
+        """Evaluate dynamic damage-based conditions (e.g., Weakened variants)."""
+        evaluate_weakened_damage_based(self)
 
     def print_health_state(self):
         print(f"Health: {self._health_damage['superficial']} superficial, {self._health_damage['aggravated']} aggravated / {self.max_health} max")
@@ -127,8 +132,13 @@ class Character(BaseObject):
         return GENERATION_LIMIT[self.generation]
 
     @property
-    def max_health(self) -> int:
+    def base_max_health(self) -> int:
         return 3 + self.traits.get("Attributes", {}).get("Physical", {}).get("Stamina", 0)
+
+    @property
+    def max_health(self) -> int:
+        # Effective max health after temporary modifiers (can't go below 1)
+        return max(1, self.base_max_health + self._max_health_mod_total)
 
     @property
     def max_willpower(self) -> int:
@@ -186,9 +196,10 @@ class Character(BaseObject):
         return self.alliance.get(char_id, "neutral")
 
     def calculate_sprint_distance(self) -> int:
+        """Calculate sprint distance (Dex based). Safe against missing keys.
+        Previously used a hard-coded formula; kept but with safe access.
         """
-        Calcule la distance de sprint en fonction de la dextérité.
-        La distance de sprint est généralement égale à la dextérité multipliée par 2.
-        """
-        self.sprint_distance = ceil(self.traits["Attributes"]["Physical"]["Dexterity"] * 1.5 + 10)
+        dex = self.traits.get("Attributes", {}).get("Physical", {}).get("Dexterity", 0)
+        # Ceiling of 1.5 * Dex + 10 (design note) – ensure minimum baseline
+        self.sprint_distance = max(1, ceil(dex * 1.5 + 10))
         return self.sprint_distance

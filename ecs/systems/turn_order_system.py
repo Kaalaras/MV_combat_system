@@ -138,6 +138,12 @@ class TurnOrderSystem:
             reverse=True
         )
         self.turn_index = 0
+        # Publish round started event
+        if getattr(self.game_state, 'event_bus', None):
+            self.game_state.event_bus.publish('round_started', round_number=self.round_number, turn_order=list(self.turn_order))
+        # Also publish first turn started if exists
+        if self.turn_order and getattr(self.game_state, 'event_bus', None):
+            self.game_state.event_bus.publish('turn_started', round_number=self.round_number, entity_id=self.turn_order[0])
 
     def get_turn_order(self) -> List[str]:
         """
@@ -211,7 +217,14 @@ class TurnOrderSystem:
             > turn_system.round_number  # If enemy1 was the last in order
             2
         """
+        current_entity_id = self.current_entity()
+        if getattr(self.game_state, 'event_bus', None) and current_entity_id is not None:
+            self.game_state.event_bus.publish('turn_ended', round_number=self.round_number, entity_id=current_entity_id)
         self.turn_index += 1
         if self.turn_index >= len(self.turn_order):
             self.start_new_round()
-        return self.current_entity()
+        # Publish new turn started
+        new_entity = self.current_entity()
+        if getattr(self.game_state, 'event_bus', None) and new_entity is not None:
+            self.game_state.event_bus.publish('turn_started', round_number=self.round_number, entity_id=new_entity)
+        return new_entity

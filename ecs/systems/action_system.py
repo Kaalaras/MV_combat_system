@@ -62,6 +62,7 @@ class ActionType(Enum):
     SECONDARY = "secondary"
     FREE = "free"
     LIMITED_FREE = "limited_free"
+    REACTION = "reaction"
 
 
 class Action:
@@ -283,8 +284,13 @@ class ActionSystem:
             ActionType.PRIMARY: 1,
             ActionType.SECONDARY: 1,
             ActionType.FREE: float('inf'),  # Effectively unlimited
-            ActionType.LIMITED_FREE: float('inf')  # Base availability, specific limits handled by per_turn_limit
+            ActionType.LIMITED_FREE: float('inf'),  # Base availability, specific limits handled by per_turn_limit
+            ActionType.REACTION: 1,  # one reaction per turn baseline
         }
+        # Apply condition system action slot modifiers
+        cond_sys = getattr(self.game_state, 'condition_system', None)
+        if cond_sys:
+            self.action_counters[entity_id] = cond_sys.apply_action_slot_modifiers(entity_id, self.action_counters[entity_id])
         self.limited_free_counters[entity_id] = {}
         self.used_keywords[entity_id] = set()
         self.per_turn_action_counts[entity_id] = {}
@@ -395,7 +401,8 @@ class ActionSystem:
             #         print(f"Warning: {action.name} (limited free) attempted without secondary action slot.")
             # self.limited_free_counters.setdefault(entity_id, {})[action.name] = current_uses + 1
             pass  # Simplified: per_turn_limit is the main check via can_perform_action
-
+        elif action.action_type == ActionType.REACTION:
+            self.action_counters[entity_id][action.action_type] -= 1
         elif action.action_type != ActionType.FREE:  # PRIMARY or SECONDARY
             self.action_counters[entity_id][action.action_type] -= 1
 

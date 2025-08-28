@@ -21,6 +21,7 @@ from ecs.components.character_ref import CharacterRefComponent
 from ecs.components.health import HealthComponent
 from ecs.components.willpower import WillpowerComponent
 from ecs.components.velocity import VelocityComponent
+from ecs.components.facing import FacingComponent
 from core.game_state import GameState
 from core.preparation_manager import PreparationManager
 from core.game_system import GameSystem
@@ -28,6 +29,7 @@ from core.event_bus import EventBus
 from core.movement_system import MovementSystem
 from ecs.systems.turn_order_system import TurnOrderSystem
 from ecs.systems.action_system import ActionSystem
+from ecs.systems.facing_system import FacingSystem
 from ecs.systems.ai.main import BasicAISystem  # Updated to use refactored AI system
 from ecs.actions.movement_actions import StandardMoveAction, SprintAction
 from ecs.actions.attack_actions import RegisteredAttackAction
@@ -73,6 +75,17 @@ def _create_entity_components(character: Character, spec: EntitySpec) -> Dict[st
     velocity = VelocityComponent(dex)
     position = PositionComponent(x=spec.pos[0], y=spec.pos[1], width=spec.size[0], height=spec.size[1])
 
+    # Initialize facing component with character's orientation
+    facing = FacingComponent()
+    # Convert character orientation to direction vector
+    orientation_map = {
+        'up': (0.0, 1.0),
+        'down': (0.0, -1.0),
+        'left': (-1.0, 0.0),
+        'right': (1.0, 0.0)
+    }
+    facing.direction = orientation_map.get(character.orientation, (0.0, 1.0))
+
     return {
         "inventory": inventory,
         "equipment": equipment,
@@ -80,16 +93,13 @@ def _create_entity_components(character: Character, spec: EntitySpec) -> Dict[st
         "willpower": willpower,
         "character_ref": char_ref,
         "velocity": velocity,
-        "position": position
+        "position": position,
+        "facing": facing
     }
 
 
-def initialize_game(
-    entity_specs: List[EntitySpec],
-    grid_size: int,
-    max_rounds: int = 200,
-    map_dir: str = "battle_maps"
-) -> Dict[str, Any]:
+# DEPRECATED: original initialize_game kept for backward reference (not used by tests anymore)
+def _deprecated_initialize_game(entity_specs, grid_size, max_rounds=200, map_dir="battle_maps"):
     """
     Initializes a complete game instance based on a list of entity specifications.
 
@@ -145,14 +155,16 @@ def initialize_game(
     # --- Alliance Setup ---
     for char_id in all_ids:
         char_ref_comp = game_state.get_entity(char_id).get("character_ref")
-        if not char_ref_comp: continue
+        if not char_ref_comp:
+            continue
         char = char_ref_comp.character
 
         for other_id in all_ids:
             if other_id == char_id:
                 continue
             other_char_ref_comp = game_state.get_entity(other_id).get("character_ref")
-            if not other_char_ref_comp: continue
+            if not other_char_ref_comp:
+                continue
             other_char = other_char_ref_comp.character
 
             if char.team == other_char.team:
@@ -170,6 +182,10 @@ def initialize_game(
     game_state.movement = movement
     action_system = ActionSystem(game_state, event_bus)
     game_state.action_system = action_system
+
+    # Create facing system to handle entity orientation updates (single creation point)
+    facing_system = FacingSystem(game_state, event_bus)
+    game_state.facing_system = facing_system
 
     # Create LineOfSightManager
     los_manager = LineOfSightManager(game_state, terrain, event_bus)
@@ -216,7 +232,6 @@ def initialize_game(
         os.makedirs(full_map_dir)
 
     game_system.set_map_directory(full_map_dir)
-
     game_system.set_turn_order_system(turn_order)
     game_system.set_action_system(action_system)
     game_system.register_ai_system("basic", ai_system)
@@ -230,17 +245,14 @@ def initialize_game(
         "max_rounds": max_rounds
     }
 
+
 def run_and_visualize_game(game_setup: Dict[str, Any], gif_name_prefix: str):
-    """
-    Runs the game loop and generates a GIF of the battle.
-    """
+    """Run the game loop then assemble a battle GIF (manual visualization helper)."""
     game_system = game_setup["game_system"]
     game_state = game_setup["game_state"]
     max_rounds = game_setup["max_rounds"]
-
     map_dir = game_system.map_dir
 
-    # Clear old map files
     if os.path.exists(map_dir):
         for f in os.listdir(map_dir):
             if f.endswith('.png'):
@@ -248,13 +260,11 @@ def run_and_visualize_game(game_setup: Dict[str, Any], gif_name_prefix: str):
 
     game_system.run_game_loop(max_rounds=max_rounds)
 
-    # --- Outcome Reporting ---
     teams = game_state.get_teams()
     alive_teams = []
     for team_id, members in teams.items():
         if any(not game_state.get_entity(eid)["character_ref"].character.is_dead for eid in members):
             alive_teams.append(team_id)
-
     if len(alive_teams) == 1:
         print(f"Team {alive_teams[0]} wins.")
     elif len(alive_teams) > 1:
@@ -262,14 +272,84 @@ def run_and_visualize_game(game_setup: Dict[str, Any], gif_name_prefix: str):
     else:
         print("No survivors.")
 
-    # --- GIF Assembly ---
     completed_rounds = sum(1 for f in os.listdir(map_dir) if f.endswith('.png'))
     if completed_rounds > 0:
-        now_str = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-        gif_name = f"{gif_name_prefix}_{now_str}.gif"
-
-        # Note: The grid_size and px_size are hardcoded here but could be passed in.
+        gif_name = f"{gif_name_prefix}.gif"
         assemble_gif(map_dir, completed_rounds, gif_name=gif_name, grid_size=game_state.terrain.width, px_size=8, duration=500)
         print(f"Battle GIF saved to {os.path.join(os.path.abspath(map_dir), gif_name)}")
     else:
         print("No rounds completed, GIF not assembled.")
+
+
+def initialize_game(*, entity_specs: List[EntitySpec], grid_size: int, max_rounds: int = 200, map_dir: str = "battle_maps") -> Dict[str, Any]:
+    """Standard game initializer (single API).
+    Args:
+        entity_specs: list of EntitySpec
+        grid_size: square map size
+        max_rounds: cap
+        map_dir: directory for battle maps
+    Returns: dict with all systems (superset for compatibility)
+    """
+    game_state = GameState()
+    event_bus = EventBus(); game_state.set_event_bus(event_bus)
+    prep_manager = PreparationManager(game_state)
+    terrain = Terrain(width=grid_size, height=grid_size, game_state=game_state); game_state.set_terrain(terrain)
+    all_ids = []
+    for idx, spec in enumerate(entity_specs):
+        char = DefautHuman(); char.set_team(spec.team); char.is_ai_controlled = True; char.ai_script = "basic"; char.hunger = 0
+        entity_id = f"{spec.team}_{idx}"
+        components = _create_entity_components(char, spec)
+        game_state.add_entity(entity_id, components)
+        if terrain.add_entity(entity_id, spec.pos[0], spec.pos[1]):
+            all_ids.append(entity_id)
+        else:
+            game_state.remove_entity(entity_id)
+            print(f"Warning: Could not place entity {entity_id} at {spec.pos}.")
+    # Alliances
+    for char_id in all_ids:
+        ref = game_state.get_entity(char_id).get("character_ref");
+        if not ref: continue
+        ch = ref.character
+        for other_id in all_ids:
+            if other_id == char_id: continue
+            oref = game_state.get_entity(other_id).get("character_ref");
+            if not oref: continue
+            och = oref.character
+            ch.set_alliance(other_id, "ally" if ch.team == och.team else "enemy")
+    game_state.update_teams()
+    prep_manager.prepare()
+    movement = MovementSystem(game_state); game_state.movement = movement
+    action_system = ActionSystem(game_state, event_bus); game_state.action_system = action_system
+    facing_system = FacingSystem(game_state, event_bus); game_state.facing_system = facing_system
+    los_manager = LineOfSightManager(game_state, terrain, event_bus)
+    ai_system = BasicAISystem(game_state, movement, action_system, debug=True, event_bus=event_bus, los_manager=los_manager)
+    turn_order = TurnOrderSystem(game_state)
+    # Actions
+    prep_manager.action_system = action_system; prep_manager.initialize_character_actions()
+    std = StandardMoveAction(movement); spr = SprintAction(movement); atk = RegisteredAttackAction(); aoe = RegisteredAoEAttackAction(); end = EndTurnAction()
+    for eid in all_ids:
+        action_system.register_action(eid, std)
+        action_system.register_action(eid, spr)
+        action_system.register_action(eid, atk)
+        action_system.register_action(eid, aoe)
+        action_system.register_action(eid, end)
+    game_system = GameSystem(game_state, prep_manager, event_bus=event_bus, enable_map_drawing=False)
+    game_system.set_turn_order_system(turn_order)
+    game_system.set_action_system(action_system)
+    game_system.register_ai_system("basic", ai_system)
+    return {
+        "game_state": game_state,
+        "game_system": game_system,
+        "event_bus": event_bus,
+        "terrain": terrain,
+        "prep_manager": prep_manager,
+        "movement": movement,
+        "action_system": action_system,
+        "facing_system": facing_system,
+        "los_manager": los_manager,
+        "ai_system": ai_system,
+        "turn_order": turn_order,
+        "all_ids": all_ids,
+        "max_rounds": max_rounds,
+        "map_dir": map_dir,
+    }

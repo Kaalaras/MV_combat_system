@@ -1,6 +1,6 @@
 import unittest
-from unittest.mock import MagicMock
-from tests.test_fixtures import BaseAITestCase, MockWeapon
+from MV_combat_system.tests.test_fixtures import BaseAITestCase, MockWeapon
+from ecs.systems.ai import targeting
 
 class TestAIAttackRange(BaseAITestCase):
     def test_ranged_attack_within_range(self):
@@ -19,7 +19,6 @@ class TestAIAttackRange(BaseAITestCase):
         self.mock_los_manager.has_los.return_value = True
 
         # Test that the enemy is detected as a valid target
-        from ecs.systems.ai import targeting
         target = targeting.choose_ranged_target(ctx)
         self.assertEqual(target, "enemy_1")
 
@@ -39,7 +38,6 @@ class TestAIAttackRange(BaseAITestCase):
         self.mock_los_manager.has_los.return_value = True
 
         # Test that no target is found due to range
-        from ecs.systems.ai import targeting
         target = targeting.choose_ranged_target(ctx)
         self.assertIsNone(target)
 
@@ -52,7 +50,6 @@ class TestAIAttackRange(BaseAITestCase):
         ctx = self.create_fresh_context("player_1")
 
         # Test that adjacent enemy is detected
-        from ecs.systems.ai import targeting
         target = targeting.choose_melee_target(ctx)
         self.assertEqual(target, "enemy_1")
 
@@ -65,6 +62,5 @@ class TestAIAttackRange(BaseAITestCase):
         ctx = self.create_fresh_context("player_1")
 
         # Test that no melee target is found
-        from ecs.systems.ai import targeting
         target = targeting.choose_melee_target(ctx)
         self.assertIsNone(target)

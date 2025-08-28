@@ -1,8 +1,26 @@
 import unittest
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
+import sys
+import os
+
+CURRENT_DIR = os.path.dirname(__file__)
+PACKAGE_DIR = os.path.abspath(os.path.join(CURRENT_DIR, '..'))
+PROJECT_ROOT = os.path.abspath(os.path.join(CURRENT_DIR, '..', '..'))
+for p in (PROJECT_ROOT, PACKAGE_DIR):
+    if p not in sys.path:
+        sys.path.insert(0, p)
+
+# Robust import for test fixtures
+try:
+    from test_fixtures import BaseAITestCase  # type: ignore
+except ImportError:  # pragma: no cover
+    try:
+        from .test_fixtures import BaseAITestCase  # type: ignore
+    except ImportError:
+        from tests.test_fixtures import BaseAITestCase  # final fallback
+
 from ecs.systems.ai.main import BasicAISystem, AITurnContext
 from ecs.systems.ai import utils, movement
-from tests.test_fixtures import BaseAITestCase
 
 class TestAIRetreatAndCover(BaseAITestCase):
     def test_find_best_retreat_tile_basic(self):

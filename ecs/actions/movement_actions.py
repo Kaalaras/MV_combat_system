@@ -115,30 +115,22 @@ class StandardMoveAction(Action):
         """
         target_tile = action_params.get("target_tile")
         new_direction = action_params.get("new_direction")
-
         if target_tile is None:
             print(f"[Move] No target_tile provided for Standard Move for {entity_id}.")
             return False
-
-        entity = game_state.get_entity(entity_id)  # Use passed game_state
-        # max_dist = 7 # Max distance for standard move
-        # Reachability check should ideally happen before publishing the event (e.g., in AI or UI)
-        # or as part of a more detailed _is_available check.
-        # For simplicity, we assume target_tile is valid and reachable if we get here.
-        # If not, movement_system.move should handle it.
-
-        moved = self.movement_system.move(entity_id, target_tile)
-        if moved:
-            if new_direction:
-                entity["character_ref"].character.set_orientation(new_direction)
-            else:
-                # Fallback to interactive choice if no direction provided (mainly for player)
-                # AI should ideally specify direction or have a default.
-                if not entity["character_ref"].character.is_ai_controlled:  # Example check
-                    directions = ["up", "down", "left", "right"]
-                    chosen_dir = choose_direction(directions)
-                    entity["character_ref"].character.set_orientation(chosen_dir)
-                # else AI might have a default or this part is skipped.
+        entity = game_state.get_entity(entity_id)
+        used = game_state.get_movement_used(entity_id) if hasattr(game_state, 'get_movement_used') else 0
+        allowance = max(0, 7 - used)
+        # Apply condition-based movement constraints
+        cond_sys = getattr(game_state, 'condition_system', None)
+        if cond_sys:
+            allowance = cond_sys.apply_movement_constraints(entity_id, allowance, movement_type='standard')
+        if allowance <= 0:
+            print(f"[Move] Movement allowance reduced to 0 for {entity_id}.")
+            return False
+        moved = self.movement_system.move(entity_id, target_tile, max_steps=allowance)
+        if moved and new_direction:
+            entity["character_ref"].character.set_orientation(new_direction)
         return moved
 
 
@@ -238,18 +230,26 @@ class SprintAction(Action):
             ```
         """
         target_tile = action_params.get("target_tile")
-        entity_id_moving = action_params.get("entity_id_moving", entity_id)  # Use provided or default to the actor
-
+        entity_id_moving = action_params.get("entity_id_moving", entity_id)
         if target_tile is None:
             print(f"[Sprint] No target_tile provided for Sprint for {entity_id}.")
             return False
-
-        # Extract target coordinates
         try:
-            target_x, target_y = target_tile
+            tx, ty = target_tile
         except (ValueError, TypeError):
             print(f"[Sprint] Invalid target_tile format: {target_tile}")
             return False
-
-        # Use the correct entity ID for movement
-        return self.movement_system.move(entity_id_moving, (target_x, target_y))
+        ent = game_state.get_entity(entity_id_moving)
+        if not ent or 'character_ref' not in ent:
+            return False
+        char = ent['character_ref'].character
+        sprint_max = char.calculate_sprint_distance() if hasattr(char, 'calculate_sprint_distance') else 15
+        used = game_state.get_movement_used(entity_id_moving) if hasattr(game_state, 'get_movement_used') else 0
+        remaining = max(0, sprint_max - used)
+        cond_sys = getattr(game_state, 'condition_system', None)
+        if cond_sys:
+            remaining = cond_sys.apply_movement_constraints(entity_id_moving, remaining, movement_type='sprint')
+        if remaining <= 0:
+            print(f"[Sprint] Movement allowance reduced to 0 for {entity_id_moving}.")
+            return False
+        return self.movement_system.move(entity_id_moving, (tx, ty), max_steps=remaining)

@@ -2,6 +2,7 @@ from typing import List, Tuple, Dict, Any, Set, Deque
 from collections import deque
 from ecs.systems.ai.utils import get_occupied_static
 from itertools import product
+import heapq
 
 
 class MovementSystem:
@@ -88,53 +89,17 @@ class MovementSystem:
         return char_ref.character.traits.get("Attributes", {}).get("Physical", {}).get("Dexterity", 0)
 
     def get_reachable_tiles(self, entity_id: str, max_distance: int, reserved_tiles: Set[Tuple[int, int]] = None) -> List[Tuple[int, int, int]]:
-        """
-        Find all tiles reachable by an entity within a specified movement range.
-
-        Uses breadth-first search to find all valid positions an entity can move to,
-        accounting for terrain obstacles, other entities, and movement limits.
-
-        Args:
-            entity_id: The unique identifier of the entity performing movement
-            max_distance: Maximum movement distance (e.g., 7 for standard move, 15 for sprint)
-            reserved_tiles: A set of (x, y) tuples for tiles that are reserved and thus unreachable.
-
-        Returns:
-            List of tuples (x, y, movement_cost) representing reachable positions and their cost
-
-        Example:
-            ```python
-            # Find tiles reachable in a standard move
-            standard_move_tiles = movement_system.get_reachable_tiles("character1", 7)
-
-            # Find tiles reachable in a sprint
-            sprint_tiles = movement_system.get_reachable_tiles("character1", 15)
-
-            # Visualize movement range (example)
-            for x, y, cost in standard_move_tiles:
-                game_ui.highlight_tile(x, y, color="blue", alpha=1.0 - (cost/7))
-            ```
-        """
+        """Cost-aware reachable tiles using terrain movement cost (1/2/3)."""
         entity = self.game_state.get_entity(entity_id)
         if not entity or "position" not in entity:
             return []
-
         pos_comp = entity["position"]
         start_pos = (pos_comp.x, pos_comp.y)
         entity_width = getattr(pos_comp, 'width', 1)
         entity_height = getattr(pos_comp, 'height', 1)
-
-        visited: Set[Tuple[int, int]] = {start_pos}
-        queue: Deque[Tuple[Tuple[int, int], int]] = deque([(start_pos, 0)])
-        reachable: List[Tuple[int, int, int]] = [(start_pos[0], start_pos[1], 0)]
-
         terrain = self.game_state.terrain
-
-        # Ensure reserved_tiles is a set
         reserved = reserved_tiles or set()
-        # Compute static occupied tiles (entities footprints and walls)
         static_occ = get_occupied_static(self.game_state)
-        # Exclude this entity's current footprint
         entity = self.game_state.get_entity(entity_id)
         pos = entity.get("position")
         width = getattr(pos, 'width', 1)
@@ -142,101 +107,179 @@ class MovementSystem:
         start_x, start_y = (pos.x, pos.y) if hasattr(pos, 'x') else pos
         for dx, dy in product(range(width), range(height)):
             static_occ.discard((start_x + dx, start_y + dy))
-        # Combine reserved and static occupied for filtering
         blocked = reserved.union(static_occ)
-
-        while queue:
-            (x, y), dist = queue.popleft()
-
-            if dist >= max_distance:
-                continue
-
-            for dx, dy in [(0, 1), (1, 0), (0, -1), (-1, 0)]:
-                nx, ny = x + dx, y + dy
-
-                if (nx, ny) in visited or (nx, ny) in blocked:
-                    continue
-
-                # Check if the new anchor position (nx,ny) is valid for the entity's footprint
+        # Dijkstra
+        heap: List[Tuple[int, Tuple[int,int]]] = [(0, start_pos)]
+        best: Dict[Tuple[int,int], int] = {start_pos:0}
+        reachable: List[Tuple[int,int,int]] = []
+        while heap:
+            dist,(x,y) = heapq.heappop(heap)
+            if dist>max_distance: continue
+            reachable.append((x,y,dist))
+            for dx,dy in [(0,1),(1,0),(0,-1),(-1,0)]:
+                nx,ny = x+dx,y+dy
+                if (nx,ny) in blocked: continue
                 if not terrain.is_walkable(nx, ny, entity_width, entity_height) or \
                    terrain.is_occupied(nx, ny, entity_width, entity_height, entity_id_to_ignore=entity_id):
                     continue
-
-                visited.add((nx, ny))
-                new_dist = dist + 1
-                queue.append(((nx, ny), new_dist))
-                reachable.append((nx, ny, new_dist))
-
+                raw_cost_fn = getattr(terrain,'get_movement_cost', None)
+                if callable(raw_cost_fn):
+                    try:
+                        step_cost_val = raw_cost_fn(nx, ny)
+                        step_cost = int(step_cost_val)
+                    except (TypeError, ValueError):
+                        step_cost = 1
+                else:
+                    step_cost = 1
+                nd = dist + step_cost
+                if nd>max_distance: continue
+                if nd < best.get((nx,ny), 10**9):
+                    best[(nx,ny)] = nd
+                    heapq.heappush(heap,(nd,(nx,ny)))
         return reachable
 
-    def move(self, entity_id: str, dest: Tuple[int, int]) -> bool:
-        """
-        Moves an entity to the specified destination if the movement is valid.
-
-        Validates that the destination is within bounds, not occupied by other entities,
-        and not blocked by terrain features.
-
-        Args:
-            entity_id: The unique identifier of the entity to move
-            dest: Tuple (x, y) destination coordinates
-
-        Returns:
-            True if the move was successful, False otherwise
-
-        Example:
-            ```python
-            # Try to move player to destination
-            player_id = "player1"
-            destination = (5, 8)
-
-            if movement_system.move(player_id, destination):
-                print("Player moved to", destination)
-                # Update UI or trigger movement animation
-            else:
-                print("Cannot move to destination")
-                # Display error message to player
-            ```
-        """
+    def find_path(self, entity_id: str, dest: Tuple[int,int], max_distance: int | None = None) -> List[Tuple[int,int]]:
+        """Cost-aware shortest path (movement cost)."""
         entity = self.game_state.get_entity(entity_id)
-        if not entity or "position" not in entity:
-            return False
-
-        pos_comp = entity["position"]
-
+        if not entity or 'position' not in entity:
+            return []
+        pos_comp = entity['position']
+        start = (pos_comp.x, pos_comp.y)
+        if start == dest:
+            return [start]
         terrain = self.game_state.terrain
+        entity_width = getattr(pos_comp,'width',1)
+        entity_height = getattr(pos_comp,'height',1)
+        static_occ = get_occupied_static(self.game_state)
+        for dx,dy in product(range(entity_width), range(entity_height)):
+            static_occ.discard((start[0]+dx, start[1]+dy))
+        heap: List[Tuple[int,Tuple[int,int]]] = [(0,start)]
+        best: Dict[Tuple[int,int], int] = {start:0}
+        parent: Dict[Tuple[int,int], Tuple[int,int]] = {}
+        while heap:
+            dist,(x,y) = heapq.heappop(heap)
+            if (max_distance is not None) and dist>max_distance:
+                continue
+            if (x,y)==dest:
+                # reconstruct
+                path=[(x,y)]
+                cur=(x,y)
+                while cur!=start:
+                    cur=parent[cur]
+                    path.append(cur)
+                path.reverse()
+                return path
+            for dx,dy in [(0,1),(1,0),(0,-1),(-1,0)]:
+                nx,ny = x+dx,y+dy
+                if (nx,ny) in static_occ: continue
+                if not terrain.is_walkable(nx, ny, entity_width, entity_height) or \
+                   terrain.is_occupied(nx, ny, entity_width, entity_height, entity_id_to_ignore=entity_id):
+                    continue
+                raw_cost_fn = getattr(terrain,'get_movement_cost', None)
+                if callable(raw_cost_fn):
+                    try:
+                        step_cost_val = raw_cost_fn(nx, ny)
+                        step_cost = int(step_cost_val)
+                    except (TypeError, ValueError):
+                        step_cost = 1
+                else:
+                    step_cost = 1
+                nd = dist + step_cost
+                if (max_distance is not None) and nd>max_distance: continue
+                if nd < best.get((nx,ny), 10**9):
+                    best[(nx,ny)] = nd
+                    parent[(nx,ny)] = (x,y)
+                    heapq.heappush(heap,(nd,(nx,ny)))
+        return []
+
+    def move(self, entity_id: str, dest: Tuple[int, int], max_steps: int | None = None, pathfind: bool = False) -> bool:
+        """Move an entity.
+        Default is a direct (single-tile destination) validation + move used by unit tests.
+        Set pathfind=True to use path-based stepwise movement (previous implementation).
+        Args:
+            entity_id: entity identifier
+            dest: (x,y) destination anchor
+            max_steps: optional cap (only relevant when pathfind=True or for direct distance validation)
+            pathfind: if True, perform BFS path movement (legacy behavior)
+        Returns: True on success, False otherwise.
+        """
+        if pathfind:
+            return self.path_move(entity_id, dest, max_steps=max_steps)
+        entity = self.game_state.get_entity(entity_id)
+        if not entity or 'position' not in entity:
+            return False
+        pos_comp = entity['position']
+        cur_x, cur_y = pos_comp.x, pos_comp.y
         dest_x, dest_y = dest
-
-        # Terrain's is_occupied and is_valid_position methods (called by move_entity or directly)
-        # should now correctly use the entity's size by fetching it via game_state.
-        # The MovementSystem's primary check here is if the *destination anchor point*
-        # is valid and not occupied by *another* entity's footprint.
-
-        # Get entity's actual size for checks
-        current_entity_width, current_entity_height = terrain._get_entity_size(entity_id)
-
-
-        # Check if destination is valid for the entity's footprint
-        if not terrain.is_valid_position(dest_x, dest_y, current_entity_width, current_entity_height):
-            # print(f"Move fail: Dest {dest} out of bounds for size {current_entity_width}x{current_entity_height}")
+        # Manhattan distance for direct move constraint
+        distance = abs(dest_x - cur_x) + abs(dest_y - cur_y)
+        if max_steps is not None and distance > max_steps:
             return False
-
-        # Check if destination is occupied by *another* entity
-        if terrain.is_occupied(dest_x, dest_y, current_entity_width, current_entity_height, entity_id_to_ignore=entity_id):
-            # print(f"Move fail: Dest {dest} (size {current_entity_width}x{current_entity_height}) occupied by another.")
-            return False
-
-        # Check if the destination is walkable (e.g. not a wall)
-        if not terrain.is_walkable(dest_x, dest_y, current_entity_width, current_entity_height):
-            # print(f"Move fail: Dest {dest} (size {current_entity_width}x{current_entity_height}) not walkable.")
-            return False
-
-        # Attempt to move the entity in the terrain subsystem
-        moved_in_terrain = terrain.move_entity(entity_id, dest_x, dest_y)
-
-        if moved_in_terrain:
-            pos_comp.x, pos_comp.y = dest_x, dest_y # Update entity's own position component
-            # print(f"Move success: {entity_id} to {dest}")
+        terrain = self.game_state.terrain
+        if hasattr(terrain, '_get_entity_size'):
+            try:
+                width, height = terrain._get_entity_size(entity_id)
+            except Exception:
+                width = getattr(pos_comp, 'width', 1)
+                height = getattr(pos_comp, 'height', 1)
+        else:
+            width = getattr(pos_comp, 'width', 1)
+            height = getattr(pos_comp, 'height', 1)
+        # If destination is current position, re-validate footprint rather than auto-success
+        if (cur_x, cur_y) == (dest_x, dest_y):
+            if hasattr(terrain, 'is_valid_position') and not terrain.is_valid_position(dest_x, dest_y, width, height):
+                return False
+            if not terrain.is_walkable(dest_x, dest_y, width, height):
+                return False
+            if terrain.is_occupied(dest_x, dest_y, width, height, entity_id_to_ignore=entity_id):
+                return False
             return True
+        # Validate destination
+        if hasattr(terrain, 'is_valid_position') and not terrain.is_valid_position(dest_x, dest_y, width, height):
+            return False
+        if terrain.is_occupied(dest_x, dest_y, width, height, entity_id_to_ignore=entity_id):
+            return False
+        if not terrain.is_walkable(dest_x, dest_y, width, height):
+            return False
+        # Perform move
+        pos_comp.x, pos_comp.y = dest_x, dest_y
+        if hasattr(terrain, 'move_entity'):
+            if not terrain.move_entity(entity_id, dest_x, dest_y):
+                return False
+        if hasattr(self.game_state, 'add_movement_steps'):
+            self.game_state.add_movement_steps(entity_id, distance)
+        # Bump blocker version if entity provides blocking (character or cover)
+        if hasattr(self.game_state, 'bump_blocker_version') and (('character_ref' in entity) or ('cover' in entity)):
+            self.game_state.bump_blocker_version()
+        return True
 
-        # print(f"Move fail: terrain.move_entity for {entity_id} to {dest} returned False")
-        return False
+    def path_move(self, entity_id: str, dest: Tuple[int, int], max_steps: int | None = None) -> bool:
+        """Legacy path-based multi-step move (extracted from previous move implementation)."""
+        entity = self.game_state.get_entity(entity_id)
+        if not entity or 'position' not in entity:
+            return False
+        pos_comp = entity['position']
+        start = (pos_comp.x, pos_comp.y)
+        if start == dest:
+            return True
+        path = self.find_path(entity_id, dest, max_distance=max_steps if max_steps is not None else None)
+        if not path:
+            return False
+        # Compute cumulative cost
+        terrain = self.game_state.terrain
+        total_cost = 0
+        for (x,y) in path[1:]:
+            step_cost = terrain.get_movement_cost(x,y) if hasattr(terrain,'get_movement_cost') else 1
+            total_cost += step_cost
+            if max_steps is not None and total_cost>max_steps:
+                return False
+        # Execute
+        for (x,y) in path[1:]:
+            if not terrain.move_entity(entity_id, x, y):
+                return False
+            pos_comp.x, pos_comp.y = x, y
+            if hasattr(self.game_state, 'add_movement_steps'):
+                self.game_state.add_movement_steps(entity_id, terrain.get_movement_cost(x,y) if hasattr(terrain,'get_movement_cost') else 1)
+            if hasattr(self.game_state, 'bump_blocker_version') and (('character_ref' in entity) or ('cover' in entity)):
+                self.game_state.bump_blocker_version()
+        return True

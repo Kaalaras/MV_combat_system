@@ -14,7 +14,7 @@ from ecs.systems.action_system import Action, ActionType
 from core.player_input import choose_defense
 from entities.dice import Dice
 from random import choice
-from typing import Callable, List, Optional, Any, Union
+from typing import Callable, List, Optional, Any
 
 
 class DodgeRangedAction(Action):
@@ -114,6 +114,12 @@ class DodgeCloseCombatAction(Action):
         self.movement_system = movement_system
         self.dice_roller = Dice()
 
+    def _apply_condition_modifiers(self, game_state: Any, character: Any, base_pool: int, used_traits: List[str]) -> int:
+        cs = getattr(game_state, 'condition_system', None)
+        if cs:
+            return cs.apply_pool_modifiers(character, base_pool, set(used_traits))
+        return base_pool
+
     def _execute(self, entity_id: str, game_state: Any) -> int:
         """
         Executes the dodge (close combat) action.
@@ -132,6 +138,7 @@ class DodgeCloseCombatAction(Action):
         dex = char.traits.get("Attributes", {}).get("Physical", {}).get("Dexterity", 0)
         ath = char.traits.get("Abilities", {}).get("Talents", {}).get("Athletics", 0)
         defense_pool = dex + ath
+        defense_pool = self._apply_condition_modifiers(game_state, char, defense_pool, ["Dexterity"])
         defense_roll = self.dice_roller.roll_pool(defense_pool, hunger_dice=0)
         defense_successes = defense_roll["successes"] + defense_roll["critical_successes"] + defense_roll[
             "hunger_bestial_successes"]
@@ -174,6 +181,12 @@ class ParryAction(Action):
         )
         self.dice_roller = Dice()
 
+    def _apply_condition_modifiers(self, game_state: Any, character: Any, base_pool: int, used_traits: List[str]) -> int:
+        cs = getattr(game_state, 'condition_system', None)
+        if cs:
+            return cs.apply_pool_modifiers(character, base_pool, set(used_traits))
+        return base_pool
+
     def _execute(self, entity_id: str, game_state: Any) -> int:
         """
         Executes the parry action.
@@ -192,6 +205,7 @@ class ParryAction(Action):
         dex = char.traits.get("Attributes", {}).get("Physical", {}).get("Dexterity", 0)
         melee = char.traits.get("Abilities", {}).get("Skills", {}).get("Melee", 0)
         defense_pool = dex + melee
+        defense_pool = self._apply_condition_modifiers(game_state, char, defense_pool, ["Dexterity"])
         defense_roll = self.dice_roller.roll_pool(defense_pool, hunger_dice=0)
         defense_successes = defense_roll["successes"] + defense_roll["critical_successes"] + defense_roll[
             "hunger_bestial_successes"]
@@ -235,6 +249,12 @@ class AbsorbAction(Action):
         )
         self.dice_roller = Dice()
 
+    def _apply_condition_modifiers(self, game_state: Any, character: Any, base_pool: int, used_traits: List[str]) -> int:
+        cs = getattr(game_state, 'condition_system', None)
+        if cs:
+            return cs.apply_pool_modifiers(character, base_pool, set(used_traits))
+        return base_pool
+
     def _execute(self, entity_id: str, game_state: Any) -> int:
         """
         Executes the absorb action.
@@ -253,6 +273,7 @@ class AbsorbAction(Action):
         sta = char.traits.get("Attributes", {}).get("Physical", {}).get("Stamina", 0)
         brawl = char.traits.get("Abilities", {}).get("Talents", {}).get("Brawl", 0)
         defense_pool = sta + brawl
+        defense_pool = self._apply_condition_modifiers(game_state, char, defense_pool, ["Stamina"])
         defense_roll = self.dice_roller.roll_pool(defense_pool, hunger_dice=0)
         defense_successes = defense_roll["successes"] + defense_roll["critical_successes"] + defense_roll[
             "hunger_bestial_successes"]

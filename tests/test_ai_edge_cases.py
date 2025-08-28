@@ -1,8 +1,9 @@
 import unittest
 from unittest.mock import MagicMock, patch, PropertyMock
+
+from MV_combat_system.tests.test_fixtures import BaseAITestCase, MockCharacter
 from ecs.systems.ai import movement, targeting, utils
 from ecs.systems.ai.main import BasicAISystem, AITurnContext
-from tests.test_fixtures import BaseAITestCase
 
 class TestScoringMultiCriteria(BaseAITestCase):
     def test_melee_scoring_tiebreak_on_distance(self):
@@ -132,7 +133,6 @@ class TestAIContextEdgeCases(BaseAITestCase):
             if eid in self.entities:
                 return self.entities[eid]
             # Return a default mock entity for missing entities (but mark as dead)
-            from tests.test_fixtures import MockCharacter
             mock_character = MockCharacter(team="B", health_damage=(0, 0), is_dead=True)
             return {
                 "position": (0, 0),
