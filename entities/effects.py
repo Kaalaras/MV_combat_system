@@ -3,7 +3,21 @@ from abc import ABC, abstractmethod
 from typing import List, Any, Tuple, Dict
 from math import floor, degrees, sqrt
 import numpy as np
-from unittest.mock import MagicMock
+
+class _Position:
+    """Simple position wrapper for entities/effects.py internal use."""
+    def __init__(self, x: int, y: int):
+        self.x = x
+        self.y = y
+    
+    def __getitem__(self, index):
+        """Allow subscript access for compatibility."""
+        if index == 0:
+            return self.x
+        elif index == 1:
+            return self.y
+        else:
+            raise IndexError("Position index out of range")
 
 def _get_distance(pos1: Tuple[int, int], pos2: Tuple[int, int]) -> float:
     """Helper function to calculate Manhattan distance."""
@@ -65,7 +79,7 @@ class PenetrationEffect(AttackEffect):
             if entity_id in [context["attacker_id"], context["primary_target_id"]]:
                 continue
 
-            entity_pos = MagicMock(x=entity_pos_tuple[0], y=entity_pos_tuple[1])
+            entity_pos = _Position(entity_pos_tuple[0], entity_pos_tuple[1])
 
             # Check if the entity is roughly "behind" the primary target
             vec_to_entity_x = entity_pos.x - start_pos.x
@@ -207,8 +221,9 @@ class ConeAoE(AreaOfEffect):
         if vec_len == 0:
              # This can happen in melee if attacker is at the same spot as impact.
              # Fallback: use attacker's orientation if available.
-             attacker_char = attacker_entity.get("character_ref", MagicMock()).character
-             orientation = getattr(attacker_char, 'orientation', 'up')
+             attacker_char_ref = attacker_entity.get("character_ref")
+             attacker_char = attacker_char_ref.character if attacker_char_ref else None
+             orientation = getattr(attacker_char, 'orientation', 'up') if attacker_char else 'up'
              orient_map = {'up': (0, -1), 'down': (0, 1), 'left': (-1, 0), 'right': (1, 0)}
              direction_vec = orient_map.get(orientation, (0, -1))
              vec_len = 1

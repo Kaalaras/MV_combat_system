@@ -1,3 +1,13 @@
 /tests/battle_maps_bigfighters/
 /tests/battle_maps/
 /logs/
+
+# Build
+assets/battles/*.json
+*.png
+
+# Python cache
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
