@@ -76,7 +76,7 @@ class PlayerTurnController:
     ) -> None:
         self.event_bus = event_bus
         self.is_player_entity = is_player_entity
-        self.action_requires_target = action_requires_target or (lambda name: name.lower() in {"move", "attack"})
+        self.action_requires_target = action_requires_target or (lambda name: any(keyword in name.lower() for keyword in {"move", "attack", "sprint"}))
 
         # Turn / interaction state
         self.active_entity_id: Optional[str] = None
@@ -150,7 +150,17 @@ class PlayerTurnController:
         if action_name.lower() == "move" and self.free_move_available:
             metadata["free_move"] = True
             self.free_move_available = False
-        self._publish_action_request(entity_id, action_name, target=target, **metadata)
+        
+        # Map target to appropriate parameter name based on action type
+        action_params = metadata.copy()
+        if action_name.lower() in ["standard move", "move", "sprint"]:
+            action_params["target_tile"] = target
+        elif action_name.lower() in ["attack", "basic attack"]:
+            action_params["target"] = target
+        else:
+            action_params["target"] = target
+            
+        self._publish_action_request(entity_id, action_name, **action_params)
         self.pending_action = None
 
     def _on_ui_end_turn(self, entity_id: str, **_: Any) -> None:
