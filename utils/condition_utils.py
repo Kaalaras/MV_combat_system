@@ -29,6 +29,8 @@ IMMOBILIZED = "Immobilized"
 HANDICAP = "Handicap"
 INVISIBLE = "Invisible"
 SEE_INVISIBLE = "SeeInvisible"  # Grants ability to perceive Invisible targets
+NIGHT_VISION_PARTIAL = "NightVision.Partial"
+NIGHT_VISION_TOTAL = "NightVision.Total"
 ALL_WEAKENED = {WEAKENED_PHYSICAL, WEAKENED_MENTAL_SOCIAL, WEAKENED_TOTAL}
 
 
@@ -108,5 +110,6 @@ __all__ = [
     'PHYSICAL_ATTRIBUTES', 'MENTAL_ATTRIBUTES', 'SOCIAL_ATTRIBUTES', 'WILLPOWER_TRAIT',
     'WEAKENED_PHYSICAL', 'WEAKENED_MENTAL_SOCIAL', 'WEAKENED_TOTAL',
     'POISONED','SLOWED','IMMOBILIZED','HANDICAP','INVISIBLE','SEE_INVISIBLE',
+    'NIGHT_VISION_PARTIAL','NIGHT_VISION_TOTAL',
     'apply_weakened_penalty', 'evaluate_weakened_damage_based'
 ]

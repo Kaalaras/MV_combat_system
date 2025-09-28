@@ -17,7 +17,7 @@ Rationale for deprecation:
 Retention Policy:
   * Kept as a stub so imports referencing interface.game_window do not break.
   * Actual Arcade window (if reintroduced) should be implemented in a new file
-    (e.g. interface/arcade_app.py) using the new modular components.
+    (e.g. interface/arcade_app_bis.py) using the new modular components.
 
 Attempting to instantiate GameWindow will raise NotImplementedError to avoid
 silent misuse.

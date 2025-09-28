@@ -1,4 +1,4 @@
-# ecs/actions/attack_actions.py
+# ecs/actions/attack_actions_bis.py
 from ecs.systems.action_system import Action, ActionType  # Ensure Action, ActionType are imported
 from entities.weapon import Weapon  # Ensure Weapon is imported
 from entities.character import Character  # Ensure Character is imported
@@ -47,7 +47,7 @@ class AttackAction:
         ```
     """
 
-    def __init__(self, attacker_id: str, target_id: str, weapon: Weapon, game_state: Any):
+    def __init__(self, attacker_id: str, target_id: str, weapon: Weapon, game_state: Any, is_opportunity: bool = False):
         """
         Initialize a new attack action.
 
@@ -62,6 +62,7 @@ class AttackAction:
         self.weapon = weapon
         self.game_state = game_state
         self.dice_roller = Dice()
+        self.is_opportunity = is_opportunity  # New flag: true when resolving an AoO reaction
 
     def _apply_condition_modifiers(self, character: Character, base_pool: int, used_traits: List[str]) -> int:
         cs = getattr(self.game_state, 'condition_system', None)
@@ -156,8 +157,8 @@ class AttackAction:
 
         if valid_moves:
             nx, ny = choice(valid_moves)
-            # Use movement_system.move for the target_id (defender)
-            moved = movement_system.move(self.target_id, (nx, ny))
+            # Use movement_system.move for the target_id (defender) without provoking AoO
+            moved = movement_system.move(self.target_id, (nx, ny), provoke_aoo=False)
             if moved:
                 print(f"[Defense] {target.name} ({self.target_id}) dodges to ({nx}, {ny})!")
 
@@ -494,8 +495,8 @@ class AttackAction:
         if chosen_defense_name in ["Dodge (close combat)", "Parry", "Dodge (ranged)"]:
             if defense_successes >= current_attack_successes:
                 print(f"[Attack] Failed! {chosen_defense_name} successes ({defense_successes}) vs attack successes ({current_attack_successes}).")
-                if chosen_defense_name == "Dodge (close combat)":
-                    self._move_defender_on_dodge(target)  # Use the new method that handles facing
+                if chosen_defense_name == "Dodge (close combat)" and not self.is_opportunity:
+                    self._move_defender_on_dodge(target)  # Skip reposition on AoO
                 return 0, 0 # No damage, no remaining dice
             else:
                 net_successes = current_attack_successes - defense_successes

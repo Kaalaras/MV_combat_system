@@ -26,7 +26,7 @@ Usage
 
 Integration Plan
 ----------------
-Arcade window (arcade_app.py) will map key presses (e.g. TAB / SHIFT+TAB / 0)
+Arcade window (arcade_app_bis.py) will map key presses (e.g. TAB / SHIFT+TAB / 0)
 into the public methods exposed here.
 """
 from __future__ import annotations

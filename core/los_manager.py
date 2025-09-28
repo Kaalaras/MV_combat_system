@@ -29,8 +29,8 @@ Key implementation notes:
 
 from core.event_bus import EventBus
 from core.game_state import GameState
-from core.terrain_manager import Terrain
-from utils.condition_utils import INVISIBLE, SEE_INVISIBLE
+from core.terrain_manager import Terrain, EFFECT_DARK_TOTAL, EFFECT_DARK_LOW  # extended import
+from utils.condition_utils import INVISIBLE, SEE_INVISIBLE, NIGHT_VISION_PARTIAL, NIGHT_VISION_TOTAL
 
 # Attempt to import tcod and constants for permissive field of view.  If tcod
 # isn't available, the variables below will be set accordingly and the
@@ -170,15 +170,89 @@ class LineOfSightManager:
         if not att or not dfn or 'position' not in att or 'position' not in dfn:
             return False
         apos = att['position']; dpos = dfn['position']
+        att_states = set()
+        def_states = set()
+        if 'character_ref' in att:
+            att_states = getattr(att['character_ref'].character, 'states', set())
+        if 'character_ref' in dfn:
+            def_states = getattr(dfn['character_ref'].character, 'states', set())
+        # Darkness gating
+        if hasattr(self.terrain, 'has_effect'):
+            attacker_dark_total = self.terrain.has_effect(apos.x, apos.y, EFFECT_DARK_TOTAL)
+            defender_dark_total = self.terrain.has_effect(dpos.x, dpos.y, EFFECT_DARK_TOTAL)
+            if attacker_dark_total and NIGHT_VISION_TOTAL not in att_states:
+                return False
+            if defender_dark_total and NIGHT_VISION_TOTAL not in att_states:
+                return False
+        # Geometric LOS
         if not self.has_los((apos.x, apos.y), (dpos.x, dpos.y)):
             return False
-        def_ref = dfn.get('character_ref'); att_ref = att.get('character_ref')
-        if def_ref and att_ref:
-            def_states = getattr(def_ref.character,'states', set())
-            att_states = getattr(att_ref.character,'states', set())
-            if INVISIBLE in def_states and SEE_INVISIBLE not in att_states:
-                return False
+        # Invisibility
+        if INVISIBLE in def_states and SEE_INVISIBLE not in att_states:
+            return False
         return True
+
+    # New helper for darkness penalty (attack roll system can call this)
+    
+    def get_darkness_attack_modifier(self, attacker_id: str, defender_id: str) -> int:
+        """Return attack modifier from darkness, delegating to VisionSystem when available.
+
+        Prefer VisionSystem.get_attack_modifier(attacker_id, defender_id) if the game_state
+        exposes one; otherwise fall back to local terrain-effect logic (-1 for low darkness
+        if the attacker lacks partial NV; 0 otherwise). We never apply a penalty for total
+        darkness here because can_see() should already gate that via LoS/NV rules.
+        """
+        # 1) Delegate to VisionSystem if present and exposes the method
+        vision_sys = getattr(self.game_state, 'vision_system', None)
+        if vision_sys and hasattr(vision_sys, 'get_attack_modifier'):
+            try:
+                return int(vision_sys.get_attack_modifier(attacker_id, defender_id)) or 0
+            except Exception:
+                # Fall through to local fallback logic
+                pass
+
+        # 2) Fallback: compute from terrain effects + attacker states
+        terrain = getattr(self.game_state, 'terrain', None)
+        if not terrain or not hasattr(terrain, 'has_effect'):
+            return 0
+        attacker = self.game_state.get_entity(attacker_id)
+        defender = self.game_state.get_entity(defender_id)
+        if not attacker or not defender or 'position' not in attacker or 'position' not in defender:
+            return 0
+        dpos = defender['position']
+        att_states = set()
+        if 'character_ref' in attacker:
+            att_states = getattr(attacker['character_ref'].character, 'states', set()) or set()
+
+        # Total darkness: LoS/vision rules should have blocked earlier; do not stack extra penalty.
+        if terrain.has_effect(dpos.x, dpos.y, EFFECT_DARK_TOTAL):
+            return 0
+
+        # Low darkness: -1 if attacker lacks partial NV (or total NV)
+        if terrain.has_effect(dpos.x, dpos.y, EFFECT_DARK_LOW):
+            if (NIGHT_VISION_PARTIAL in att_states) or (NIGHT_VISION_TOTAL in att_states):
+                return 0
+            return -1
+
+        return 0
+        if not terrain or not hasattr(terrain, 'has_effect'):
+            return 0
+        attacker = self.game_state.get_entity(attacker_id)
+        defender = self.game_state.get_entity(defender_id)
+        if not attacker or not defender or 'position' not in attacker or 'position' not in defender:
+            return 0
+        dpos = defender['position']
+        att_states = set()
+        if 'character_ref' in attacker:
+            att_states = getattr(attacker['character_ref'].character, 'states', set())
+        if terrain.has_effect(dpos.x, dpos.y, EFFECT_DARK_TOTAL):
+            # Already blocked in can_see unless attacker has total night vision; treat as no additional mod
+            return 0
+        if terrain.has_effect(dpos.x, dpos.y, EFFECT_DARK_LOW):
+            if NIGHT_VISION_PARTIAL in att_states or NIGHT_VISION_TOTAL in att_states:
+                return 0
+            return -1
+        return 0
 
     def reset_stats(self):
         for k in self.stats:

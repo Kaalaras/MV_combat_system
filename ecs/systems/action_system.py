@@ -44,27 +44,25 @@ Example:
     # Trigger the action via the event bus
     event_bus.publish("action_requested", entity_id="player1", action_name="attack", target_id="enemy1")
 """
+
+from __future__ import annotations
+from typing import Any, Callable, Dict, List, Optional
+from dataclasses import dataclass, field
 from enum import Enum
-from typing import Dict, List, Optional, Callable, Any
 
 
 class ActionType(Enum):
     """
-    Enum defining the different types of actions and their associated costs.
-
-    Attributes:
-        PRIMARY: Main actions that typically cost a primary action point
-        SECONDARY: Less impactful actions that cost a secondary action point
-        FREE: Actions that can be performed without consuming action points
-        LIMITED_FREE: Actions that are free but have per-turn usage limitations
+    Enumeration of action types used to categorize actions and determine their cost.
     """
-    PRIMARY = "primary"
-    SECONDARY = "secondary"
-    FREE = "free"
-    LIMITED_FREE = "limited_free"
-    REACTION = "reaction"
+    PRIMARY = "PRIMARY"            # consumes primary action slot
+    SECONDARY = "SECONDARY"        # consumes secondary action slot
+    FREE = "FREE"                  # does not consume slots
+    LIMITED_FREE = "LIMITED_FREE"  # free but limited per turn (e.g., bonus steps)
+    REACTION = "REACTION"          # triggered outside of the entity's turn
 
 
+@dataclass
 class Action:
     """
     Represents a game action that can be performed by an entity.
@@ -81,72 +79,31 @@ class Action:
         cooldown (int): Number of turns to wait before the action can be used again
     """
 
-    def __init__(self,
-                 name: str,
-                 action_type: ActionType,
-                 execute_func: Callable,
-                 is_available_func: Optional[Callable] = None,
-                 description: str = "",
-                 keywords: Optional[list] = None,
-                 incompatible_keywords: Optional[list] = None,
-                 per_turn_limit: int = None,
-                 cooldown: int = 0):
+    name: str
+    action_type: ActionType
+    execute_func: Callable[..., Any]
+    is_available_func: Optional[Callable[..., bool]] = None
+    description: str = ""
+    keywords: List[str] = field(default_factory=list)
+    incompatible_keywords: List[str] = field(default_factory=list)
+    per_turn_limit: int = 1
+    cooldown: int = 0
+
+    def is_available(self, entity_id: str, game_state, **action_params) -> bool:
         """
-        Initialize a new Action.
-
-        Args:
-            name: Unique identifier for the action
-            action_type: The type of action which determines its cost
-            execute_func: Function that implements the action's behavior
-            is_available_func: Function that determines if the action can be used
-            description: Human-readable description of the action
-            keywords: Tags that categorize the action and may affect interactions
-            incompatible_keywords: Keywords that make this action unavailable if used
-            per_turn_limit: Maximum number of times this action can be used per turn
-            cooldown: Number of turns to wait before the action can be used again
-        """
-        self.name = name
-        self.action_type = action_type
-        self.execute_func = execute_func
-        self.is_available_func = is_available_func
-        self.description = description
-        self.keywords = keywords or []
-        self.incompatible_keywords = incompatible_keywords or []
-        self.per_turn_limit = per_turn_limit
-        self.cooldown = cooldown
-
-    def is_available(self, entity_id, game_state, **action_params) -> bool:
-        """
-        Checks if the action is available for the given entity in the current game state,
-        considering specific action parameters if provided.
-
-        Args:
-            entity_id: The identifier of the entity attempting the action
-            game_state: The current state of the game
-            **action_params: Additional parameters specific to this action instance
-
-        Returns:
-            bool: True if the action is available, False otherwise
+        Check if the action is available for the given entity and game state.
         """
         if self.is_available_func:
-            # Pass entity_id, game_state, and any action_params to the specific availability check
-            return self.is_available_func(entity_id, game_state, **action_params)
+            try:
+                return bool(self.is_available_func(entity_id, game_state, **action_params))
+            except Exception as e:
+                print(f"[ActionSystem][WARN] availability func error for {self.name}: {e}")
+                return False
         return True
 
-    def execute(self, entity_id: str, game_state: Any, **action_params) -> Any:
+    def execute(self, entity_id: str, game_state, **action_params) -> Any:
         """
-        Executes the action using the provided arguments.
-
-        The execute_func is expected to have a signature like:
-        func(entity_id, game_state, **action_params)
-
-        Args:
-            entity_id: The identifier of the entity performing the action
-            game_state: The current state of the game
-            **action_params: Additional parameters specific to this action instance
-
-        Returns:
-            Any: The result of executing the action, dependent on the specific action implementation
+        Execute the action logic.
         """
         return self.execute_func(entity_id, game_state, **action_params)
 
@@ -169,25 +126,61 @@ class ActionSystem:
         cooldowns: Dictionary tracking cooldowns for each entity's actions
     """
 
-    def __init__(self, game_state: Any, event_bus: Any):
-        """
-        Initialize the ActionSystem.
-
-        Args:
-            game_state: The current state of the game
-            event_bus: Event system for communication between game components
-        """
+    def __init__(self, game_state, event_bus=None):
         self.game_state = game_state
         self.event_bus = event_bus
+
+        # Registered actions per entity
         self.available_actions: Dict[str, List[Action]] = {}
-        self.action_counters: Dict[str, Dict[ActionType, float]] = {}
+
+        # Action counters per entity (reset every turn)
+        self.action_counters: Dict[str, Dict[ActionType, int]] = {}
+
+        # Limited free actions per-turn usage
         self.limited_free_counters: Dict[str, Dict[str, int]] = {}
+
+        # Keywords used by entity this turn
         self.used_keywords: Dict[str, set] = {}
+
+        # Per-turn action counts
         self.per_turn_action_counts: Dict[str, Dict[str, int]] = {}
+
+        # Cooldowns per entity
         self.cooldowns: Dict[str, Dict[str, int]] = {}
 
         if self.event_bus:
             self.event_bus.subscribe("action_requested", self.handle_action_requested)
+
+    # --- Helpers for robust enum handling -----------------------------------
+    def _normalize_action_type(self, at) -> str:
+        """Return a stable string for an ActionType-like object (enum or str)."""
+        try:
+            return at.value
+        except AttributeError:
+            return str(at)
+
+    def _is_free_like(self, action) -> bool:
+        v = self._normalize_action_type(action.action_type)
+        try:
+            return v in (ActionType.FREE.value, ActionType.LIMITED_FREE.value)
+        except Exception:
+            return v in ("FREE", "LIMITED_FREE")
+    # ------------------------------------------------------------------------
+
+    def register_action(self, entity_id: str, action: Action):
+        """
+        Register an action for a specific entity.
+        """
+        self.available_actions.setdefault(entity_id, []).append(action)
+
+    def unregister_action(self, entity_id: str, action_name: str):
+        """
+        Unregister an action by name for a specific entity.
+        """
+        if entity_id in self.available_actions:
+            self.available_actions[entity_id] = [
+                a for a in self.available_actions[entity_id] if a.name != action_name
+            ]
 
     def find_action_by_name(self, entity_id: str, action_name: str) -> Optional[Action]:
         """
@@ -210,72 +203,31 @@ class ActionSystem:
         Handles an 'action_requested' event by finding, validating, and executing the requested action.
 
         This method is typically triggered by the event bus when an entity attempts to perform an action.
-        It checks if the action exists and can be performed, then executes it and publishes the result.
-
-        Args:
-            entity_id: The identifier of the entity attempting the action
-            action_name: The name of the action to perform
-            **action_params: Additional parameters for the action execution
         """
-        # If 'params' is present in action_params, unpack it and merge with other action_params
-        params_dict = action_params.pop('params', None)
-        if params_dict and isinstance(params_dict, dict):
-            action_params.update(params_dict)
-
-        # print(f"[ActionSystem] Received action_requested: {entity_id}, {action_name}, {action_params}")
-        action_to_perform = self.find_action_by_name(entity_id, action_name)
-
-        if not action_to_perform:
-            print(f"[ActionSystem] Action '{action_name}' not found for entity {entity_id}.")
+        action = self.find_action_by_name(entity_id, action_name)
+        if not action:
+            print(f"[ActionSystem][WARN] Action '{action_name}' not found for entity {entity_id}")
             if self.event_bus:
-                self.event_bus.publish("action_failed", entity_id=entity_id, action_name=action_name,
-                                       reason="Action not found", params=action_params)
+                self.event_bus.publish("action_failed", entity_id=entity_id, action_name=action_name, reason="not_found")
             return
 
-        # Pass action_params to can_perform_action for specific availability checks
-        if self.can_perform_action(entity_id, action_to_perform, **action_params):
-            result = self.perform_action(entity_id, action_to_perform, **action_params)
-            # perform_action now returns the direct result of action.execute()
-            # The event payload should reflect this.
+        if not self.can_perform_action(entity_id, action, **action_params):
+            print(f"[ActionSystem][DEBUG] Action '{action_name}' cannot be performed by {entity_id}")
             if self.event_bus:
-                # Assuming 'result' indicates success if not False or None,
-                # specific actions might return damage, status, etc.
-                # For simplicity, let's assume any non-False/None result means performed.
-                # A more robust system might have execute() return a status object.
-                if result is not False and result is not None:  # Crude check for success
-                    self.event_bus.publish("action_performed", entity_id=entity_id, action_name=action_name,
-                                           result=result, params=action_params)
-                else:  # Explicit False or None indicates failure from execute
-                    self.event_bus.publish("action_failed", entity_id=entity_id, action_name=action_name,
-                                           reason="Execution failed", result=result, params=action_params)
-        else:
-            print(f"[ActionSystem] Cannot perform action '{action_name}' for entity {entity_id}.")
-            if self.event_bus:
-                self.event_bus.publish("action_failed", entity_id=entity_id, action_name=action_name,
-                                       reason="Cannot perform action (rules/state)", params=action_params)
+                self.event_bus.publish("action_failed", entity_id=entity_id, action_name=action_name, reason="unavailable")
+            return
 
-    def register_action(self, entity_id: str, action: Action):
-        """
-        Register an action as available to an entity.
-
-        Args:
-            entity_id: The identifier of the entity
-            action: The action to register
-        """
-        if entity_id not in self.available_actions:
-            self.available_actions[entity_id] = []
-        self.available_actions[entity_id].append(action)
+        result = self.perform_action(entity_id, action, **action_params)
+        if self.event_bus:
+            try:
+                self.event_bus.publish("action_performed", entity_id=entity_id, action_name=action.name, result=result)
+            except Exception as e:
+                print(f"[ActionSystem][WARN] Failed to publish action_performed: {e}")
+        return result
 
     def reset_counters(self, entity_id: str):
         """
-        Reset all action counters for an entity at the start of their turn.
-
-        This method reestablishes the standard action economy for the entity:
-        - 1 primary action
-        - 1 secondary action
-        - Unlimited free actions
-        - Resets per-turn action counts
-        - Clears used keywords
+        Reset action counters and turn-specific tracking for an entity.
 
         Args:
             entity_id: The identifier of the entity
@@ -283,9 +235,9 @@ class ActionSystem:
         self.action_counters[entity_id] = {
             ActionType.PRIMARY: 1,
             ActionType.SECONDARY: 1,
-            ActionType.FREE: float('inf'),  # Effectively unlimited
-            ActionType.LIMITED_FREE: float('inf'),  # Base availability, specific limits handled by per_turn_limit
-            ActionType.REACTION: 1,  # one reaction per turn baseline
+            ActionType.FREE: float('inf'),           # effectively unlimited
+            ActionType.LIMITED_FREE: float('inf'),   # limit handled by per_turn_limit + custom logic if needed
+            ActionType.REACTION: 1,                  # baseline: one reaction per round
         }
         # Apply condition system action slot modifiers
         cond_sys = getattr(self.game_state, 'condition_system', None)
@@ -331,30 +283,45 @@ class ActionSystem:
         if entity_id not in self.action_counters:
             self.reset_counters(entity_id)
 
-        # Use action_params for the action-specific availability check
+        # Use action_params to pass target, positions, weapons, etc. to availability logic
         if not action.is_available(entity_id, self.game_state, **action_params):
+            print(f"[ActionSystem][DEBUG] is_available=False for {action.name}")
             return False
 
-        count = self.per_turn_action_counts.get(entity_id, {}).get(action.name, 0)
-        if action.per_turn_limit is not None and count >= action.per_turn_limit:
+        # Check per-turn limits
+        per_turn_map = self.per_turn_action_counts.setdefault(entity_id, {})
+        used_count = per_turn_map.get(action.name, 0)
+        if used_count >= action.per_turn_limit:
+            print(f"[ActionSystem][DEBUG] per-turn limit reached for {action.name} ({used_count}/{action.per_turn_limit})")
             return False
 
-        if self.cooldowns.get(entity_id, {}).get(action.name, 0) > 0:
+        # Check cooldowns
+        cd_map = self.cooldowns.setdefault(entity_id, {})
+        cd_val = cd_map.get(action.name, 0)
+        if cd_val and cd_val > 0:
+            print(f"[ActionSystem][DEBUG] cooldown active for {action.name}: {cd_val}")
             return False
 
-        used = self.used_keywords.get(entity_id, set())
+        # Keyword incompatibilities
+        used = self.used_keywords.setdefault(entity_id, set())
         if any(kw in used for kw in action.incompatible_keywords):
+            print(f"[ActionSystem][DEBUG] incompatible keyword in use; used={used}, incompatible={action.incompatible_keywords}")
             return False
 
-        if action.action_type == ActionType.LIMITED_FREE:
-            # For limited free, per_turn_limit is the primary constraint.
-            # If it costs a secondary action after first use, that's handled during perform_action.
-            # Here, we just check if it's generally allowed by limits.
-            return True  # Specific per_turn_limit already checked
-        elif action.action_type == ActionType.FREE:
+        # Slot availability (robust to duplicated Enum classes)
+        if self._is_free_like(action):
             return True
-        else:  # PRIMARY or SECONDARY
-            return self.action_counters[entity_id].get(action.action_type, 0) > 0
+        else:
+            # exact enum key first
+            if self.action_counters[entity_id].get(action.action_type, 0) > 0:
+                return True
+            # value-match fallback (handles duplicated Enum classes across modules)
+            needed_val = self._normalize_action_type(action.action_type)
+            for k, v in self.action_counters[entity_id].items():
+                if self._normalize_action_type(k) == needed_val and v > 0:
+                    return True
+            print(f"[ActionSystem][DEBUG] no action points for {action.name} type {action.action_type}")
+            return False
 
     def perform_action(self, entity_id: str, action: Action, **action_params) -> Any:
         """
@@ -370,24 +337,21 @@ class ActionSystem:
 
         Args:
             entity_id: The identifier of the entity performing the action
-            action: The action to perform
-            **action_params: Additional parameters specific to this action instance
+            action: The action to execute
+            **action_params: Parameters for the action execution
 
         Returns:
-            Any: The result returned by the action's execute method
+            Any: The result of the action's execute function
         """
-        # Note: can_perform_action should have been called with action_params before this.
-        # This method now focuses on execution and counter updates.
+        # Update per-turn count
+        per_turn_map = self.per_turn_action_counts.setdefault(entity_id, {})
+        per_turn_map[action.name] = per_turn_map.get(action.name, 0) + 1
 
-        # Per-turn count update
-        self.per_turn_action_counts.setdefault(entity_id, {})
-        self.per_turn_action_counts[entity_id][action.name] = \
-            self.per_turn_action_counts[entity_id].get(action.name, 0) + 1
-
+        # Set cooldown if any
         if action.cooldown > 0:
-            self.cooldowns.setdefault(entity_id, {})[
-                action.name] = action.cooldown + 1  # Cooldown is for N future rounds
+            self.cooldowns.setdefault(entity_id, {})[action.name] = action.cooldown
 
+        # Consume action points according to type
         if action.action_type == ActionType.LIMITED_FREE:
             # Logic for limited free actions that might consume a secondary action slot
             # This depends on specific game rules (e.g., first is free, subsequent cost secondary)
@@ -402,14 +366,34 @@ class ActionSystem:
             # self.limited_free_counters.setdefault(entity_id, {})[action.name] = current_uses + 1
             pass  # Simplified: per_turn_limit is the main check via can_perform_action
         elif action.action_type == ActionType.REACTION:
-            self.action_counters[entity_id][action.action_type] -= 1
-        elif action.action_type != ActionType.FREE:  # PRIMARY or SECONDARY
-            self.action_counters[entity_id][action.action_type] -= 1
+            # prefer exact key; else fallback by value
+            if self.action_counters[entity_id].get(action.action_type, 0) > 0:
+                self.action_counters[entity_id][action.action_type] -= 1
+            else:
+                needed_val = self._normalize_action_type(action.action_type)
+                for k in list(self.action_counters[entity_id].keys()):
+                    if self._normalize_action_type(k) == needed_val and self.action_counters[entity_id][k] > 0:
+                        self.action_counters[entity_id][k] -= 1
+                        break
+        elif not self._is_free_like(action):  # PRIMARY / SECONDARY
+            if self.action_counters[entity_id].get(action.action_type, 0) > 0:
+                self.action_counters[entity_id][action.action_type] -= 1
+            else:
+                needed_val = self._normalize_action_type(action.action_type)
+                for k in list(self.action_counters[entity_id].keys()):
+                    if self._normalize_action_type(k) == needed_val and self.action_counters[entity_id][k] > 0:
+                        self.action_counters[entity_id][k] -= 1
+                        break
 
         self.used_keywords.setdefault(entity_id, set()).update(action.keywords)
 
         # Pass entity_id, game_state, and action_params to the action's execute method
         result = action.execute(entity_id, self.game_state, **action_params)
 
-        # Removed event publishing from here, will be done in handle_action_requested
+        # Publish here as safety if direct calls bypass handle_action_requested
+        if self.event_bus:
+            try:
+                self.event_bus.publish("action_performed", entity_id=entity_id, action_name=action.name, result=result)
+            except Exception as e:
+                print(f"[ActionSystem][WARN] Failed to publish action_performed (direct): {e}")
         return result  # Return the actual result from action execution

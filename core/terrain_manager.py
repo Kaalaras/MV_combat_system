@@ -1,12 +1,18 @@
 from typing import Dict, Tuple, List, Optional, Set, Any, Callable # Ensure all are present
 from utils.logger import log_calls
 from tqdm import tqdm
+import time
 
 # Event constants
 EVT_TERRAIN_CHANGED = "terrain_changed"
 EVT_ENTITY_MOVED = "entity_moved"
 EVT_WALL_ADDED = "wall_added"
 EVT_WALL_REMOVED = "wall_removed"
+# New terrain effect events
+EVT_TERRAIN_EFFECT_ADDED = "terrain_effect_added"
+EVT_TERRAIN_EFFECT_REMOVED = "terrain_effect_removed"
+EVT_TERRAIN_EFFECT_TRIGGER = "terrain_effect_trigger"  # e.g. dangerous tile entered
+EVT_TERRAIN_CURRENT_MOVED = "terrain_current_moved"     # entity displaced by current
 
 # --- Terrain Effect constants ---
 EFFECT_DIFFICULT = "difficult"
@@ -15,9 +21,11 @@ EFFECT_IMPASSABLE_SOLID = "impassable_solid"  # cannot enter
 EFFECT_IMPASSABLE_VOID = "impassable_void"    # cannot end movement (future: allow jump)
 EFFECT_DANGEROUS = "dangerous"
 EFFECT_VERY_DANGEROUS = "very_dangerous"      # center tile (aura handled separately)
+EFFECT_DANGEROUS_AURA = "dangerous_aura"      # aura tiles around very dangerous center
 EFFECT_CURRENT = "current"                    # flowing movement each round
 EFFECT_DARK_LOW = "dark_low"
 EFFECT_DARK_TOTAL = "dark_total"
+EFFECT_GRADIENT_KEY = 'gradient'
 
 
 class Terrain:
@@ -179,20 +187,23 @@ class Terrain:
                 print(f"Cannot walk to ({next_x}, {next_y}), there's a wall")
             ```
         """
-        if not self.is_valid_position(x, y, entity_width, entity_height):  # Must be valid first
+        # Modified: void tiles now non-walkable (cannot step onto), solid impassable also blocked.
+        if not self.is_valid_position(x, y, entity_width, entity_height):
             return False
-
-        # Check if any cell in the entity's footprint is a wall
         for dy in range(entity_height):
             for dx in range(entity_width):
                 cx, cy = x+dx, y+dy
-                if (cx, cy) in self.walls:
+                if (cx,cy) in self.walls:
                     return False
-                if self._is_impassable(cx, cy):
+                if self._is_impassable_solid(cx,cy) or self._is_impassable_void(cx,cy):
                     return False
         return True
 
     @log_calls
+
+    def is_walkable_traverse(self, x:int, y:int, entity_width:int=1, entity_height:int=1) -> bool:
+        """Traversal variant kept equal to is_walkable for safety (no void pass-through)."""
+        return self.is_walkable(x, y, entity_width, entity_height)
     def is_occupied(self, x: int, y: int, entity_width: int = 1, entity_height: int = 1,
                     entity_id_to_ignore: Optional[str] = None, check_walls: bool = False) -> bool:
         """
@@ -391,8 +402,8 @@ class Terrain:
             "new_position": (new_x, new_y),
             "size": (entity_width, entity_height)
         })
-
-        # The entity's own PositionComponent (x,y) is updated by the MovementSystem
+        # Trigger enter effects on anchor tile (only once per move)
+        self.handle_entity_enter(entity_id, new_x, new_y)
         return True
 
     @log_calls
@@ -563,126 +574,71 @@ class Terrain:
 
     @log_calls
     def precompute_paths(self):
-        """
-        Precompute shortest paths between all walkable cell pairs using BFS.
-
-        This method calculates and stores paths between all walkable cells for quick access,
-        significantly improving performance for pathfinding operations.
-
-        Note: This can be memory-intensive for large terrains. The result is stored
-        in self.path_cache as a dictionary mapping (start_pos, end_pos) to path lists.
-
-        Example:
-            ```python
-            # Precompute paths at terrain initialization
-            terrain = Terrain(50, 50)
-
-            # Set up walls, obstacles etc.
-            terrain.add_wall(10, 10)
-            terrain.add_wall(11, 10)
-
-            # Precompute paths after all obstacles are set
-            terrain.precompute_paths()
-
-            # Later, retrieve cached path
-            start_pos = (1, 1)
-            end_pos = (20, 20)
-            path = terrain.path_cache.get((start_pos, end_pos))
-
-            if path:
-                print(f"Found cached path with {len(path)} steps")
-            ```
-        """
-        from collections import deque
-        # path_cache type hint was added in __init__
-        print("[Terrain] Precomputing paths...")
-        for start in tqdm(self.walkable_cells, desc="Paths", unit="start"):
-            visited: Dict[Tuple[int, int], Optional[Tuple[int, int]]] = {start: None} # Corrected type for visited
-            queue = deque([start])
-            while queue:
-                current = queue.popleft()
-                x, y = current
-                neighbors = [(x + 1, y), (x - 1, y), (x, y + 1), (x, y - 1)]
-                for neighbor in neighbors:
-                    if neighbor in self.walkable_cells and neighbor not in visited and neighbor not in self.walls:
-                        visited[neighbor] = current # current is Tuple[int, int], fits Optional[Tuple[int, int]]
-                        queue.append(neighbor)
-            # Reconstruct paths from start to every reachable cell
-            for end in visited:
-                if end == start:
+        start_t = time.perf_counter()
+        import heapq
+        self.path_cache.clear()
+        print('[Terrain] Precomputing paths (Dijkstra)...')
+        for start in tqdm(self.walkable_cells, desc='Paths', unit='start'):
+            if start in self.walls or self._is_impassable_solid(*start) or self._is_impassable_void(*start):
+                continue
+            dist: Dict[Tuple[int,int], int] = {start:0}
+            prev: Dict[Tuple[int,int], Tuple[int,int]] = {}
+            heap: List[Tuple[int,Tuple[int,int]]] = [(0,start)]
+            while heap:
+                d,(x,y) = heapq.heappop(heap)
+                if d != dist[(x,y)]:
                     continue
-                path: List[Tuple[int, int]] = []
-                curr_step = end
-                while curr_step is not None: # Iterate back using the predecessor chain
-                    path.append(curr_step)
-                    curr_step = visited[curr_step] # Get the predecessor
-                path.reverse() # Reverse to get path from start to end
-                if path and path[0] == start: # Ensure path starts with 'start'
-                    self.path_cache[(start, end)] = path
+                for dx,dy in [(1,0),(-1,0),(0,1),(0,-1)]:
+                    nx,ny = x+dx,y+dy
+                    if (nx,ny) not in self.walkable_cells: continue
+                    if (nx,ny) in self.walls: continue
+                    if self._is_impassable_solid(nx,ny) or self._is_impassable_void(nx,ny): continue
+                    step_cost = self.get_movement_cost(nx,ny)
+                    nd = d + step_cost
+                    if nd < dist.get((nx,ny), 10**9):
+                        dist[(nx,ny)] = nd
+                        prev[(nx,ny)] = (x,y)
+                        heapq.heappush(heap,(nd,(nx,ny)))
+            for end in dist:
+                if end == start: continue
+                if self._is_impassable_void(*end) or self._is_impassable_solid(*end):
+                    continue
+                path=[end]; cur=end
+                while cur!=start:
+                    cur=prev[cur]; path.append(cur)
+                path.reverse(); self.path_cache[(start,end)] = path
+        self.last_path_compute_seconds = time.perf_counter() - start_t
 
     @log_calls
     def precompute_reachable_tiles(self, move_distances=(7, 15)):
-        """
-        Precompute reachable tiles for each cell and each movement allowance.
-
-        For each walkable cell and movement distance, this method computes all
-        cells that can be reached within the specified movement range, accounting
-        for walls and obstacles.
-
-        Args:
-            move_distances: Tuple of movement distances to calculate for, typically
-                           standard move and sprint distances (default: (7, 15))
-
-        Note: Results are stored in self.reachable_tiles_cache as a dictionary
-        mapping (start_pos, move_distance) to sets of reachable positions.
-
-        Example:
-            ```python
-            # Precompute standard and sprint movement ranges
-            terrain.precompute_reachable_tiles()
-
-            # Precompute custom movement distances
-            terrain.precompute_reachable_tiles(move_distances=(5, 10, 20))
-
-            # Later, get tiles reachable from a position with standard movement
-            start_pos = (5, 5)
-            standard_movement = 7
-
-            reachable_tiles = terrain.reachable_tiles_cache.get((start_pos, standard_movement), set())
-
-            # Use for highlighting movement range or validating moves
-            for tile_pos in reachable_tiles:
-                ui.highlight_move_range(tile_pos[0], tile_pos[1])
-            ```
-        """
-        # Updated to consider difficult terrain costs using a Dijkstra-like expansion
+        start_t = time.perf_counter()
         from heapq import heappush, heappop
         self.reachable_tiles_cache = {}
-        print("[Terrain] Precomputing reachable tiles (cost aware)...")
+        print('[Terrain] Precomputing reachable tiles (cost aware)...')
         for move_distance in move_distances:
-            for start in tqdm(self.walkable_cells, desc=f"Reachable (move={move_distance})", unit="start"):
+            for start in tqdm(self.walkable_cells, desc=f'Reachable (move={move_distance})', unit='start'):
+                if self._is_impassable_solid(*start) or self._is_impassable_void(*start):
+                    continue
                 best: Dict[Tuple[int,int], int] = {start:0}
                 heap: List[Tuple[int,Tuple[int,int]]] = [(0,start)]
                 reachable: Set[Tuple[int,int]] = set()
                 while heap:
-                    dist,(x,y) = heappop(heap)
-                    if dist>move_distance:
-                        continue
+                    dist,(x,y)=heappop(heap)
+                    if dist>move_distance: continue
                     reachable.add((x,y))
-                    for dx,dy in [(-1,0),(1,0),(0,-1),(0,1)]: # Adjacent cells
+                    for dx,dy in [(-1,0),(1,0),(0,-1),(0,1)]:
                         nx,ny = x+dx,y+dy
-                        if (nx,ny) not in self.walkable_cells:
-                            continue
-                        if self._is_impassable(nx,ny):
-                            continue
-                        step = self.get_movement_cost(nx,ny)
-                        nd = dist + step
-                        if nd>move_distance:
-                            continue
-                        if nd < best.get((nx,ny), 10**9):
+                        if (nx,ny) not in self.walkable_cells: continue
+                        if (nx,ny) in self.walls: continue
+                        if self._is_impassable_solid(nx,ny) or self._is_impassable_void(nx,ny): continue
+                        step=self.get_movement_cost(nx,ny)
+                        nd=dist+step
+                        if nd>move_distance: continue
+                        if nd < best.get((nx,ny),10**9):
                             best[(nx,ny)] = nd
                             heappush(heap,(nd,(nx,ny)))
-                self.reachable_tiles_cache[(start, move_distance)] = reachable
+                self.reachable_tiles_cache[(start,move_distance)] = reachable
+        self.last_reachable_compute_seconds = time.perf_counter() - start_t
 
     def world_to_cell(self, coord):
         return (int(coord[0]), int(coord[1]))
@@ -694,22 +650,177 @@ class Terrain:
         # Placeholder: optimizer not initialized in tests; avoid AttributeError
         return
 
+    def add_effect(self, name: str, positions: List[Tuple[int,int]], **data) -> None:
+        """Generic effect adder. Positions are tiles to mark.
+        data merged into effect dict {name, data}.
+        Publishes EVT_TERRAIN_EFFECT_ADDED once (batched) with summary."""
+        added: List[Tuple[int,int]] = []
+        for pos in positions:
+            if not self.is_valid_position(pos[0], pos[1]):
+                continue
+            eff_list = self.effects_by_tile.setdefault(pos, [])
+            eff_list.append({'name': name, 'data': data.copy()})
+            added.append(pos)
+        if added:
+            self._publish(EVT_TERRAIN_EFFECT_ADDED, {"name": name, "positions": tuple(added), "data": data})
+            # terrain changes affecting movement/path or LOS caches -> rebuild minimal
+            if name in (EFFECT_DIFFICULT, EFFECT_VERY_DIFFICULT, EFFECT_IMPASSABLE_SOLID, EFFECT_IMPASSABLE_VOID, EFFECT_DARK_LOW, EFFECT_DARK_TOTAL,
+                        EFFECT_DANGEROUS, EFFECT_VERY_DANGEROUS, EFFECT_DANGEROUS_AURA):
+                self.rebuild_optimizer_wall_matrix()
+                if hasattr(self, 'precompute_paths'):
+                    self.precompute_paths()
+                    self.precompute_reachable_tiles()
+            self.game_state.bump_terrain_version() if getattr(self, 'game_state', None) else None
+
+    def remove_effect(self, predicate: Callable[[dict], bool], positions: Optional[List[Tuple[int,int]]] = None) -> None:
+        """Remove effects matching predicate at given positions (or all tiles if positions None)."""
+        targets = positions if positions is not None else list(self.effects_by_tile.keys())
+        removed_total: List[Tuple[int,int]] = []
+        for pos in targets:
+            effs = self.effects_by_tile.get(pos)
+            if not effs:
+                continue
+            before = len(effs)
+            effs = [e for e in effs if not predicate(e)]
+            if effs:
+                self.effects_by_tile[pos] = effs
+            else:
+                del self.effects_by_tile[pos]
+            if len(effs) != before:
+                removed_total.append(pos)
+        if removed_total:
+            self._publish(EVT_TERRAIN_EFFECT_REMOVED, {"positions": tuple(removed_total)})
+            self.game_state.bump_terrain_version() if getattr(self, 'game_state', None) else None
+
+    # Convenience wrappers -------------------------------------------------
+    def add_difficult(self, positions: List[Tuple[int,int]]):
+        self.add_effect(EFFECT_DIFFICULT, positions)
+    def add_very_difficult(self, positions: List[Tuple[int,int]]):
+        self.add_effect(EFFECT_VERY_DIFFICULT, positions)
+    def add_impassable_solid(self, positions: List[Tuple[int,int]]):
+        self.add_effect(EFFECT_IMPASSABLE_SOLID, positions)
+    def add_impassable_void(self, positions: List[Tuple[int,int]]):
+        self.add_effect(EFFECT_IMPASSABLE_VOID, positions)
+    def add_dangerous(self, positions: List[Tuple[int,int]], difficulty: int = 2, damage: int = 1, aggravated: bool = False):
+        self.add_effect(EFFECT_DANGEROUS, positions, difficulty=difficulty, damage=damage, aggravated=aggravated)
+    def add_very_dangerous(self, center: Tuple[int,int], radius: int = 3, difficulty: int = 3, damage: int = 1, aggravated: bool = False, gradient: bool = False):
+        self.add_effect(EFFECT_VERY_DANGEROUS, [center], difficulty=difficulty, damage=damage, aggravated=aggravated, radius=radius)
+        cx, cy = center; aura_tiles: List[Tuple[int,int]] = []
+        for dx in range(-radius, radius+1):
+            for dy in range(-radius, radius+1):
+                if dx==0 and dy==0: continue
+                ax,ay = cx+dx, cy+dy
+                if not self.is_valid_position(ax,ay): continue
+                if abs(dx)+abs(dy) <= radius:
+                    aura_tiles.append((ax,ay))
+        if aura_tiles:
+            self.add_effect(EFFECT_DANGEROUS_AURA, aura_tiles, source=center, difficulty=difficulty, damage=damage, aggravated=aggravated, radius=radius, gradient=gradient)
+    def add_current(self, positions: List[Tuple[int,int]], dx: int, dy: int, magnitude: int = 1):
+        # dx,dy define direction unit (or any vector). magnitude cells moved each round (can be overridden per-tile in data later)
+        self.add_effect(EFFECT_CURRENT, positions, dx=dx, dy=dy, magnitude=magnitude)
+    def add_dark_low(self, positions: List[Tuple[int,int]]):
+        self.add_effect(EFFECT_DARK_LOW, positions)
+    def add_dark_total(self, positions: List[Tuple[int,int]]):
+        self.add_effect(EFFECT_DARK_TOTAL, positions)
+
+    # Query helpers --------------------------------------------------------
+    def get_effects(self, x:int, y:int) -> List[dict]:
+        return self.effects_by_tile.get((x,y), [])
+    def has_effect(self, x:int, y:int, name: str) -> bool:
+        return any(eff.get('name') == name for eff in self.effects_by_tile.get((x,y), []))
+
+    def handle_entity_enter(self, entity_id: str, x: int, y: int):
+        # Aggregate strongest effects across the entity footprint, then publish one event per category.
+        if self.game_state:
+            w,h = self.game_state.get_entity_size(entity_id)
+        else:
+            w=h=1
+        tiles = [(x+dx, y+dy) for dx in range(w) for dy in range(h)]
+        best_vdanger = None
+        best_danger = None
+        best_aura = None
+        for tx,ty in tiles:
+            for eff in self.get_effects(tx,ty):
+                nm = eff.get('name'); data = eff.get('data', {}) or {}
+                if nm == EFFECT_VERY_DANGEROUS:
+                    best_vdanger = data
+                elif nm == EFFECT_DANGEROUS:
+                    cur = best_danger or {}
+                    if data.get('difficulty',0) > cur.get('difficulty',0) or data.get('damage',0) > cur.get('damage',0):
+                        best_danger = data
+                elif nm == EFFECT_DANGEROUS_AURA:
+                    if data.get('gradient'):
+                        # Prefer gradient aura with largest radius; if previous best was nongradient, prefer gradient.
+                        if (not best_aura) or (best_aura.get('gradient') and data.get('radius',0) > best_aura.get('radius',0)) or (not best_aura.get('gradient')):
+                            best_aura = data
+                    else:
+                        if not best_aura or (not best_aura.get('gradient') and data.get('intensity',0) > best_aura.get('intensity',0)):
+                            best_aura = data
+        if best_vdanger is not None:
+            self._publish(EVT_TERRAIN_EFFECT_TRIGGER, {
+                'entity_id': entity_id, 'position': (x,y), 'effect': EFFECT_VERY_DANGEROUS, 'auto_fail': True, **best_vdanger
+            })
+        if best_danger is not None:
+            self._publish(EVT_TERRAIN_EFFECT_TRIGGER, {
+                'entity_id': entity_id, 'position': (x,y), 'effect': EFFECT_DANGEROUS, **best_danger
+            })
+        if best_aura is not None:
+            self._publish(EVT_TERRAIN_EFFECT_TRIGGER, {
+                'entity_id': entity_id, 'position': (x,y), 'effect': EFFECT_DANGEROUS_AURA, **best_aura
+            })
     def _is_impassable(self, x:int, y:int) -> bool:
-        # Minimal implementation: look for EFFECT_IMPASSABLE_SOLID or VOID effects on tile
         effects = self.effects_by_tile.get((x,y), [])
         for eff in effects:
-            if eff.get('name') in (EFFECT_IMPASSABLE_SOLID, EFFECT_IMPASSABLE_VOID):
+            if eff.get('name') in (EFFECT_IMPASSABLE_SOLID, EFFECT_IMPASSABLE_VOID):  # VERY_DANGEROUS now enterable
+                return True
+        return False
+
+    def _is_impassable_solid(self, x:int, y:int) -> bool:
+        effects = self.effects_by_tile.get((x,y), [])
+        for eff in effects:
+            if eff.get('name') == EFFECT_IMPASSABLE_SOLID:
+                return True
+        return False
+
+    def _is_impassable_void(self, x:int, y:int) -> bool:
+        effects = self.effects_by_tile.get((x,y), [])
+        for eff in effects:
+            if eff.get('name') == EFFECT_IMPASSABLE_VOID:
                 return True
         return False
 
     def get_movement_cost(self, x:int, y:int) -> int:
-        # Minimal implementation: difficult terrain doubles cost (2), very difficult triples (3)
         effects = self.effects_by_tile.get((x,y), [])
         cost = 1
+        max_aura_intensity = 0
+        max_aura_radius = 0
+        aura_has_gradient = False
+        aura_source = None
         for eff in effects:
-            name = eff.get('name')
-            if name == EFFECT_DIFFICULT:
+            nm = eff.get('name'); data = eff.get('data', {}) or {}
+            if nm == EFFECT_DIFFICULT:
                 cost = max(cost,2)
-            elif name == EFFECT_VERY_DIFFICULT:
+            elif nm == EFFECT_VERY_DIFFICULT:
                 cost = max(cost,3)
+            elif nm == EFFECT_DANGEROUS:
+                cost = max(cost,4)
+            elif nm == EFFECT_VERY_DANGEROUS:
+                cost = max(cost,12)
+            elif nm == EFFECT_DANGEROUS_AURA:
+                if data.get('gradient'):
+                    aura_has_gradient = True
+                    radius = int(data.get('radius',3))
+                    src = data.get('source')
+                    if isinstance(src,(list,tuple)) and len(src)==2:
+                        aura_source = src
+                        max_aura_radius = max(max_aura_radius, radius)
+                else:
+                    intensity = int(data.get('intensity',1))
+                    max_aura_intensity = max(max_aura_intensity, intensity)
+        # Apply aura effect
+        if aura_has_gradient and aura_source is not None:
+            dist = abs(x - aura_source[0]) + abs(y - aura_source[1])
+            cost = max(cost, min(6, 4 + max(0, max_aura_radius - dist)))
+        elif max_aura_intensity > 0:
+            cost = max(cost, min(6, 3 + max_aura_intensity))
         return cost

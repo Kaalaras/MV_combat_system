@@ -31,11 +31,12 @@ from ecs.systems.turn_order_system import TurnOrderSystem
 from ecs.systems.action_system import ActionSystem
 from ecs.systems.facing_system import FacingSystem
 from ecs.systems.ai.main import BasicAISystem  # Updated to use refactored AI system
-from ecs.actions.movement_actions import StandardMoveAction, SprintAction
+from ecs.actions.movement_actions import StandardMoveAction, SprintAction, JumpAction
 from ecs.actions.attack_actions import RegisteredAttackAction
 from ecs.actions.aoe_attack_actions import RegisteredAoEAttackAction
 from ecs.actions.turn_actions import EndTurnAction
 from tests.manual.battle_map_utils import assemble_gif
+from core.terrain_effect_system import TerrainEffectSystem
 
 
 class EntitySpec:
@@ -127,6 +128,9 @@ def _deprecated_initialize_game(entity_specs, grid_size, max_rounds=200, map_dir
     prep_manager = PreparationManager(game_state)
     terrain = Terrain(width=grid_size, height=grid_size, game_state=game_state)
     game_state.set_terrain(terrain)
+    # Terrain effects system (currents, hazards)
+    terrain_effect_system = TerrainEffectSystem(game_state, terrain, event_bus)
+    game_state.set_terrain_effect_system(terrain_effect_system)
 
     # --- Entity Creation ---
     all_ids = []
@@ -201,12 +205,14 @@ def _deprecated_initialize_game(entity_specs, grid_size, max_rounds=200, map_dir
     # Register generic actions available to all
     standard_move = StandardMoveAction(movement)
     sprint_move = SprintAction(movement)
+    jump_move = JumpAction(movement)
     attack_action = RegisteredAttackAction()
     aoe_attack_action = RegisteredAoEAttackAction()
     end_turn_action = EndTurnAction()
     for entity_id in all_ids:
         action_system.register_action(entity_id, standard_move)
         action_system.register_action(entity_id, sprint_move)
+        action_system.register_action(entity_id, jump_move)
         action_system.register_action(entity_id, attack_action)
         action_system.register_action(entity_id, aoe_attack_action)
         action_system.register_action(entity_id, end_turn_action)
@@ -241,6 +247,7 @@ def _deprecated_initialize_game(entity_specs, grid_size, max_rounds=200, map_dir
         "game_system": game_system,
         "event_bus": event_bus,
         "terrain": terrain,
+        "terrain_effect_system": terrain_effect_system,
         "all_ids": all_ids,
         "max_rounds": max_rounds
     }
@@ -294,6 +301,9 @@ def initialize_game(*, entity_specs: List[EntitySpec], grid_size: int, max_round
     event_bus = EventBus(); game_state.set_event_bus(event_bus)
     prep_manager = PreparationManager(game_state)
     terrain = Terrain(width=grid_size, height=grid_size, game_state=game_state); game_state.set_terrain(terrain)
+    # Terrain effects system (currents, hazards)
+    terrain_effect_system = TerrainEffectSystem(game_state, terrain, event_bus)
+    game_state.set_terrain_effect_system(terrain_effect_system)
     all_ids = []
     for idx, spec in enumerate(entity_specs):
         char = DefautHuman(); char.set_team(spec.team); char.is_ai_controlled = True; char.ai_script = "basic"; char.hunger = 0
@@ -326,10 +336,11 @@ def initialize_game(*, entity_specs: List[EntitySpec], grid_size: int, max_round
     turn_order = TurnOrderSystem(game_state)
     # Actions
     prep_manager.action_system = action_system; prep_manager.initialize_character_actions()
-    std = StandardMoveAction(movement); spr = SprintAction(movement); atk = RegisteredAttackAction(); aoe = RegisteredAoEAttackAction(); end = EndTurnAction()
+    std = StandardMoveAction(movement); spr = SprintAction(movement); jmp = JumpAction(movement); atk = RegisteredAttackAction(); aoe = RegisteredAoEAttackAction(); end = EndTurnAction()
     for eid in all_ids:
         action_system.register_action(eid, std)
         action_system.register_action(eid, spr)
+        action_system.register_action(eid, jmp)
         action_system.register_action(eid, atk)
         action_system.register_action(eid, aoe)
         action_system.register_action(eid, end)

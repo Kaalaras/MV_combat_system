@@ -27,21 +27,20 @@ class GameState:
     game_state = GameState()
 
     # Initialize systems and set references
-    event_bus = EventBus()
-    movement_system = MovementSystem()
-    terrain = TerrainGrid(width=100, height=100)
-
-    game_state.set_event_bus(event_bus)
-    game_state.set_movement_system(movement_system)
+    terrain = TerrainGrid(100, 100)
     game_state.set_terrain(terrain)
 
-    # Add entities with components
-    player_components = {
-        "position": Position(x=10, y=20),
-        "character_ref": CharacterRef(character=Character(team="blue")),
-        "sprite": Sprite(image_path="player.png")
-    }
-    game_state.add_entity("player1", player_components)
+    event_bus = EventBus()
+    game_state.set_event_bus(event_bus)
+
+    movement_system = MovementSystem()
+    game_state.set_movement_system(movement_system)
+
+    # Add an entity
+    game_state.add_entity("player1", {
+        "position": PositionComponent(10, 10),
+        "health": HealthComponent(100)
+    })
 
     # Update team assignments based on entity components
     game_state.update_teams()
@@ -63,8 +62,10 @@ class GameState:
         self.movement_turn_usage: Dict[str, Dict[str, Any]] = {}  # {'distance':int}
         self.condition_system: Any = None  # New: reference to ConditionSystem
         self.cover_system: Any = None  # New: reference to CoverSystem
+        self.terrain_effect_system: Any = None  # Reference to TerrainEffectSystem
         self.terrain_version = 0  # increments on wall add/remove
         self.blocker_version = 0  # increments on blocking entity move / cover changes
+        self.vision_system: Optional[Any] = None  # Optional: VisionSystem auto-wired on set_terrain
         # Add other global state or system references as needed
         # e.g., self.action_system_ref for quick access if needed by some non-ECS logic
 
@@ -74,21 +75,29 @@ class GameState:
 
         Args:
             entity_id: Unique identifier for the entity
-            components: Dictionary of component name -> component instance
+            components: Dictionary of components to associate with the entity
 
         Returns:
             None
 
         Example:
             ```python
-            # Create new entity with position and health components
-            components = {
-                "position": {"x": 10, "y": 20},
-                "health": {"current": 100, "max": 100}
-            }
-            game_state.add_entity("enemy1", components)
+            # Add a player entity
+            game_state.add_entity("player1", {
+                "position": PositionComponent(x=10, y=10),
+                "health": HealthComponent(max_health=100, current_health=100),
+                "inventory": InventoryComponent(items=[])
+            })
             ```
         """
+        # Validate that the entity ID is unique
+        if entity_id in self.entities:
+            raise ValueError(f"Entity with ID '{entity_id}' already exists.")
+
+        # Optionally validate components (if there's a schema)
+        # For simplicity, we assume components are already properly formed
+
+        # Add the entity and its components to the dictionary
         self.entities[entity_id] = components
 
     def get_entity(self, entity_id: str) -> Optional[Dict[str, Any]]:
@@ -126,62 +135,61 @@ class GameState:
 
         Example:
             ```python
-            # Remove an enemy that has been defeated
-            game_state.remove_entity("enemy42")
+            # Remove an entity when it is destroyed
+            game_state.remove_entity("ogre1")
             ```
         """
         if entity_id in self.entities:
             del self.entities[entity_id]
-        # else:
-        # print(f"Warning: Entity {entity_id} not found in GameState during remove.")
+        # If the entity had a mapped position in a terrain grid, update that too if needed
 
-    def get_teams(self) -> Dict[str, List[str]]:
+    def get_component(self, entity_id: str, component_name: str) -> Optional[Any]:
         """
-        Get the current team assignments.
+        Retrieve a specific component from an entity.
+
+        Args:
+            entity_id: The unique identifier for the entity
+            component_name: The name of the component to retrieve
 
         Returns:
-            Dictionary mapping team identifiers to lists of entity IDs
+            The requested component if available, None otherwise
 
         Example:
             ```python
-            # Check which entities belong to each team
-            teams = game_state.get_teams()
-            blue_team_entities = teams.get("blue", [])
-            red_team_entities = teams.get("red", [])
+            # Retrieve the position component of an entity
+            position = game_state.get_component("player1", "position")
+            if position:
+                print(f"Player is at ({position.x}, {position.y})")
             ```
         """
-        return self.teams
+        entity = self.get_entity(entity_id)
+        if entity:
+            return entity.get(component_name)
+        return None
 
-    def update_teams(self) -> None:
+    def set_component(self, entity_id: str, component_name: str, component_value: Any) -> None:
         """
-        Update team assignments based on current entity character components.
+        Set (or replace) a specific component on an entity.
 
-        This method reads the team attribute from each entity's character_ref component
-        and updates the teams dictionary accordingly.
+        Args:
+            entity_id: The unique identifier for the entity
+            component_name: The name of the component to set
+            component_value: The new value for the component
 
         Returns:
             None
 
         Example:
             ```python
-            # After adding/removing entities or changing team affiliations
-            game_state.update_teams()
-
-            # Now the teams collections are up-to-date
-            red_team = game_state.teams.get("red", [])
+            # Update a health component after taking damage
+            health = game_state.get_component("player1", "health")
+            if health:
+                health.current_health -= 10
+                game_state.set_component("player1", "health", health)
             ```
         """
-        teams: Dict[str, List[str]] = {}
-        for entity_id, entity_components in self.entities.items():
-            # Assuming 'character_ref' component holds a Character object with a 'team' attribute
-            char_ref_comp = entity_components.get("character_ref")
-            if char_ref_comp:
-                character = getattr(char_ref_comp, "character", None)
-                if character:
-                    team = getattr(character, "team", None)
-                    if team is not None:
-                        teams.setdefault(str(team), []).append(entity_id)
-        self.teams = teams
+        if entity_id in self.entities:
+            self.entities[entity_id][component_name] = component_value
 
     def set_terrain(self, terrain: Any) -> None:
         """
@@ -202,22 +210,28 @@ class GameState:
             ```
         """
         self.terrain = terrain
+        # Auto-wire vision system if missing
+        if self.vision_system is None:
+            try:
+                from core.vision_system import VisionSystem
+                self.vision_system = VisionSystem(self, terrain)
+            except Exception:
+                self.vision_system = None
 
     def set_event_bus(self, event_bus: Any) -> None:
         """
-        Set the event bus system reference for the game.
+        Set the event bus for cross-system event handling.
 
         Args:
-            event_bus: Event bus instance for handling game events
+            event_bus: The event bus instance
 
         Returns:
             None
 
         Example:
             ```python
-            # Create and set event bus
-            event_bus = EventBus()
-            game_state.set_event_bus(event_bus)
+            # Connect event bus to the game
+            game_state.set_event_bus(EventBus())
 
             # Now systems can access the event bus through game state
             # game_systems.combat.handle_combat(entity1, entity2, game_state.event_bus)
@@ -253,19 +267,7 @@ class GameState:
         Set the condition system reference for the game.
 
         Args:
-            condition_system: Condition system instance for managing timed conditions
-
-        Returns:
-            None
-
-        Example:
-            ```python
-            # Create and set condition system
-            condition_system = ConditionSystem()
-            game_state.set_condition_system(condition_system)
-
-            # Now the game state has a reference to the condition system
-            ```
+            condition_system: Condition system instance
         """
         self.condition_system = condition_system
 
@@ -274,54 +276,39 @@ class GameState:
         Set the cover system reference for the game.
 
         Args:
-            cover_system: Cover system instance for managing entity cover states
-
-        Returns:
-            None
-
-        Example:
-            ```python
-            # Create and set cover system
-            cover_system = CoverSystem()
-            game_state.set_cover_system(cover_system)
-
-            # Now the game state has a reference to the cover system
-            ```
+            cover_system: Cover system instance
         """
         self.cover_system = cover_system
 
-    def get_component(self, entity_id: str, component_name: str) -> Optional[Any]:
+    def set_terrain_effect_system(self, tes: Any) -> None:
         """
-        Get a specific component for an entity.
+        Set the terrain effect system reference for the game.
+        """
+        self.terrain_effect_system = tes
 
-        Args:
-            entity_id: The unique identifier for the entity
-            component_name: Name of the component to retrieve
+    def update_teams(self) -> None:
+        """
+        Rebuild the mapping of teams to entity IDs based on current entity components.
 
         Returns:
-            The component if it exists for the entity, None otherwise
-
-        Example:
-            ```python
-            # Get the position component of an entity
-            position = game_state.get_component("player1", "position")
-            if position:
-                player_x, player_y = position.x, position.y
-            else:
-                print("Player has no position component")
-            ```
+            None
         """
-        entity = self.get_entity(entity_id)
-        if entity:
-            return entity.get(component_name)
-        return None
+        teams: Dict[str, List[str]] = {}
+        for eid, comps in self.entities.items():
+            cref = comps.get("character_ref")
+            if not cref:
+                continue
+            char = getattr(cref, 'character', None)
+            if not char:
+                continue
+            tm = getattr(char, 'team', None)
+            if tm is not None:
+                teams.setdefault(str(tm), []).append(eid)
+        self.teams = teams
 
     def get_entity_size(self, entity_id: str) -> tuple[int, int]:
         """
-        Get the width and height of an entity's footprint.
-
-        Args:
-            entity_id: The unique identifier for the entity
+        Retrieve the width and height of an entity's position (if any).
 
         Returns:
             Tuple (width, height) representing the entity's size in grid cells, default (1, 1)
@@ -339,6 +326,7 @@ class GameState:
             return getattr(pos_comp, 'width', 1), getattr(pos_comp, 'height', 1)
         return 1, 1  # Default size if entity doesn't exist or has no position
 
+    # Movement tracking --------------------------------------------------
     def reset_movement_usage(self, entity_id: str):
         """Reset per-turn movement tracking for an entity (called at turn start)."""
         self.movement_turn_usage[entity_id] = {"distance": 0}
@@ -358,16 +346,32 @@ class GameState:
     def bump_blocker_version(self):
         self.blocker_version += 1
 
-    # ------------------------------------------------------------------
-    # Convenience helpers (used by AI and other high-level systems)
-    # ------------------------------------------------------------------
-    def is_tile_occupied(self, x: int, y: int) -> bool:
-        """Return True if a single grid cell is occupied by an entity.
-        Thin wrapper over terrain.is_occupied for clarity / decoupling.
-        Walls are handled separately via movement/terrain walkability checks."""
-        terrain = getattr(self, 'terrain', None)
-        if not terrain:
+    # Optional helpers to apply lethal/cleanup logic
+    def kill_entity(self, entity_id: str, killer_id: Optional[str] = None, cause: str = 'unknown') -> bool:
+        ent = self.get_entity(entity_id)
+        if not ent:
             return False
-        # check_walls False: we only care about entity bodies here
-        return terrain.is_occupied(x, y, 1, 1, check_walls=False)
-    # ------------------------------------------------------------------
+        # Mark dead if there's a character; allow missing fields gracefully
+        cref = ent.get('character_ref')
+        char = getattr(cref, 'character', None) if cref else None
+        if char:
+            try:
+                setattr(char, 'is_dead', True)
+                # Max out health aggravated to ensure downstream checks consider entity dead
+                if hasattr(char, 'max_health') and hasattr(char, '_health_damage'):
+                    char._health_damage['aggravated'] = char.max_health
+                    char._health_damage['superficial'] = 0
+            except Exception:
+                pass
+        if hasattr(char, 'max_willpower') and hasattr(char, '_willpower_damage'):
+            try:
+                # Do not necessarily kill via willpower but ensure consistency if logic checks it
+                char._willpower_damage['aggravated'] = max(getattr(char, '_willpower_damage', {}).get('aggravated', 0), 0)
+            except Exception:
+                pass
+        if self.event_bus:
+            try:
+                self.event_bus.publish('entity_died', entity_id=entity_id, killer_id=killer_id, cause=cause)
+            except Exception:
+                pass
+        return True

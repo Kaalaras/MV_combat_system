@@ -1,4 +1,4 @@
-# ecs/actions/movement_actions.py
+# ecs/actions/movement_actions_bis.py
 """
 Movement action system module that handles different movement options for entities.
 
@@ -10,9 +10,8 @@ Movement actions interact with the game's movement system to validate and execut
 positional changes on the game grid.
 """
 
-from ecs.systems.action_system import Action, ActionType
-from core.player_input import choose_direction  # choose_tile removed as target_tile comes from params
-from typing import Tuple, Optional, Any, Dict, List, Union
+from MV_combat_system.ecs.systems.action_system import Action, ActionType
+from typing import Any
 
 
 class StandardMoveAction(Action):
@@ -54,7 +53,7 @@ class StandardMoveAction(Action):
             name="Standard Move",
             action_type=ActionType.LIMITED_FREE,
             execute_func=self._execute,
-            is_available_func=self._is_available,  # Added for consistency
+            is_available_func=self._is_available,
             description="Move up to 7 spaces and choose facing direction",
             keywords=["move"],
             incompatible_keywords=["move"],
@@ -174,7 +173,7 @@ class SprintAction(Action):
             name="Sprint",
             action_type=ActionType.PRIMARY,
             execute_func=self._execute,
-            is_available_func=self._is_available,  # Added for consistency
+            is_available_func=self._is_available,
             description="Run quickly and maintain facing direction",
             keywords=["move"],
             incompatible_keywords=["move"]
@@ -253,3 +252,127 @@ class SprintAction(Action):
             print(f"[Sprint] Movement allowance reduced to 0 for {entity_id_moving}.")
             return False
         return self.movement_system.move(entity_id_moving, (tx, ty), max_steps=remaining)
+
+
+class JumpAction(Action):
+    """Secondary action: Jump over void or light cover up to Strength+Athletics tiles (Manhattan).
+    Treat walls / solid impassable / heavy cover (>2 bonus) / other entities as blocking.
+    Destination cannot be void/solid/wall/occupied."""
+    EFFECT_IMPASSABLE_VOID = 'impassable_void'
+    EFFECT_IMPASSABLE_SOLID = 'impassable_solid'
+    def __init__(self, movement_system: Any):
+        super().__init__(
+            name="Jump", action_type=ActionType.SECONDARY,
+            execute_func=self._execute, is_available_func=self._is_available,
+            description="Jump over void/light cover up to Strength+Athletics tiles",
+            keywords=["move","jump"], incompatible_keywords=["move"], per_turn_limit=1
+        )
+        self.movement_system = movement_system
+    def _pool(self, char):
+        t = getattr(char,'traits',{})
+        return max(0, t.get('Attributes',{}).get('Physical',{}).get('Strength',0)) + \
+               max(0, t.get('Abilities',{}).get('Talents',{}).get('Athletics',0))
+    def _is_available(self, entity_id: str, game_state: Any, **action_params) -> bool:
+        tgt = action_params.get('target_tile')
+        if not tgt: return False
+        ent = game_state.get_entity(entity_id)
+        if not ent or 'character_ref' not in ent or 'position' not in ent: return False
+        rng = self._pool(ent['character_ref'].character)
+        if rng<=0: return False
+        pos = ent['position']
+        try: tx,ty = tgt
+        except: return False
+        dist = abs(tx-pos.x)+abs(ty-pos.y)
+        if not (0 < dist <= rng):
+            return False
+        # Disallow if destination itself invalid (cannot land on void/solid etc.)
+        try:
+            if self._dest_invalid(game_state, entity_id, tx, ty):
+                return False
+        except Exception:
+            return False
+        # New: pre-check midpoints for blocking solid/wall/occupied so availability reflects futility
+        try:
+            path = self._bres(pos.x, pos.y, tx, ty)
+            for (mx,my) in path[1:-1]:  # exclude start and destination
+                if self._mid_blocked(game_state, entity_id, mx, my):
+                    return False
+        except Exception:
+            return False
+        return True
+    def _mid_blocked(self, game_state, eid, x,y):
+        terrain = game_state.terrain
+        if (x,y) in terrain.walls: return True
+        effs = terrain.get_effects(x,y) if hasattr(terrain,'get_effects') else []
+        for eff in effs:
+            if eff.get('name') == self.EFFECT_IMPASSABLE_SOLID:
+                return True
+        occ = terrain.get_entity_at(x,y)
+        if occ and occ!=eid:
+            ent = game_state.get_entity(occ)
+            if ent and 'cover' in ent:
+                if getattr(ent['cover'],'bonus',0) > 2:
+                    return True
+            else:
+                return True
+        return False
+    def _dest_invalid(self, game_state, eid, x,y):
+        terrain = game_state.terrain
+        if not terrain.is_valid_position(x,y): return True
+        if (x,y) in terrain.walls: return True
+        if terrain.is_occupied(x,y): return True
+        effs = terrain.get_effects(x,y) if hasattr(terrain,'get_effects') else []
+        for eff in effs:
+            if eff.get('name') in (self.EFFECT_IMPASSABLE_VOID,self.EFFECT_IMPASSABLE_SOLID):
+                return True
+        return False
+    def _bres(self,x0,y0,x1,y1):
+        pts=[]; dx=abs(x1-x0); dy=-abs(y1-y0); sx=1 if x0<x1 else -1; sy=1 if y0<y1 else -1; err=dx+dy
+        while True:
+            pts.append((x0,y0))
+            if x0==x1 and y0==y1: break
+            e2=2*err
+            if e2>=dy:
+                if x0==x1: break
+                err+=dy; x0+=sx
+            if e2<=dx:
+                if y0==y1: break
+                err+=dx; y0+=sy
+        return pts
+    def _execute(self, entity_id: str, game_state: Any, **action_params) -> bool:
+        tgt = action_params.get('target_tile')
+        if tgt is None: return False
+        ent = game_state.get_entity(entity_id)
+        if not ent or 'position' not in ent or 'character_ref' not in ent: return False
+        pos = ent['position']; sx,sy = pos.x,pos.y
+        try: dx,dy = int(tgt[0]), int(tgt[1])
+        except: return False
+        if (sx,sy)==(dx,dy): return False
+        max_range = self._pool(ent['character_ref'].character)
+        if abs(dx-sx)+abs(dy-sy) > max_range: return False
+        path = self._bres(sx,sy,dx,dy)
+        midpoints = path[1:-1]
+        last_free = (sx,sy)
+        blocked_encountered = False
+        for (mx,my) in midpoints:
+            if self._mid_blocked(game_state, entity_id, mx,my):
+                blocked_encountered = True
+                break
+            last_free = (mx,my)
+        final_dest = (dx,dy)
+        if blocked_encountered:
+            if last_free == (sx,sy):
+                return False
+            final_dest = last_free
+        if final_dest == (dx,dy) and self._dest_invalid(game_state, entity_id, dx,dy):
+            return False
+        fx,fy = final_dest
+        terrain = game_state.terrain
+        old=(sx,sy)
+        pos.x,pos.y = fx,fy
+        if not terrain.move_entity(entity_id, fx,fy):
+            pos.x,pos.y = old
+            return False
+        if hasattr(game_state,'add_movement_steps'):
+            game_state.add_movement_steps(entity_id, abs(fx-sx)+abs(fy-sy))
+        return True
