@@ -74,16 +74,28 @@ class StandardMoveAction(Action):
             bool: True if the move action can be performed, False otherwise.
 
         Note:
-            Currently only checks if target_tile is provided. A more robust
-            implementation would check if the tile is reachable based on
-            entity position and movement range.
+            Checks if target_tile is provided and is a valid, walkable destination.
+            Prevents voluntary movement into void or other impassable terrain.
         """
-        # Availability can be checked here, e.g., if entity can move.
-        # For now, assume ActionSystem's general checks are sufficient or it's always available if not otherwise restricted.
-        # A more robust check might verify if a target_tile is provided in action_params.
-        if not action_params.get("target_tile"):
-            # print(f"StandardMoveAction: target_tile not provided for {entity_id}")
-            return False  # Or handle differently if interactive fallback is desired
+        target_tile = action_params.get("target_tile")
+        if not target_tile:
+            return False
+        
+        try:
+            x, y = target_tile
+        except (TypeError, ValueError):
+            return False
+            
+        # Check if destination is valid and walkable (prevents void movement)
+        terrain = getattr(game_state, 'terrain', None)
+        if terrain:
+            # Use is_walkable which already checks for void and solid impassable
+            if not terrain.is_walkable(x, y):
+                return False
+            # Double-check for void specifically to be explicit
+            if hasattr(terrain, 'has_effect') and terrain.has_effect(x, y, 'impassable_void'):
+                return False
+                
         return True
 
     def _execute(self, entity_id: str, game_state: Any, **action_params) -> bool:
@@ -193,13 +205,28 @@ class SprintAction(Action):
             bool: True if the sprint action can be performed, False otherwise.
 
         Note:
-            Currently only checks if target_tile is provided. A more robust
-            implementation would check if the tile is reachable based on
-            entity position, stamina, and other relevant factors.
+            Checks if target_tile is provided and is a valid, walkable destination.
+            Prevents voluntary movement into void or other impassable terrain.
         """
-        if not action_params.get("target_tile"):
-            # print(f"SprintAction: target_tile not provided for {entity_id}")
+        target_tile = action_params.get("target_tile")
+        if not target_tile:
             return False
+            
+        try:
+            x, y = target_tile
+        except (TypeError, ValueError):
+            return False
+            
+        # Check if destination is valid and walkable (prevents void movement)
+        terrain = getattr(game_state, 'terrain', None)
+        if terrain:
+            # Use is_walkable which already checks for void and solid impassable
+            if not terrain.is_walkable(x, y):
+                return False
+            # Double-check for void specifically to be explicit
+            if hasattr(terrain, 'has_effect') and terrain.has_effect(x, y, 'impassable_void'):
+                return False
+                
         return True
 
     def _execute(self, entity_id: str, game_state: Any, **action_params) -> bool:
