@@ -319,7 +319,22 @@ class MovementSystem:
         if not terrain.is_walkable(dest_x, dest_y, width, height) and not void_tile:
             return False
         # Fire AoO events BEFORE moving: any pre-adjacent attacker for which destination is NOT adjacent
-        # to=entity_id, origin_adjacent=True)
+        if pre_adjacent and provoke_aoo:
+            bus = getattr(self.game_state, 'event_bus', None)
+            if bus:
+                for attacker_id in pre_adjacent:
+                    att = self.game_state.get_entity(attacker_id)
+                    if not att or 'position' not in att:
+                        continue
+                    ap = att['position']
+                    # If attacker will still be adjacent to destination, no opportunity attack
+                    if abs(ap.x - dest_x) + abs(ap.y - dest_y) == 1:
+                        continue
+                    char_ref = att.get('character_ref')
+                    char = getattr(char_ref, 'character', None) if char_ref else None
+                    if not char or not getattr(char, 'toggle_opportunity_attack', False):
+                        continue
+                    bus.publish('opportunity_attack_triggered', attacker_id=attacker_id, target_id=entity_id, origin_adjacent=True)
         # Perform move AFTER AoO resolution
         pos_comp.x, pos_comp.y = dest_x, dest_y
         if hasattr(terrain, 'move_entity'):

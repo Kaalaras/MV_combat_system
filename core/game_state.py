@@ -375,3 +375,33 @@ class GameState:
             except Exception:
                 pass
         return True
+
+    # ------------------------------------------------------------------
+    # Convenience helpers (used by AI and other high-level systems)
+    # ------------------------------------------------------------------
+
+    def is_tile_occupied(self, x: int, y: int) -> bool:
+        """Return True if a single grid cell is occupied by an entity.
+        Thin wrapper over terrain.is_occupied for clarity / decoupling.
+        Walls are handled separately via movement/terrain walkability checks."""
+        terrain = getattr(self, 'terrain', None)
+        if not terrain:
+            return False
+        # check_walls False: we only care about entity bodies here
+        return terrain.is_occupied(x, y, 1, 1, check_walls=False)
+    
+    def get_teams(self) -> Dict[str, List[str]]:
+        """
+        Get current team mappings.
+
+        Returns:
+            Dictionary mapping team identifiers to lists of entity IDs
+
+        Example:
+            ```python
+            teams = game_state.get_teams()
+            for team_id, entity_list in teams.items():
+                print(f"Team {team_id} has {len(entity_list)} entities")
+            ```
+        """
+        return self.teams

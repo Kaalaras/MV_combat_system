@@ -97,6 +97,10 @@ class TerrainEffectsAdvancedTest(unittest.TestCase):
         self.add_entity('c',0,0)
         self.terrain.add_very_dangerous((1,0), radius=0)
         self.terrain.move_entity('c',1,0)
+        # Update entity position component to match terrain move
+        entity = self.gs.get_entity('c')
+        entity['position'].x = 1
+        entity['position'].y = 0
         initial = len([e for e in self.events if e.get('effect')==EFFECT_VERY_DANGEROUS])
         self.eb.publish('turn_start', entity_id='c')
         after = len([e for e in self.events if e.get('effect')==EFFECT_VERY_DANGEROUS])
