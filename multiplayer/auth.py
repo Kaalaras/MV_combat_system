@@ -6,6 +6,8 @@ import secrets
 from datetime import datetime, timedelta
 from typing import Optional
 
+from fastapi import HTTPException, Depends, status
+from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from pydantic import BaseModel
 
 from .models import Player
@@ -14,6 +16,9 @@ from .models import Player
 SECRET_KEY = "dev-secret-key-change-in-production"  # In production, use environment variable
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 60 * 24  # 24 hours
+
+# FastAPI Security dependency for Bearer tokens
+security = HTTPBearer()
 
 # Temporary in-memory user storage (replace with database)
 USERS_DB = {
@@ -67,7 +72,7 @@ def create_access_token(data: dict, expires_delta: Optional[timedelta] = None) -
     return token
 
 
-async def get_current_player(token: str) -> Optional[Player]:
+async def get_current_player_from_token(token: str) -> Optional[Player]:
     """
     Get current player from token (simplified for Phase 1)
     """
@@ -94,6 +99,20 @@ async def get_current_player(token: str) -> Optional[Player]:
         
     except (ValueError, IndexError):
         return None
+
+
+async def get_current_player(credentials: HTTPAuthorizationCredentials = Depends(security)) -> Player:
+    """
+    FastAPI dependency to get current player from Bearer token
+    """
+    player = await get_current_player_from_token(credentials.credentials)
+    if not player:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid authentication token",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    return player
 
 
 def validate_token(token: str) -> Optional[str]:

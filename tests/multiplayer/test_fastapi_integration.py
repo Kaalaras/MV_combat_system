@@ -139,7 +139,7 @@ class TestFastAPIIntegration:
         
         headers = {"Authorization": f"Bearer {mock_token}"}
         
-        with patch('multiplayer.server.get_current_player', return_value=mock_player), \
+        with patch('multiplayer.auth.get_current_player_from_token', return_value=mock_player), \
              patch('multiplayer.server.game_room_manager.create_room') as mock_create:
             
             # Mock successful room creation
@@ -232,7 +232,7 @@ class TestFastAPIIntegration:
         join_request = {"team": "red", "spectator": False}
         headers = {"Authorization": f"Bearer {mock_token}"}
         
-        with patch('multiplayer.server.get_current_player', return_value=mock_player), \
+        with patch('multiplayer.auth.get_current_player_from_token', return_value=mock_player), \
              patch('multiplayer.server.game_room_manager.join_room', return_value=True) as mock_join:
             
             response = client.post(

@@ -20,7 +20,7 @@ from .models import (
     GameRoom, Player, GameCommand, CommandResponse, 
     PlayerJoinRequest, AuthToken, GameState as NetworkGameState
 )
-from .auth import authenticate_player, create_access_token, get_current_player
+from .auth import authenticate_player, create_access_token, get_current_player, get_current_player_from_token
 from .game_manager import GameRoomManager, CommandValidator
 from .state_sync import GameStateSynchronizer, TurnOrderManager, StateDeltaManager, ConflictResolver
 
