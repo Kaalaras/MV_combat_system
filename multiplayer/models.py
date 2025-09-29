@@ -61,8 +61,9 @@ class GameCommand(BaseModel):
     """Command sent from client to server"""
     command_id: str = Field(default_factory=lambda: str(uuid.uuid4()))
     command_type: CommandType
-    turn_id: int
-    sequence_number: int
+    player_id: str
+    turn_id: int = 0
+    sequence_number: int = 0
     timestamp: datetime = Field(default_factory=datetime.utcnow)
     payload: Dict[str, Any]
     
