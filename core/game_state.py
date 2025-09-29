@@ -86,55 +86,136 @@ class GameState:
 
     def add_entity(self, entity_id: str, components: Dict[str, Any]) -> None:
         """
-        DEPRECATED: Use ecs_manager.create_entity() instead.
+        MIGRATION BRIDGE: Temporarily supports legacy code while enforcing ECS migration.
         
-        This method violates ECS architecture and has been deprecated for multiplayer readiness.
+        This method provides backward compatibility during the ECS migration but will
+        be removed once all code is migrated to proper ECS usage.
         """
-        raise DeprecationWarning(
+        import warnings
+        warnings.warn(
             "add_entity() is deprecated. Use ecs_manager.create_entity() with component instances instead. "
-            "Example: entity_id = ecs_manager.create_entity(PositionComponent(x, y), HealthComponent(hp))"
+            "Example: entity_id = ecs_manager.create_entity(PositionComponent(x, y), HealthComponent(hp))",
+            DeprecationWarning,
+            stacklevel=2
         )
+        
+        if self.ecs_manager is None:
+            raise RuntimeError("ECS manager not initialized. Cannot add entity without ECS manager.")
+        
+        # Convert dict components to ECS components and add to ECS
+        from ecs.components.position import PositionComponent
+        from ecs.components.character_ref import CharacterRefComponent
+        from ecs.components.health import HealthComponent
+        from ecs.components.equipment import EquipmentComponent
+        
+        ecs_components = []
+        for comp_name, comp_value in components.items():
+            if comp_name == 'position' and hasattr(comp_value, 'x') and hasattr(comp_value, 'y'):
+                ecs_components.append(PositionComponent(comp_value.x, comp_value.y, 
+                                                        getattr(comp_value, 'width', 1), 
+                                                        getattr(comp_value, 'height', 1)))
+            elif comp_name == 'character_ref':
+                ecs_components.append(CharacterRefComponent(comp_value.character if hasattr(comp_value, 'character') else comp_value))
+            elif comp_name == 'health':
+                ecs_components.append(HealthComponent(getattr(comp_value, 'current', 100), 
+                                                      getattr(comp_value, 'maximum', 100)))
+            elif comp_name == 'equipment':
+                ecs_components.append(EquipmentComponent(comp_value))
+        
+        if ecs_components:
+            self.ecs_manager.add_entity(entity_id, *ecs_components)
 
     def get_entity(self, entity_id: str) -> Optional[Dict[str, Any]]:
         """
-        DEPRECATED: Use ecs_manager.get_component() instead.
+        MIGRATION BRIDGE: Temporarily supports legacy code while enforcing ECS migration.
         
-        This method violates ECS architecture and has been deprecated for multiplayer readiness.
+        Returns a dict-like object that provides access to entity components
+        through the ECS system, maintaining backward compatibility.
         """
-        raise DeprecationWarning(
+        import warnings
+        warnings.warn(
             "get_entity() is deprecated. Use ecs_manager.get_component(entity_id, ComponentType) instead. "
-            "Example: position = ecs_manager.get_component(entity_id, PositionComponent)"
+            "Example: position = ecs_manager.get_component(entity_id, PositionComponent)",
+            DeprecationWarning,
+            stacklevel=2
         )
+        
+        if self.ecs_manager is None:
+            return None
+        
+        try:
+            entity_id_int = int(entity_id)
+            if not self.ecs_manager.entity_exists(entity_id_int):
+                return None
+        except (ValueError, TypeError):
+            return None
+        
+        # Return a bridge object that provides dict-like access to ECS components
+        return _EntityBridge(self.ecs_manager, entity_id)
 
     def remove_entity(self, entity_id: str) -> None:
         """
-        DEPRECATED: Use ecs_manager.delete_entity() instead.
-        
-        This method violates ECS architecture and has been deprecated for multiplayer readiness.
+        MIGRATION BRIDGE: Temporarily supports legacy code while enforcing ECS migration.
         """
-        raise DeprecationWarning(
-            "remove_entity() is deprecated. Use ecs_manager.delete_entity(entity_id) instead."
+        import warnings
+        warnings.warn(
+            "remove_entity() is deprecated. Use ecs_manager.delete_entity(entity_id) instead.",
+            DeprecationWarning,
+            stacklevel=2
         )
+        
+        if self.ecs_manager is None:
+            return
+        
+        if self.ecs_manager.entity_exists(entity_id):
+            self.ecs_manager.delete_entity(entity_id)
 
     def get_component(self, entity_id: str, component_name: str) -> Optional[Any]:
         """
-        DEPRECATED: Use ecs_manager.get_component() instead.
-        
-        This method violates ECS architecture and has been deprecated for multiplayer readiness.
+        MIGRATION BRIDGE: Temporarily supports legacy code while enforcing ECS migration.
         """
-        raise DeprecationWarning(
-            "get_component() is deprecated. Use ecs_manager.get_component(entity_id, ComponentType) instead."
+        import warnings
+        warnings.warn(
+            "get_component() is deprecated. Use ecs_manager.get_component(entity_id, ComponentType) instead.",
+            DeprecationWarning,
+            stacklevel=2
         )
+        
+        entity = self.get_entity(entity_id)
+        if entity is None:
+            return None
+        return entity.get(component_name)
 
     def set_component(self, entity_id: str, component_name: str, component_value: Any) -> None:
         """
-        DEPRECATED: Use ecs_manager.add_component() instead.
-        
-        This method violates ECS architecture and has been deprecated for multiplayer readiness.
+        MIGRATION BRIDGE: Temporarily supports legacy code while enforcing ECS migration.
         """
-        raise DeprecationWarning(
-            "set_component() is deprecated. Use ecs_manager.add_component(entity_id, component_instance) instead."
+        import warnings
+        warnings.warn(
+            "set_component() is deprecated. Use ecs_manager.add_component(entity_id, component_instance) instead.",
+            DeprecationWarning,
+            stacklevel=2
         )
+        
+        if self.ecs_manager is None:
+            return
+        
+        # Convert to proper ECS component and set
+        from ecs.components.position import PositionComponent
+        from ecs.components.character_ref import CharacterRefComponent
+        from ecs.components.health import HealthComponent
+        
+        if component_name == 'position' and hasattr(component_value, 'x'):
+            self.ecs_manager.add_component(entity_id, 
+                PositionComponent(component_value.x, component_value.y,
+                                  getattr(component_value, 'width', 1),
+                                  getattr(component_value, 'height', 1)))
+        elif component_name == 'character_ref':
+            self.ecs_manager.add_component(entity_id, CharacterRefComponent(component_value))
+        elif component_name == 'health':
+            self.ecs_manager.add_component(entity_id, HealthComponent(
+                getattr(component_value, 'current', 100),
+                getattr(component_value, 'maximum', 100)))
 
     def set_terrain(self, terrain: Any) -> None:
         """
@@ -372,3 +453,162 @@ class GameState:
             ```
         """
         return self.teams
+    
+    @property
+    def entities(self) -> '_EntitiesBridge':
+        """
+        MIGRATION BRIDGE: Provides dict-like access to entities through ECS.
+        
+        This property maintains backward compatibility during ECS migration
+        while providing access to entities through the ECS system.
+        """
+        import warnings
+        warnings.warn(
+            "Direct access to game_state.entities is deprecated. "
+            "Use ecs_manager methods directly for better performance and proper ECS architecture.",
+            DeprecationWarning,
+            stacklevel=2
+        )
+        return _EntitiesBridge(self.ecs_manager)
+
+
+class _EntityBridge:
+    """
+    Bridge class that provides dict-like access to ECS entity components.
+    
+    This maintains backward compatibility during ECS migration while providing
+    access to entity data through the proper ECS system.
+    """
+    
+    def __init__(self, ecs_manager: Any, entity_id: str):
+        self.ecs_manager = ecs_manager
+        self.entity_id = entity_id
+        
+    def __contains__(self, key: str) -> bool:
+        """Check if entity has a component with the given name."""
+        if not self.ecs_manager:
+            return False
+        
+        try:
+            entity_id_int = int(self.entity_id)
+            if not self.ecs_manager.entity_exists(entity_id_int):
+                return False
+        except (ValueError, TypeError):
+            return False
+        
+        # Map component names to actual component classes
+        component_map = {
+            'position': 'ecs.components.position.PositionComponent',
+            'character_ref': 'ecs.components.character_ref.CharacterRefComponent', 
+            'health': 'ecs.components.health.HealthComponent',
+            'equipment': 'ecs.components.equipment.EquipmentComponent',
+            'willpower': 'ecs.components.willpower.WillpowerComponent',
+            'facing': 'ecs.components.facing.FacingComponent',
+            'velocity': 'ecs.components.velocity.VelocityComponent',
+        }
+        
+        if key in component_map:
+            try:
+                module_path, class_name = component_map[key].rsplit('.', 1)
+                module = __import__(module_path, fromlist=[class_name])
+                component_class = getattr(module, class_name)
+                return self.ecs_manager.get_component(entity_id_int, component_class) is not None
+            except (ImportError, KeyError, ValueError, AttributeError):
+                return False
+        
+        return False
+    
+    def get(self, key: str, default=None):
+        """Get a component value with a default fallback."""
+        if key in self:
+            return self[key]
+        return default
+    
+    def __getitem__(self, key: str):
+        """Get a component value by name."""
+        try:
+            entity_id_int = int(self.entity_id)
+            if not self.ecs_manager or not self.ecs_manager.entity_exists(entity_id_int):
+                raise KeyError(f"Entity {self.entity_id} not found")
+        except (ValueError, TypeError):
+            raise KeyError(f"Invalid entity ID {self.entity_id}")
+        
+        # Map component names to actual component classes
+        component_map = {
+            'position': 'ecs.components.position.PositionComponent',
+            'character_ref': 'ecs.components.character_ref.CharacterRefComponent',
+            'health': 'ecs.components.health.HealthComponent', 
+            'equipment': 'ecs.components.equipment.EquipmentComponent',
+            'willpower': 'ecs.components.willpower.WillpowerComponent',
+            'facing': 'ecs.components.facing.FacingComponent',
+            'velocity': 'ecs.components.velocity.VelocityComponent',
+        }
+        
+        if key in component_map:
+            try:
+                module_path, class_name = component_map[key].rsplit('.', 1)
+                module = __import__(module_path, fromlist=[class_name])
+                component_class = getattr(module, class_name)
+                component = self.ecs_manager.get_component(entity_id_int, component_class)
+                if component is not None:
+                    return component
+            except (ImportError, KeyError, ValueError, AttributeError):
+                pass
+        
+        raise KeyError(f"Component '{key}' not found for entity {self.entity_id}")
+
+
+class _EntitiesBridge:
+    """
+    Bridge class that provides dict-like access to all entities through ECS.
+    
+    This maintains backward compatibility during ECS migration while providing
+    access to entities through the proper ECS system.
+    """
+    
+    def __init__(self, ecs_manager: Any):
+        self.ecs_manager = ecs_manager
+        
+    def __contains__(self, entity_id: str) -> bool:
+        """Check if entity exists."""
+        if not self.ecs_manager:
+            return False
+        try:
+            return self.ecs_manager.entity_exists(int(entity_id))
+        except (ValueError, TypeError):
+            return False
+    
+    def __getitem__(self, entity_id: str) -> _EntityBridge:
+        """Get entity bridge by ID."""
+        if entity_id not in self:
+            raise KeyError(f"Entity {entity_id} not found")
+        return _EntityBridge(self.ecs_manager, entity_id)
+    
+    def get(self, entity_id: str, default=None):
+        """Get entity with default fallback."""
+        if entity_id in self:
+            return self[entity_id]
+        return default
+    
+    def items(self):
+        """Iterate over entity_id, entity_bridge pairs."""
+        if not self.ecs_manager:
+            return
+        
+        # Get all entity IDs from ECS manager
+        try:
+            for entity_id in self.ecs_manager.get_all_entities():
+                yield str(entity_id), _EntityBridge(self.ecs_manager, str(entity_id))
+        except (AttributeError, TypeError):
+            # Fallback if get_all_entities doesn't exist
+            pass
+    
+    def keys(self):
+        """Get all entity IDs."""
+        for entity_id, _ in self.items():
+            yield entity_id
+    
+    def values(self):
+        """Get all entity bridges.""" 
+        for _, entity_bridge in self.items():
+            yield entity_bridge
