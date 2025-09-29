@@ -22,6 +22,7 @@ from .models import (
 )
 from .auth import authenticate_player, create_access_token, get_current_player
 from .game_manager import GameRoomManager, CommandValidator
+from .state_sync import GameStateSynchronizer, TurnOrderManager, StateDeltaManager, ConflictResolver
 
 # Import core modules with path fix
 import sys, os
@@ -62,6 +63,7 @@ pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 # Global instances
 game_room_manager = GameRoomManager()
 command_validator = CommandValidator()
+game_synchronizer = GameStateSynchronizer()
 
 # Connect Socket.IO to FastAPI
 socket_app = socketio.ASGIApp(sio, app)
@@ -340,6 +342,224 @@ async def get_game_state(sid):
     except Exception as e:
         logger.error(f"Error in get_game_state: {e}")
         await sio.emit('error', {'message': 'Failed to get game state'}, room=sid)
+
+
+# Phase 2: Game State Synchronization Event Handlers
+
+@sio.event
+async def start_game(sid, data):
+    """Start a new game in the room"""
+    try:
+        session = await sio.get_session(sid)
+        player_id = session['player_id']
+        room_id = session.get('room_id')
+        
+        if not room_id:
+            await sio.emit('error', {'message': 'Not in a game room'}, room=sid)
+            return
+            
+        # Get room and validate host
+        room = await game_room_manager.get_room(room_id)
+        if not room or room.host_id != player_id:
+            await sio.emit('error', {'message': 'Only room host can start game'}, room=sid)
+            return
+            
+        # Initialize game synchronization
+        success = await game_synchronizer.initialize_game(
+            room_id=room_id,
+            players=room.players,
+            game_config=data.get('config', {})
+        )
+        
+        if success:
+            # Notify all players that game has started
+            await sio.emit('game_started', {
+                'room_id': room_id,
+                'turn_info': game_synchronizer.turn_manager.current_turn.to_dict()
+            }, room=room_id)
+        else:
+            await sio.emit('error', {'message': 'Failed to start game'}, room=sid)
+            
+    except Exception as e:
+        logger.error(f"Error in start_game: {e}")
+        await sio.emit('error', {'message': 'Failed to start game'}, room=sid)
+
+
+@sio.event
+async def queue_action(sid, data):
+    """Queue an action for turn-based execution"""
+    try:
+        session = await sio.get_session(sid)
+        player_id = session['player_id']
+        room_id = session.get('room_id')
+        
+        if not room_id:
+            await sio.emit('error', {'message': 'Not in a game room'}, room=sid)
+            return
+            
+        # Parse command
+        command = GameCommand(**data)
+        command.player_id = player_id
+        
+        # Validate command
+        validation_result = await command_validator.validate_command(
+            command, player_id, room_id
+        )
+        
+        if not validation_result.valid:
+            await sio.emit('action_rejected', {
+                'command_id': command.command_id,
+                'reason': validation_result.reason
+            }, room=sid)
+            return
+            
+        # Process action through synchronizer
+        result = await game_synchronizer.process_player_action(room_id, player_id, command)
+        
+        if result['success']:
+            # Notify player that action was queued
+            await sio.emit('action_queued', {
+                'command_id': command.command_id,
+                'queued': result.get('queued', True)
+            }, room=sid)
+            
+            # Broadcast any immediate execution results
+            if 'execution_results' in result:
+                for exec_result in result['execution_results']:
+                    if exec_result.get('success') and 'delta' in exec_result:
+                        await sio.emit('state_delta', exec_result['delta'], room=room_id)
+        else:
+            await sio.emit('action_failed', {
+                'command_id': command.command_id,
+                'reason': result.get('reason', 'Unknown error')
+            }, room=sid)
+            
+    except Exception as e:
+        logger.error(f"Error in queue_action: {e}")
+        await sio.emit('error', {'message': 'Action processing failed'}, room=sid)
+
+
+@sio.event
+async def get_state_updates(sid, data):
+    """Get state updates since specified point"""
+    try:
+        session = await sio.get_session(sid)
+        room_id = session.get('room_id')
+        
+        if not room_id:
+            await sio.emit('error', {'message': 'Not in a game room'}, room=sid)
+            return
+            
+        since_turn = data.get('since_turn', 0)
+        since_sequence = data.get('since_sequence', 0)
+        
+        updates = await game_synchronizer.get_state_updates(
+            room_id, since_turn, since_sequence
+        )
+        
+        await sio.emit('state_updates', updates, room=sid)
+        
+    except Exception as e:
+        logger.error(f"Error in get_state_updates: {e}")
+        await sio.emit('error', {'message': 'Failed to get state updates'}, room=sid)
+
+
+@sio.event
+async def advance_turn(sid):
+    """Advance to next turn phase (host only)"""
+    try:
+        session = await sio.get_session(sid)
+        player_id = session['player_id']
+        room_id = session.get('room_id')
+        
+        if not room_id:
+            await sio.emit('error', {'message': 'Not in a game room'}, room=sid)
+            return
+            
+        # Validate host permissions
+        room = await game_room_manager.get_room(room_id)
+        if not room or room.host_id != player_id:
+            await sio.emit('error', {'message': 'Only host can advance turns'}, room=sid)
+            return
+            
+        # Advance turn
+        result = await game_synchronizer.advance_turn(room_id)
+        
+        if result['success']:
+            # Broadcast turn advance to all players
+            await sio.emit('turn_advanced', result, room=room_id)
+            
+            # If new delta was created, broadcast it
+            if 'delta' in result:
+                await sio.emit('state_delta', result['delta'], room=room_id)
+        else:
+            await sio.emit('error', {'message': result.get('reason', 'Failed to advance turn')}, room=sid)
+            
+    except Exception as e:
+        logger.error(f"Error in advance_turn: {e}")
+        await sio.emit('error', {'message': 'Turn advance failed'}, room=sid)
+
+
+@sio.event
+async def get_turn_info(sid):
+    """Get current turn information"""
+    try:
+        session = await sio.get_session(sid)
+        room_id = session.get('room_id')
+        
+        if not room_id:
+            await sio.emit('error', {'message': 'Not in a game room'}, room=sid)
+            return
+            
+        current_turn = game_synchronizer.turn_manager.current_turn
+        if current_turn:
+            await sio.emit('turn_info', current_turn.to_dict(), room=sid)
+        else:
+            await sio.emit('turn_info', {'no_active_turn': True}, room=sid)
+            
+    except Exception as e:
+        logger.error(f"Error in get_turn_info: {e}")
+        await sio.emit('error', {'message': 'Failed to get turn info'}, room=sid)
+
+
+# Background task for turn timeouts
+async def turn_timeout_monitor():
+    """Monitor for turn timeouts and auto-advance"""
+    while True:
+        try:
+            await asyncio.sleep(10)  # Check every 10 seconds
+            
+            current_turn = game_synchronizer.turn_manager.current_turn
+            if current_turn and current_turn.turn_deadline:
+                now = datetime.utcnow()
+                if now > current_turn.turn_deadline:
+                    # Turn timeout - advance automatically
+                    logger.info(f"Turn {current_turn.turn_id} timed out, auto-advancing")
+                    
+                    # Find active room for this turn (simplified lookup)
+                    for room_id in game_synchronizer.active_games:
+                        if game_synchronizer.active_games[room_id]:
+                            result = await game_synchronizer.advance_turn(room_id)
+                            if result['success']:
+                                await sio.emit('turn_timeout', {
+                                    'message': 'Turn timed out and was auto-advanced',
+                                    'result': result
+                                }, room=room_id)
+                            break
+                            
+        except Exception as e:
+            logger.error(f"Error in turn timeout monitor: {e}")
+
+
+# Start background tasks
+@app.on_event("startup")
+async def startup_event():
+    """Initialize server on startup"""
+    logger.info("MV Combat System Multiplayer Server starting up...")
+    await game_room_manager.initialize()
+    
+    # Start background tasks
+    asyncio.create_task(turn_timeout_monitor())
 
 
 # Helper Functions
