@@ -128,8 +128,12 @@ class GameState:
             elif comp_name == 'character_ref':
                 ecs_components.append(CharacterRefComponent(comp_value.character if hasattr(comp_value, 'character') else comp_value))
             elif comp_name == 'health':
-                ecs_components.append(HealthComponent(getattr(comp_value, 'current', 100), 
-                                                      getattr(comp_value, 'maximum', 100)))
+                max_health = getattr(comp_value, 'maximum', 100)
+                health_comp = HealthComponent(max_health)
+                # Set current health if it's different from max
+                current_health = getattr(comp_value, 'current', max_health)
+                health_comp.current_health = current_health
+                ecs_components.append(health_comp)
             elif comp_name == 'equipment':
                 # comp_value should already be an EquipmentComponent instance
                 ecs_components.append(comp_value)

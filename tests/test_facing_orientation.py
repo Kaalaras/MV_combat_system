@@ -4,11 +4,13 @@ try:
     from MV_combat_system.core.event_bus import EventBus  # type: ignore
     from MV_combat_system.ecs.components.position import PositionComponent  # type: ignore
     from MV_combat_system.ecs.components.facing import FacingComponent  # type: ignore
+    from MV_combat_system.ecs.components.character_ref import CharacterRefComponent  # type: ignore
 except ModuleNotFoundError:
     from core.game_state import GameState  # type: ignore
     from core.event_bus import EventBus  # type: ignore
     from ecs.components.position import PositionComponent  # type: ignore
     from ecs.components.facing import FacingComponent  # type: ignore
+    from ecs.components.character_ref import CharacterRefComponent  # type: ignore
 
 class DummyChar:
     def __init__(self, orientation='up'):
@@ -53,17 +55,22 @@ class OrientationMirrorTests(unittest.TestCase):
     def test_fixed_mode_does_not_change_orientation(self):
         gs = GameState(); eb = EventBus(); gs.set_event_bus(eb)
         char = DummyChar(orientation='up')
-        gs.add_entity('e', {
-            'position': PositionComponent(x=1,y=1,width=1,height=1),
-            'facing': FacingComponent(direction=(0.0,1.0), mode='Fixed'),
-            'character_ref': CharRef(char)
-        })
+        
+        # Use new ECS system 
+        entity_id = gs.ecs_manager.create_entity(
+            PositionComponent(x=1,y=1,width=1,height=1),
+            FacingComponent(direction=(0.0,1.0), mode='Fixed'),
+            CharacterRefComponent(char)
+        )
+        
         self._facing_system(gs, eb)
-        eb.publish('action_requested', entity_id='e', action_name='Standard Move', target_tile=(5,1))
+        eb.publish('action_requested', entity_id=str(entity_id), action_name='Standard Move', target_tile=(5,1))
         self.assertEqual(char.orientation, 'up')
-        # Ensure still exactly facing up
-        self.assertAlmostEqual(gs.get_entity('e')['facing'].direction[0], 0.0)
-        self.assertAlmostEqual(gs.get_entity('e')['facing'].direction[1], 1.0)
+        
+        # Ensure still exactly facing up using new ECS system
+        facing_comp = gs.ecs_manager.get_component(entity_id, FacingComponent)
+        self.assertAlmostEqual(facing_comp.direction[0], 0.0)
+        self.assertAlmostEqual(facing_comp.direction[1], 1.0)
 
 if __name__ == '__main__':  # pragma: no cover
     unittest.main()
