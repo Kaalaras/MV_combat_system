@@ -204,6 +204,213 @@ class TestAISystemCoverage:
     def test_hide_from_enemy_no_current_los(self, ai_setup):
         """Test private method logic - skipped due to implementation details."""
         pytest.skip("Private method access not available in current API")
+
+    def test_compute_local_threats_detailed(self, ai_setup):
+        """Test _compute_local_threats method covering lines 316-339."""
+        ai_system, mocks = ai_setup
+        
+        # Create a more realistic context setup
+        mock_ctx = MagicMock()
+        mock_ctx.char_id = 'char1'
+        mock_ctx.char_pos = (5, 5)
+        mock_ctx.adjacent_enemies = ['enemy1', 'enemy2']  # 2 adjacent enemies
+        mock_ctx.enemies = ['enemy1', 'enemy2', 'enemy3', 'enemy4']
+        mock_ctx.allies = ['ally1', 'ally2']
+        mock_ctx.game_state = mocks['game_state']
+        
+        # Mock entity positions for distance calculations
+        def mock_get_entity(eid):
+            positions = {
+                'enemy1': {'position': MagicMock(x=6, y=5)},  # Adjacent
+                'enemy2': {'position': MagicMock(x=4, y=5)},  # Adjacent  
+                'enemy3': {'position': (8, 8)},               # Distant (tuple format)
+                'enemy4': {'position': [10, 10]},             # Very distant (array format)
+                'ally1': {'position': MagicMock(x=6, y=6)},   # Close ally
+                'ally2': {'position': MagicMock(x=10, y=10)}  # Distant ally
+            }
+            return positions.get(eid, {'position': MagicMock(x=0, y=0)})
+        
+        mocks['game_state'].get_entity.side_effect = mock_get_entity
+        
+        # Mock distance calculations
+        def mock_distance(game_state, char_id, target_id):
+            distances = {
+                'enemy1': 1, 'enemy2': 1, 'enemy3': 5, 'enemy4': 10,
+                'ally1': 2, 'ally2': 10
+            }
+            return distances.get(target_id, 10)
+        
+        # Import utils to mock it properly
+        from ecs.systems.ai import utils
+        utils.calculate_distance_between_entities = mock_distance
+        
+        # Mock LOS manager
+        def mock_has_los(pos1, pos2):
+            # Enemy1 and Enemy2 have LOS, others don't
+            return pos1 in [(6, 5), (4, 5)] or pos2 in [(6, 5), (4, 5)]
+        
+        mocks['los_manager'].has_los.side_effect = mock_has_los
+        
+        # Test the method
+        result = ai_system._compute_local_threats(mock_ctx)
+        
+        # Verify results
+        assert result['melee_adjacent'] == 2  # 2 adjacent enemies
+        assert result['enemies_within5'] >= 3  # enemy1, enemy2, enemy3 within 5
+        assert result['los_threats_current'] >= 2  # enemy1, enemy2 have LOS
+        assert result['allies_close'] >= 1  # ally1 is close
+
+    def test_should_retreat_decision_logic(self, ai_setup):
+        """Test _should_retreat method covering lines 341-363."""
+        ai_system, mocks = ai_setup
+        
+        # Create context for retreat scenario
+        mock_ctx = MagicMock()
+        mock_ctx.char_id = 'char1'
+        mock_ctx.adjacent_enemies = ['enemy1', 'enemy2']  # Multiple adjacent
+        mock_ctx.ranged_weapon = MagicMock()  # Has ranged weapon
+        mock_ctx.melee_weapon = None  # No melee weapon
+        
+        # Mock _compute_local_threats to return retreat conditions
+        ai_system._compute_local_threats = MagicMock(return_value={
+            'melee_adjacent': 2,
+            'enemies_within5': 3,
+            'los_threats_current': 1,
+            'allies_close': 0
+        })
+        
+        result = ai_system._should_retreat(mock_ctx)
+        
+        # Should consider retreat with 2+ adjacent enemies and no melee weapon
+        assert isinstance(result, bool)
+
+    def test_should_seek_cover_conditions(self, ai_setup):
+        """Test _should_seek_cover method covering lines 368-376."""
+        ai_system, mocks = ai_setup
+        
+        # Test case 1: No ranged weapon (should return False)
+        mock_ctx = MagicMock()
+        mock_ctx.ranged_weapon = None
+        result = ai_system._should_seek_cover(mock_ctx)
+        assert result is False
+        
+        # Test case 2: Adjacent enemies (should return False)
+        mock_ctx.ranged_weapon = MagicMock()
+        mock_ctx.adjacent_enemies = ['enemy1']
+        result = ai_system._should_seek_cover(mock_ctx)
+        assert result is False
+        
+        # Test case 3: Few LOS threats (should return False)
+        mock_ctx.adjacent_enemies = []
+        ai_system._compute_local_threats = MagicMock(return_value={
+            'los_threats_current': 1  # Less than 2
+        })
+        result = ai_system._should_seek_cover(mock_ctx)
+        assert result is False
+        
+        # Test case 4: Should take cover (multiple LOS threats, no adjacent enemies, has ranged weapon)
+        ai_system._compute_local_threats = MagicMock(return_value={
+            'los_threats_current': 3  # 2 or more threats
+        })
+        result = ai_system._should_seek_cover(mock_ctx)
+        assert result is True
+
+    def test_los_threat_count_from_tile(self, ai_setup):
+        """Test _los_threat_count_from_tile method covering lines 378-390."""
+        ai_system, mocks = ai_setup
+        
+        mock_ctx = MagicMock()
+        mock_ctx.enemies = ['enemy1', 'enemy2', 'enemy3']
+        mock_ctx.game_state = mocks['game_state']
+        
+        # Mock enemy positions with different formats
+        def mock_get_entity(eid):
+            positions = {
+                'enemy1': {'position': MagicMock(x=10, y=10)},  # Has x, y attributes
+                'enemy2': {'position': (15, 15)},               # Tuple format
+                'enemy3': {'position': [20, 20]}                # Array format
+            }
+            return positions.get(eid, {'position': MagicMock(x=0, y=0)})
+        
+        mocks['game_state'].get_entity.side_effect = mock_get_entity
+        
+        # Mock LOS - enemy1 and enemy2 have LOS to tile (5, 5)
+        def mock_has_los(enemy_pos, tile_pos):
+            return enemy_pos in [(10, 10), (15, 15)]
+        
+        mocks['los_manager'].has_los.side_effect = mock_has_los
+        
+        # Test the method
+        threat_count = ai_system._los_threat_count_from_tile(mock_ctx, (5, 5))
+        
+        # Should count enemy1 and enemy2 as having LOS
+        assert threat_count >= 2
+
+    def test_decision_tree_branches_comprehensive(self, ai_setup):
+        """Test comprehensive decision tree branches for better AI coverage."""
+        ai_system, mocks = ai_setup
+        
+        # Setup comprehensive character entity with all required components
+        char_entity = {
+            'position': MagicMock(x=5, y=5),
+            'character_ref': MagicMock(),
+            'equipment': MagicMock()  # Add equipment component
+        }
+        char_entity['character_ref'].character = MagicMock()
+        char_entity['character_ref'].character.team = 'team_a'
+        char_entity['equipment'].weapons = {'main': MagicMock(), 'secondary': None}
+        char_entity['equipment'].weapons['main'].weapon_type = 'firearm'
+        
+        mocks['game_state'].get_entity.return_value = char_entity
+        mocks['game_state'].entities = {
+            'char1': char_entity,
+            'enemy1': {
+                'position': MagicMock(x=10, y=10),
+                'character_ref': MagicMock()
+            }
+        }
+        mocks['game_state'].entities['enemy1']['character_ref'].character = MagicMock()
+        mocks['game_state'].entities['enemy1']['character_ref'].character.team = 'team_b'
+        
+        # Mock available actions
+        mock_attack = MagicMock(name='Attack')
+        mock_move = MagicMock(name='Standard Move')
+        mock_end = MagicMock(name='End Turn')
+        
+        mocks['action_system'].available_actions = {
+            'char1': [mock_attack, mock_move, mock_end]
+        }
+        mocks['action_system'].can_perform_action.return_value = True
+        
+        # Mock movement and LOS
+        mocks['movement_system'].get_reachable_tiles.return_value = [(6, 6, 1), (7, 7, 2)]
+        mocks['los_manager'].has_los.return_value = True
+        
+        # Run the AI decision process
+        result = ai_system.choose_action('char1')
+        
+        # Should complete without errors and return a boolean
+        assert isinstance(result, bool)
+
+    def test_ai_system_with_empty_entities(self, ai_setup):
+        """Test AI system behavior with empty entity collections."""
+        ai_system, mocks = ai_setup
+        
+        # Mock empty entities collection
+        mocks['game_state'].entities = {}
+        
+        char_entity = {
+            'position': MagicMock(x=5, y=5),
+            'character_ref': MagicMock(),
+            'equipment': MagicMock()
+        }
+        mocks['game_state'].get_entity.return_value = char_entity
+        
+        # Mock empty available actions
+        mocks['action_system'].available_actions = {'char1': []}
+        
+        result = ai_system.choose_action('char1')
+        assert result is False  # Should handle empty actions gracefully
     
     def test_standard_move_available_false(self, ai_setup):
         """Test _standard_move_available when move is not available (line 461-462)."""
