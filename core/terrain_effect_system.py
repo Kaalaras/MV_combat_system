@@ -58,6 +58,16 @@ class TerrainEffectSystem:
         for entity_id, (pos,) in entities_with_position:
             if not pos:
                 continue
+            
+            # Convert integer entity ID back to original string ID for terrain operations
+            terrain_entity_id = entity_id
+            if hasattr(self.game_state, '_entity_id_mapping'):
+                # Find the original string ID that maps to this integer ID
+                for string_id, int_id in self.game_state._entity_id_mapping.items():
+                    if int_id == entity_id:
+                        terrain_entity_id = string_id
+                        break
+            
             x, y = pos.x, pos.y
             effects = self.terrain.get_effects(x, y) if hasattr(self.terrain, 'get_effects') else []
             if not effects:
@@ -78,9 +88,9 @@ class TerrainEffectSystem:
                     break
                 if not self.terrain.is_walkable(nx, ny, getattr(pos,'width',1), getattr(pos,'height',1)):
                     break
-                if self.terrain.is_occupied(nx, ny, getattr(pos,'width',1), getattr(pos,'height',1), entity_id_to_ignore=entity_id):
+                if self.terrain.is_occupied(nx, ny, getattr(pos,'width',1), getattr(pos,'height',1), entity_id_to_ignore=terrain_entity_id):
                     break
-                moved = self.terrain.move_entity(entity_id, nx, ny)
+                moved = self.terrain.move_entity(terrain_entity_id, nx, ny)
                 if not moved:
                     break
                 pos.x, pos.y = nx, ny
@@ -89,7 +99,7 @@ class TerrainEffectSystem:
             if (cur_x, cur_y) != (x, y):
                 if self.event_bus:
                     self.event_bus.publish(EVT_TERRAIN_CURRENT_MOVED,
-                                           entity_id=entity_id,
+                                           entity_id=terrain_entity_id,
                                            old_position=(x, y),
                                            new_position=(cur_x, cur_y),
                                            dx=dx, dy=dy, magnitude=steps)
