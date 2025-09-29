@@ -360,16 +360,27 @@ class ConflictResolver:
                 resolution = await self.resolution_rules[conflict_type](conflict)
                 resolutions.append(resolution)
             else:
-                # Default resolution - first action wins
-                resolution = {
-                    'conflict_id': conflict.get('conflict_id'),
-                    'resolution_type': 'first_wins',
-                    'winner': conflict.get('actions', [{}])[0].get('command_id'),
-                    'losers': [
-                        action.get('command_id') 
-                        for action in conflict.get('actions', [])[1:]
-                    ]
-                }
+                # Default resolution - initiative order determines winner
+                actions = conflict.get('actions', [])
+                if actions:
+                    # Sort by sequence number (initiative order)
+                    actions.sort(key=lambda a: a.get('sequence_number', 0))
+                    resolution = {
+                        'conflict_id': conflict.get('conflict_id'),
+                        'resolution_type': 'initiative_order',
+                        'winner': actions[0].get('command_id'),
+                        'losers': [
+                            action.get('command_id') 
+                            for action in actions[1:]
+                        ],
+                        'details': 'Conflict resolved by initiative order'
+                    }
+                else:
+                    resolution = {
+                        'conflict_id': conflict.get('conflict_id'),
+                        'resolution_type': 'no_action',
+                        'details': 'No actions to resolve'
+                    }
                 resolutions.append(resolution)
         
         return resolutions
@@ -450,28 +461,52 @@ class ConflictResolver:
         }
     
     async def _resolve_target_conflict(self, conflict: Dict[str, Any]) -> Dict[str, Any]:
-        """Resolve target conflict - all attacks proceed"""
+        """Resolve target conflict - initiative order determines attack sequence"""
+        actions = conflict.get('actions', [])
+        if not actions:
+            return {'conflict_id': conflict.get('conflict_id'), 'resolution_type': 'no_action'}
+        
+        # Sort by sequence number (initiative order)
+        actions.sort(key=lambda a: a.get('sequence_number', 0))
+        
         return {
             'conflict_id': conflict.get('conflict_id'),
-            'resolution_type': 'all_proceed',
-            'details': 'Multiple attacks on same target - all proceed'
+            'resolution_type': 'initiative_sequence',
+            'execution_order': [action.get('command_id') for action in actions],
+            'details': 'Multiple attacks resolved in initiative order'
         }
     
     async def _resolve_resource_conflict(self, conflict: Dict[str, Any]) -> Dict[str, Any]:
-        """Resolve resource conflict"""
-        # Implementation would depend on specific resource rules
+        """Resolve resource conflict - initiative order determines access"""
+        actions = conflict.get('actions', [])
+        if not actions:
+            return {'conflict_id': conflict.get('conflict_id'), 'resolution_type': 'no_action'}
+        
+        # Sort by sequence number (initiative order)
+        actions.sort(key=lambda a: a.get('sequence_number', 0))
+        
         return {
             'conflict_id': conflict.get('conflict_id'),
-            'resolution_type': 'first_wins',
-            'details': 'Resource conflict resolved by first action'
+            'resolution_type': 'initiative_order',
+            'winner': actions[0].get('command_id'),
+            'losers': [action.get('command_id') for action in actions[1:]],
+            'details': 'Resource conflict resolved by initiative order'
         }
     
     async def _resolve_timing_conflict(self, conflict: Dict[str, Any]) -> Dict[str, Any]:
-        """Resolve timing conflict"""
+        """Resolve timing conflict - initiative order determines execution sequence"""
+        actions = conflict.get('actions', [])
+        if not actions:
+            return {'conflict_id': conflict.get('conflict_id'), 'resolution_type': 'no_action'}
+        
+        # Sort by sequence number (initiative order)
+        actions.sort(key=lambda a: a.get('sequence_number', 0))
+        
         return {
             'conflict_id': conflict.get('conflict_id'),
-            'resolution_type': 'simultaneous',
-            'details': 'Actions execute simultaneously'
+            'resolution_type': 'initiative_sequence',
+            'execution_order': [action.get('command_id') for action in actions],
+            'details': 'Timing conflict resolved by initiative order'
         }
 
 

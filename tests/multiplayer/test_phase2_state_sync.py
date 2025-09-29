@@ -393,15 +393,33 @@ class TestConflictResolver:
             }
         ]
         
+        # Add a target conflict test
+        target_conflict = {
+            'conflict_id': 'target_conflict1',
+            'type': 'target_conflict', 
+            'target_id': 'enemy1',
+            'actions': [
+                {'command_id': 'attack2', 'sequence_number': 2},
+                {'command_id': 'attack1', 'sequence_number': 1},
+                {'command_id': 'attack3', 'sequence_number': 3}
+            ]
+        }
+        conflicts.append(target_conflict)
+        
         resolutions = await conflict_resolver.resolve_conflicts(conflicts)
         
-        assert len(resolutions) == 1
-        resolution = resolutions[0]
+        assert len(resolutions) == 2  # Movement and target conflicts
         
-        assert resolution['conflict_id'] == 'conflict1'
-        assert resolution['resolution_type'] == 'initiative_order'
-        assert resolution['winner'] == 'move1'  # Earlier sequence wins
-        assert 'move2' in resolution['losers']
+        # Check movement conflict resolution
+        movement_resolution = next(r for r in resolutions if r['conflict_id'] == 'conflict1')
+        assert movement_resolution['resolution_type'] == 'initiative_order'
+        assert movement_resolution['winner'] == 'move1'  # Earlier sequence wins
+        assert 'move2' in movement_resolution['losers']
+        
+        # Check target conflict resolution  
+        target_resolution = next(r for r in resolutions if r['conflict_id'] == 'target_conflict1')
+        assert target_resolution['resolution_type'] == 'initiative_sequence'
+        assert target_resolution['execution_order'] == ['attack1', 'attack2', 'attack3']  # Initiative order
 
 
 class TestGameStateSynchronizer:
