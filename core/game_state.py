@@ -386,9 +386,20 @@ class GameState:
         if not self.ecs_manager:
             return 1, 1
             
+        # Handle entity ID mapping
+        actual_entity_id = entity_id
+        if hasattr(self, '_entity_id_mapping') and entity_id in self._entity_id_mapping:
+            actual_entity_id = self._entity_id_mapping[entity_id]
+        else:
+            # Try to convert to int for ECS lookup
+            try:
+                actual_entity_id = int(entity_id)
+            except (ValueError, TypeError):
+                return 1, 1
+            
         try:
             from ecs.components.position import PositionComponent
-            pos_comp = self.ecs_manager.get_component(int(entity_id), PositionComponent)
+            pos_comp = self.ecs_manager.get_component(actual_entity_id, PositionComponent)
             return getattr(pos_comp, 'width', 1), getattr(pos_comp, 'height', 1)
         except (ImportError, KeyError, ValueError):
             return 1, 1  # Default size if entity doesn't exist or has no position
