@@ -54,10 +54,19 @@ class GameState:
         
         Args:
             ecs_manager: The ECS manager that handles all entity/component operations
+                        If None, a default ECS manager will be created for backward compatibility
         """
         # ===== ECS ARCHITECTURE FIX =====
         # REMOVED: self.entities = {} -- This was the critical ECS violation
         # All entity operations now go through the ECS manager
+        
+        # Auto-create ECS manager if none provided (for backward compatibility with tests)
+        if ecs_manager is None:
+            from ecs.ecs_manager import ECSManager
+            from core.event_bus import EventBus
+            event_bus = EventBus()
+            ecs_manager = ECSManager(event_bus)
+        
         self.ecs_manager: Optional[Any] = ecs_manager
         
         # ===== SYSTEM REFERENCES =====
@@ -123,7 +132,12 @@ class GameState:
                 ecs_components.append(EquipmentComponent(comp_value))
         
         if ecs_components:
-            self.ecs_manager.add_entity(entity_id, *ecs_components)
+            # Use create_entity instead of add_entity to avoid the string ID issue
+            new_entity_id = self.ecs_manager.create_entity(*ecs_components)
+            # Store the mapping for legacy lookups
+            if not hasattr(self, '_entity_id_mapping'):
+                self._entity_id_mapping = {}
+            self._entity_id_mapping[entity_id] = new_entity_id
 
     def get_entity(self, entity_id: str) -> Optional[Dict[str, Any]]:
         """
@@ -143,15 +157,21 @@ class GameState:
         if self.ecs_manager is None:
             return None
         
-        try:
-            entity_id_int = int(entity_id)
-            if not self.ecs_manager.entity_exists(entity_id_int):
+        # Check if we have a mapping for this entity ID
+        if hasattr(self, '_entity_id_mapping') and entity_id in self._entity_id_mapping:
+            actual_entity_id = self._entity_id_mapping[entity_id]
+        else:
+            # Try to convert to int for legacy support
+            try:
+                actual_entity_id = int(entity_id)
+            except (ValueError, TypeError):
                 return None
-        except (ValueError, TypeError):
+        
+        if not self.ecs_manager.entity_exists(actual_entity_id):
             return None
         
         # Return a bridge object that provides dict-like access to ECS components
-        return _EntityBridge(self.ecs_manager, entity_id)
+        return _EntityBridge(self.ecs_manager, actual_entity_id)
 
     def remove_entity(self, entity_id: str) -> None:
         """
