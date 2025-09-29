@@ -45,8 +45,18 @@ class VisionSystem:
         ent = self._get_entity(entity_id)
         if not ent:
             return None
-        # Support dict ou objet
-        char_ref = ent.get("character_ref") if isinstance(ent, dict) else getattr(ent, "character_ref", None)
+        
+        # Handle both dict and EntityBridge objects
+        char_ref = None
+        if isinstance(ent, dict):
+            char_ref = ent.get("character_ref")
+        elif hasattr(ent, 'get'):
+            # EntityBridge object
+            char_ref = ent.get("character_ref")
+        else:
+            # Direct attribute access
+            char_ref = getattr(ent, "character_ref", None)
+            
         return getattr(char_ref, "character", None) if char_ref else None
 
     # -------------------------- Capacités de vision --------------------------
@@ -84,7 +94,18 @@ class VisionSystem:
         ent = self._get_entity(defender_id)
         if not ent:
             return 0
-        pos = ent.get("position") if isinstance(ent, dict) else getattr(ent, "position", None)
+        
+        # Handle both dict and EntityBridge objects
+        pos = None
+        if isinstance(ent, dict):
+            pos = ent.get("position")
+        elif hasattr(ent, 'get'):
+            # EntityBridge object
+            pos = ent.get("position")
+        else:
+            # Direct attribute access
+            pos = getattr(ent, "position", None)
+            
         if not pos:
             return 0
         x, y = getattr(pos, "x", None), getattr(pos, "y", None)

@@ -125,10 +125,28 @@ class TurnOrderSystem:
         """
         self.round_number += 1
         self.reserved_tiles.clear()
-        self.turn_order = [
-            eid for eid, ent in self.game_state.entities.items()
-            if "character_ref" in ent and not ent["character_ref"].character.is_dead
-        ]
+        
+        # Get all entities with character_ref using ECS
+        from ecs.components.character_ref import CharacterRefComponent
+        
+        living_entities = []
+        if self.game_state.ecs_manager:
+            try:
+                entities_with_char_ref = self.game_state.ecs_manager.get_components(CharacterRefComponent)
+                for eid, (char_ref_comp,) in entities_with_char_ref:
+                    if not char_ref_comp.character.is_dead:
+                        living_entities.append(str(eid))
+            except AttributeError:
+                # Fallback if get_components doesn't exist
+                for entity_id in self.game_state.ecs_manager.get_all_entities():
+                    try:
+                        char_ref_comp = self.game_state.ecs_manager.get_component(entity_id, CharacterRefComponent)
+                        if char_ref_comp and not char_ref_comp.character.is_dead:
+                            living_entities.append(str(entity_id))
+                    except:
+                        continue
+        
+        self.turn_order = living_entities
         # Sort by initiative desc, tie-breaker desc
         self.turn_order.sort(
             key=lambda eid: (

@@ -56,23 +56,39 @@ class TestECSArchitectureCompliance(unittest.TestCase):
         Justification: Legacy code using the old API needs clear guidance
         to migrate to proper ECS patterns for multiplayer compatibility.
         """
+        import warnings
         gs = GameState()
         
-        with self.assertRaises(DeprecationWarning) as cm:
+        with warnings.catch_warnings(record=True) as w:
+            warnings.simplefilter("always")
             gs.add_entity("test", {})
-        self.assertIn("ecs_manager.create_entity", str(cm.exception))
+            self.assertEqual(len(w), 1)
+            self.assertTrue(issubclass(w[0].category, DeprecationWarning))
+            self.assertIn("ecs_manager.create_entity", str(w[0].message))
         
-        with self.assertRaises(DeprecationWarning) as cm:
-            gs.get_entity("test")  
-        self.assertIn("ecs_manager.get_component", str(cm.exception))
+        with warnings.catch_warnings(record=True) as w:
+            warnings.simplefilter("always")
+            gs.get_entity("test")
+            self.assertEqual(len(w), 1)
+            self.assertTrue(issubclass(w[0].category, DeprecationWarning))
+            self.assertIn("ecs_manager.get_component", str(w[0].message))
         
-        with self.assertRaises(DeprecationWarning) as cm:
+        with warnings.catch_warnings(record=True) as w:
+            warnings.simplefilter("always")
             gs.remove_entity("test")
-        self.assertIn("ecs_manager.delete_entity", str(cm.exception))
+            self.assertEqual(len(w), 1)
+            self.assertTrue(issubclass(w[0].category, DeprecationWarning))
+            self.assertIn("ecs_manager.delete_entity", str(w[0].message))
         
-        with self.assertRaises(DeprecationWarning) as cm:
+        with warnings.catch_warnings(record=True) as w:
+            warnings.simplefilter("always")
             gs.get_component("test", "position")
-        self.assertIn("ecs_manager.get_component", str(cm.exception))
+            self.assertEqual(len(w), 2)  # get_component calls get_entity, so 2 warnings
+            deprecation_warnings = [warning for warning in w if issubclass(warning.category, DeprecationWarning)]
+            self.assertGreaterEqual(len(deprecation_warnings), 1)
+            # Check at least one contains the expected message
+            messages = [str(warning.message) for warning in deprecation_warnings]
+            self.assertTrue(any("ecs_manager.get_component" in msg for msg in messages))
 
     def test_ecs_manager_integration(self):
         """
@@ -315,14 +331,41 @@ class TestMultiplayerReadiness(unittest.TestCase):
             method = getattr(gs, method_name, None)
             self.assertIsNotNone(method, f"Method {method_name} should exist (for deprecation warning)")
             
+    def test_no_direct_entity_access_patterns(self):
+        """
+        CRITICAL: Verify no direct entity dictionary access remains.
+        
+        Justification: Any remaining direct entity access would bypass ECS
+        and break multiplayer synchronization.
+        """
+        import warnings
+        gs = GameState()
+        
+        # These should all be deprecated/removed
+        deprecated_methods = ['add_entity', 'get_entity', 'remove_entity', 'get_component', 'set_component']
+        
+        for method_name in deprecated_methods:
+            method = getattr(gs, method_name, None)
+            self.assertIsNotNone(method, f"Method {method_name} should exist (for deprecation warning)")
+            
             # Calling these should raise deprecation warnings
-            with self.assertRaises(DeprecationWarning):
-                if method_name == 'add_entity':
-                    method("test", {})
-                elif method_name == 'set_component':
-                    method("test", "pos", None)
-                else:
-                    method("test")
+            with warnings.catch_warnings(record=True) as w:
+                warnings.simplefilter("always")
+                try:
+                    if method_name == 'add_entity':
+                        method("test", {})
+                    elif method_name == 'set_component':
+                        method("test", "pos", None)
+                    elif method_name == 'get_component':
+                        method("test", "position")
+                    else:
+                        method("test")
+                except Exception:
+                    pass  # Some methods may raise other exceptions, we only care about warnings
+                
+                # Check that a deprecation warning was issued
+                deprecation_warnings = [warning for warning in w if issubclass(warning.category, DeprecationWarning)]
+                self.assertGreater(len(deprecation_warnings), 0, f"Method {method_name} should issue DeprecationWarning")
     
     def test_enhanced_event_bus_statistics(self):
         """

@@ -54,10 +54,19 @@ class GameState:
         
         Args:
             ecs_manager: The ECS manager that handles all entity/component operations
+                        If None, a default ECS manager will be created for backward compatibility
         """
         # ===== ECS ARCHITECTURE FIX =====
         # REMOVED: self.entities = {} -- This was the critical ECS violation
         # All entity operations now go through the ECS manager
+        
+        # Auto-create ECS manager if none provided (for backward compatibility with tests)
+        if ecs_manager is None:
+            from ecs.ecs_manager import ECSManager
+            from core.event_bus import EventBus
+            event_bus = EventBus()
+            ecs_manager = ECSManager(event_bus)
+        
         self.ecs_manager: Optional[Any] = ecs_manager
         
         # ===== SYSTEM REFERENCES =====
@@ -107,6 +116,8 @@ class GameState:
         from ecs.components.character_ref import CharacterRefComponent
         from ecs.components.health import HealthComponent
         from ecs.components.equipment import EquipmentComponent
+        from ecs.components.cover import CoverComponent
+        from ecs.components.structure import StructureComponent
         
         ecs_components = []
         for comp_name, comp_value in components.items():
@@ -120,10 +131,23 @@ class GameState:
                 ecs_components.append(HealthComponent(getattr(comp_value, 'current', 100), 
                                                       getattr(comp_value, 'maximum', 100)))
             elif comp_name == 'equipment':
-                ecs_components.append(EquipmentComponent(comp_value))
+                # comp_value should already be an EquipmentComponent instance
+                ecs_components.append(comp_value)
+            elif comp_name == 'cover':
+                # comp_value should already be a CoverComponent instance
+                ecs_components.append(comp_value)
+            elif comp_name == 'structure':
+                # comp_value should already be a StructureComponent instance
+                ecs_components.append(comp_value)
+            # Note: 'conditions' is handled differently in the ECS system
         
         if ecs_components:
-            self.ecs_manager.add_entity(entity_id, *ecs_components)
+            # Use create_entity instead of add_entity to avoid the string ID issue
+            new_entity_id = self.ecs_manager.create_entity(*ecs_components)
+            # Store the mapping for legacy lookups
+            if not hasattr(self, '_entity_id_mapping'):
+                self._entity_id_mapping = {}
+            self._entity_id_mapping[entity_id] = new_entity_id
 
     def get_entity(self, entity_id: str) -> Optional[Dict[str, Any]]:
         """
@@ -143,15 +167,21 @@ class GameState:
         if self.ecs_manager is None:
             return None
         
-        try:
-            entity_id_int = int(entity_id)
-            if not self.ecs_manager.entity_exists(entity_id_int):
+        # Check if we have a mapping for this entity ID
+        if hasattr(self, '_entity_id_mapping') and entity_id in self._entity_id_mapping:
+            actual_entity_id = self._entity_id_mapping[entity_id]
+        else:
+            # Try to convert to int for legacy support
+            try:
+                actual_entity_id = int(entity_id)
+            except (ValueError, TypeError):
                 return None
-        except (ValueError, TypeError):
+        
+        if not self.ecs_manager.entity_exists(actual_entity_id):
             return None
         
         # Return a bridge object that provides dict-like access to ECS components
-        return _EntityBridge(self.ecs_manager, entity_id)
+        return _EntityBridge(self.ecs_manager, actual_entity_id)
 
     def remove_entity(self, entity_id: str) -> None:
         """
@@ -167,8 +197,22 @@ class GameState:
         if self.ecs_manager is None:
             return
         
-        if self.ecs_manager.entity_exists(entity_id):
-            self.ecs_manager.delete_entity(entity_id)
+        # Handle entity ID mapping (same logic as get_entity)
+        if hasattr(self, '_entity_id_mapping') and entity_id in self._entity_id_mapping:
+            actual_entity_id = self._entity_id_mapping[entity_id]
+        else:
+            # Try to convert to int for legacy support
+            try:
+                actual_entity_id = int(entity_id)
+            except (ValueError, TypeError):
+                return
+        
+        if self.ecs_manager.entity_exists(actual_entity_id):
+            self.ecs_manager.delete_entity(actual_entity_id)
+            
+            # Also remove from entity ID mapping
+            if hasattr(self, '_entity_id_mapping') and entity_id in self._entity_id_mapping:
+                del self._entity_id_mapping[entity_id]
 
     def get_component(self, entity_id: str, component_name: str) -> Optional[Any]:
         """
@@ -356,9 +400,20 @@ class GameState:
         if not self.ecs_manager:
             return 1, 1
             
+        # Handle entity ID mapping
+        actual_entity_id = entity_id
+        if hasattr(self, '_entity_id_mapping') and entity_id in self._entity_id_mapping:
+            actual_entity_id = self._entity_id_mapping[entity_id]
+        else:
+            # Try to convert to int for ECS lookup
+            try:
+                actual_entity_id = int(entity_id)
+            except (ValueError, TypeError):
+                return 1, 1
+            
         try:
             from ecs.components.position import PositionComponent
-            pos_comp = self.ecs_manager.get_component(int(entity_id), PositionComponent)
+            pos_comp = self.ecs_manager.get_component(actual_entity_id, PositionComponent)
             return getattr(pos_comp, 'width', 1), getattr(pos_comp, 'height', 1)
         except (ImportError, KeyError, ValueError):
             return 1, 1  # Default size if entity doesn't exist or has no position
@@ -454,22 +509,8 @@ class GameState:
         """
         return self.teams
     
-    @property
-    def entities(self) -> '_EntitiesBridge':
-        """
-        MIGRATION BRIDGE: Provides dict-like access to entities through ECS.
-        
-        This property maintains backward compatibility during ECS migration
-        while providing access to entities through the ECS system.
-        """
-        import warnings
-        warnings.warn(
-            "Direct access to game_state.entities is deprecated. "
-            "Use ecs_manager methods directly for better performance and proper ECS architecture.",
-            DeprecationWarning,
-            stacklevel=2
-        )
-        return _EntitiesBridge(self.ecs_manager)
+    # REMOVED: entities property to comply with proper ECS architecture
+    # All entity access should go through ecs_manager directly
 
 
 class _EntityBridge:
@@ -502,6 +543,8 @@ class _EntityBridge:
             'character_ref': 'ecs.components.character_ref.CharacterRefComponent', 
             'health': 'ecs.components.health.HealthComponent',
             'equipment': 'ecs.components.equipment.EquipmentComponent',
+            'cover': 'ecs.components.cover.CoverComponent',
+            'structure': 'ecs.components.structure.StructureComponent',
             'willpower': 'ecs.components.willpower.WillpowerComponent',
             'facing': 'ecs.components.facing.FacingComponent',
             'velocity': 'ecs.components.velocity.VelocityComponent',
@@ -539,6 +582,8 @@ class _EntityBridge:
             'character_ref': 'ecs.components.character_ref.CharacterRefComponent',
             'health': 'ecs.components.health.HealthComponent', 
             'equipment': 'ecs.components.equipment.EquipmentComponent',
+            'cover': 'ecs.components.cover.CoverComponent',
+            'structure': 'ecs.components.structure.StructureComponent',
             'willpower': 'ecs.components.willpower.WillpowerComponent',
             'facing': 'ecs.components.facing.FacingComponent',
             'velocity': 'ecs.components.velocity.VelocityComponent',

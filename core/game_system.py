@@ -1,5 +1,5 @@
 from typing import Dict, Optional, Any, List
-from tests.manual.battle_map_utils import draw_battle_map
+from utils.battle_map_utils import draw_battle_map
 import os
 
 
