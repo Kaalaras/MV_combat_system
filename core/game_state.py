@@ -129,7 +129,8 @@ class GameState:
                 ecs_components.append(HealthComponent(getattr(comp_value, 'current', 100), 
                                                       getattr(comp_value, 'maximum', 100)))
             elif comp_name == 'equipment':
-                ecs_components.append(EquipmentComponent(comp_value))
+                # comp_value should already be an EquipmentComponent instance
+                ecs_components.append(comp_value)
         
         if ecs_components:
             # Use create_entity instead of add_entity to avoid the string ID issue
@@ -474,22 +475,8 @@ class GameState:
         """
         return self.teams
     
-    @property
-    def entities(self) -> '_EntitiesBridge':
-        """
-        MIGRATION BRIDGE: Provides dict-like access to entities through ECS.
-        
-        This property maintains backward compatibility during ECS migration
-        while providing access to entities through the ECS system.
-        """
-        import warnings
-        warnings.warn(
-            "Direct access to game_state.entities is deprecated. "
-            "Use ecs_manager methods directly for better performance and proper ECS architecture.",
-            DeprecationWarning,
-            stacklevel=2
-        )
-        return _EntitiesBridge(self.ecs_manager)
+    # REMOVED: entities property to comply with proper ECS architecture
+    # All entity access should go through ecs_manager directly
 
 
 class _EntityBridge:
