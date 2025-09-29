@@ -40,8 +40,15 @@ class TestAIFinal90Percent:
     def setup_method(self):
         """Setup comprehensive test environment for AI system testing."""
         self.game_state = Mock()
+        self.movement_system = Mock()
+        self.action_system = Mock()
         self.event_bus = Mock()
-        self.ai_system = BasicAISystem(self.game_state, self.event_bus)
+        self.ai_system = BasicAISystem(
+            self.game_state, 
+            self.movement_system, 
+            self.action_system, 
+            self.event_bus
+        )
         
         # Setup mock entities and components
         self.setup_mock_entities()
@@ -62,10 +69,20 @@ class TestAIFinal90Percent:
         })
         
         # Setup weapons
-        self.ranged_weapon = Weapon(name='Rifle', weapon_type=WeaponType.FIREARM, 
-                                  weapon_range=8, damage_bonus=2)
-        self.melee_weapon = Weapon(name='Knife', weapon_type=WeaponType.BRAWL, 
-                                 weapon_range=1, damage_bonus=1)
+        self.ranged_weapon = Weapon(
+            name='Rifle', 
+            damage_bonus=2, 
+            weapon_range=8, 
+            damage_type='superficial',
+            weapon_type=WeaponType.FIREARM
+        )
+        self.melee_weapon = Weapon(
+            name='Knife', 
+            damage_bonus=1, 
+            weapon_range=1, 
+            damage_type='superficial',
+            weapon_type=WeaponType.BRAWL
+        )
 
     def test_core_decision_logic_immediate_ranged_success(self):
         """

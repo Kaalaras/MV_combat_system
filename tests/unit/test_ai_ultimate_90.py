@@ -37,7 +37,12 @@ class TestAIUltimate90Coverage:
         self.turn_order_system = Mock()
         self.turn_order_system.reserved_tiles = set()
         
-        self.ai_system = BasicAISystem(self.game_state, self.event_bus)
+        self.ai_system = BasicAISystem(
+            self.game_state, 
+            self.movement_system, 
+            self.action_system, 
+            self.event_bus
+        )
         
         # Setup realistic game entities
         self.setup_realistic_entities()
