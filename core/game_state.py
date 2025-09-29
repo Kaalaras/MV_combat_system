@@ -197,8 +197,22 @@ class GameState:
         if self.ecs_manager is None:
             return
         
-        if self.ecs_manager.entity_exists(entity_id):
-            self.ecs_manager.delete_entity(entity_id)
+        # Handle entity ID mapping (same logic as get_entity)
+        if hasattr(self, '_entity_id_mapping') and entity_id in self._entity_id_mapping:
+            actual_entity_id = self._entity_id_mapping[entity_id]
+        else:
+            # Try to convert to int for legacy support
+            try:
+                actual_entity_id = int(entity_id)
+            except (ValueError, TypeError):
+                return
+        
+        if self.ecs_manager.entity_exists(actual_entity_id):
+            self.ecs_manager.delete_entity(actual_entity_id)
+            
+            # Also remove from entity ID mapping
+            if hasattr(self, '_entity_id_mapping') and entity_id in self._entity_id_mapping:
+                del self._entity_id_mapping[entity_id]
 
     def get_component(self, entity_id: str, component_name: str) -> Optional[Any]:
         """
