@@ -116,6 +116,8 @@ class GameState:
         from ecs.components.character_ref import CharacterRefComponent
         from ecs.components.health import HealthComponent
         from ecs.components.equipment import EquipmentComponent
+        from ecs.components.cover import CoverComponent
+        from ecs.components.structure import StructureComponent
         
         ecs_components = []
         for comp_name, comp_value in components.items():
@@ -131,6 +133,13 @@ class GameState:
             elif comp_name == 'equipment':
                 # comp_value should already be an EquipmentComponent instance
                 ecs_components.append(comp_value)
+            elif comp_name == 'cover':
+                # comp_value should already be a CoverComponent instance
+                ecs_components.append(comp_value)
+            elif comp_name == 'structure':
+                # comp_value should already be a StructureComponent instance
+                ecs_components.append(comp_value)
+            # Note: 'conditions' is handled differently in the ECS system
         
         if ecs_components:
             # Use create_entity instead of add_entity to avoid the string ID issue
@@ -509,6 +518,8 @@ class _EntityBridge:
             'character_ref': 'ecs.components.character_ref.CharacterRefComponent', 
             'health': 'ecs.components.health.HealthComponent',
             'equipment': 'ecs.components.equipment.EquipmentComponent',
+            'cover': 'ecs.components.cover.CoverComponent',
+            'structure': 'ecs.components.structure.StructureComponent',
             'willpower': 'ecs.components.willpower.WillpowerComponent',
             'facing': 'ecs.components.facing.FacingComponent',
             'velocity': 'ecs.components.velocity.VelocityComponent',
@@ -546,6 +557,8 @@ class _EntityBridge:
             'character_ref': 'ecs.components.character_ref.CharacterRefComponent',
             'health': 'ecs.components.health.HealthComponent', 
             'equipment': 'ecs.components.equipment.EquipmentComponent',
+            'cover': 'ecs.components.cover.CoverComponent',
+            'structure': 'ecs.components.structure.StructureComponent',
             'willpower': 'ecs.components.willpower.WillpowerComponent',
             'facing': 'ecs.components.facing.FacingComponent',
             'velocity': 'ecs.components.velocity.VelocityComponent',

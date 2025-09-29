@@ -36,8 +36,26 @@ class TerrainEffectSystem:
         """Process currents: push entities in current tiles.
         Each entity checked once using its starting anchor position.
         If multiple current effects on same tile, apply the first in list (legacy simple behavior)."""
-        for entity_id, comps in list(self.game_state.entities.items()):
-            pos = comps.get("position")
+        # Get all entities with position components using ECS
+        from ecs.components.position import PositionComponent
+        
+        if not self.game_state.ecs_manager:
+            return
+            
+        try:
+            entities_with_position = self.game_state.ecs_manager.get_components(PositionComponent)
+        except AttributeError:
+            # Fallback if get_components doesn't exist
+            entities_with_position = []
+            for entity_id in self.game_state.ecs_manager.get_all_entities():
+                try:
+                    pos = self.game_state.ecs_manager.get_component(entity_id, PositionComponent)
+                    if pos:
+                        entities_with_position.append((entity_id, (pos,)))
+                except:
+                    continue
+        
+        for entity_id, (pos,) in entities_with_position:
             if not pos:
                 continue
             x, y = pos.x, pos.y
