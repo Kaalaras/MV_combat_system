@@ -36,10 +36,38 @@ class TerrainEffectSystem:
         """Process currents: push entities in current tiles.
         Each entity checked once using its starting anchor position.
         If multiple current effects on same tile, apply the first in list (legacy simple behavior)."""
-        for entity_id, comps in list(self.game_state.entities.items()):
-            pos = comps.get("position")
+        # Get all entities with position components using ECS
+        from ecs.components.position import PositionComponent
+        
+        if not self.game_state.ecs_manager:
+            return
+            
+        try:
+            entities_with_position = self.game_state.ecs_manager.get_components(PositionComponent)
+        except AttributeError:
+            # Fallback if get_components doesn't exist
+            entities_with_position = []
+            for entity_id in self.game_state.ecs_manager.get_all_entities():
+                try:
+                    pos = self.game_state.ecs_manager.get_component(entity_id, PositionComponent)
+                    if pos:
+                        entities_with_position.append((entity_id, (pos,)))
+                except:
+                    continue
+        
+        for entity_id, (pos,) in entities_with_position:
             if not pos:
                 continue
+            
+            # Convert integer entity ID back to original string ID for terrain operations
+            terrain_entity_id = entity_id
+            if hasattr(self.game_state, '_entity_id_mapping'):
+                # Find the original string ID that maps to this integer ID
+                for string_id, int_id in self.game_state._entity_id_mapping.items():
+                    if int_id == entity_id:
+                        terrain_entity_id = string_id
+                        break
+            
             x, y = pos.x, pos.y
             effects = self.terrain.get_effects(x, y) if hasattr(self.terrain, 'get_effects') else []
             if not effects:
@@ -60,9 +88,9 @@ class TerrainEffectSystem:
                     break
                 if not self.terrain.is_walkable(nx, ny, getattr(pos,'width',1), getattr(pos,'height',1)):
                     break
-                if self.terrain.is_occupied(nx, ny, getattr(pos,'width',1), getattr(pos,'height',1), entity_id_to_ignore=entity_id):
+                if self.terrain.is_occupied(nx, ny, getattr(pos,'width',1), getattr(pos,'height',1), entity_id_to_ignore=terrain_entity_id):
                     break
-                moved = self.terrain.move_entity(entity_id, nx, ny)
+                moved = self.terrain.move_entity(terrain_entity_id, nx, ny)
                 if not moved:
                     break
                 pos.x, pos.y = nx, ny
@@ -71,7 +99,7 @@ class TerrainEffectSystem:
             if (cur_x, cur_y) != (x, y):
                 if self.event_bus:
                     self.event_bus.publish(EVT_TERRAIN_CURRENT_MOVED,
-                                           entity_id=entity_id,
+                                           entity_id=terrain_entity_id,
                                            old_position=(x, y),
                                            new_position=(cur_x, cur_y),
                                            dx=dx, dy=dy, magnitude=steps)

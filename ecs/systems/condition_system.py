@@ -422,9 +422,23 @@ class ConditionSystem:
         for entity_id, name in expired:
             self.remove_condition(entity_id, name, reason='expired')
             self._publish('condition_expired', entity_id=entity_id, condition=name)
-        for eid, ent in self.game_state.entities.items():
-            if 'character_ref' in ent:
-                self.recheck_damage_based(eid)
+        # Recheck damage-based conditions for all entities with character_ref
+        from ecs.components.character_ref import CharacterRefComponent
+        
+        if self.game_state.ecs_manager:
+            try:
+                entities_with_char_ref = self.game_state.ecs_manager.get_components(CharacterRefComponent)
+                for eid, (char_ref,) in entities_with_char_ref:
+                    self.recheck_damage_based(eid)
+            except AttributeError:
+                # Fallback if get_components doesn't exist
+                for entity_id in self.game_state.ecs_manager.get_all_entities():
+                    try:
+                        char_ref = self.game_state.ecs_manager.get_component(entity_id, CharacterRefComponent)
+                        if char_ref:
+                            self.recheck_damage_based(entity_id)
+                    except:
+                        continue
 
     def _on_damage_inflicted(self, target_id: str, **evt):
         self.recheck_damage_based(target_id)

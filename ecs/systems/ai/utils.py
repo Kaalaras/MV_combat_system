@@ -7,16 +7,60 @@ def get_enemies(game_state, char_id: str) -> List[str]:
     Get a list of all enemy entity IDs for the specified character.
     """
     char = game_state.get_entity(char_id)["character_ref"].character
-    return [eid for eid, ent in game_state.entities.items()
-            if eid != char_id and char.get_alliance(eid) == "enemy" and not ent["character_ref"].character.is_dead]
+    
+    # Get all entities with character_ref using ECS
+    from ecs.components.character_ref import CharacterRefComponent
+    
+    if not game_state.ecs_manager:
+        return []
+    
+    enemies = []
+    try:
+        entities_with_char_ref = game_state.ecs_manager.get_components(CharacterRefComponent)
+        for eid, (char_ref_comp,) in entities_with_char_ref:
+            if str(eid) != char_id and char.get_alliance(str(eid)) == "enemy" and not char_ref_comp.character.is_dead:
+                enemies.append(str(eid))
+    except AttributeError:
+        # Fallback if get_components doesn't exist
+        for entity_id in game_state.ecs_manager.get_all_entities():
+            try:
+                char_ref_comp = game_state.ecs_manager.get_component(entity_id, CharacterRefComponent)
+                if char_ref_comp and str(entity_id) != char_id and char.get_alliance(str(entity_id)) == "enemy" and not char_ref_comp.character.is_dead:
+                    enemies.append(str(entity_id))
+            except:
+                continue
+    
+    return enemies
 
 def get_allies(game_state, char_id: str) -> List[str]:
     """
     Get a list of all ally entity IDs for the specified character.
     """
     char = game_state.get_entity(char_id)["character_ref"].character
-    return [eid for eid, ent in game_state.entities.items()
-            if eid != char_id and char.get_alliance(eid) == "ally" and not ent["character_ref"].character.is_dead]
+    
+    # Get all entities with character_ref using ECS
+    from ecs.components.character_ref import CharacterRefComponent
+    
+    if not game_state.ecs_manager:
+        return []
+    
+    allies = []
+    try:
+        entities_with_char_ref = game_state.ecs_manager.get_components(CharacterRefComponent)
+        for eid, (char_ref_comp,) in entities_with_char_ref:
+            if str(eid) != char_id and char.get_alliance(str(eid)) == "ally" and not char_ref_comp.character.is_dead:
+                allies.append(str(eid))
+    except AttributeError:
+        # Fallback if get_components doesn't exist
+        for entity_id in game_state.ecs_manager.get_all_entities():
+            try:
+                char_ref_comp = game_state.ecs_manager.get_component(entity_id, CharacterRefComponent)
+                if char_ref_comp and str(entity_id) != char_id and char.get_alliance(str(entity_id)) == "ally" and not char_ref_comp.character.is_dead:
+                    allies.append(str(entity_id))
+            except:
+                continue
+    
+    return allies
 
 def get_adjacent_enemies(game_state, enemies: List[str], char_id: str) -> List[str]:
     """
@@ -270,15 +314,34 @@ def get_occupied_static(game_state) -> Set[Tuple[int, int]]:
     Gather all statically occupied tiles: entity footprints and terrain obstacles (walls).
     """
     occupied = set()
-    # Add entity occupied tiles
-    for eid, ent in game_state.entities.items():
+    
+    # Add entity occupied tiles using ECS
+    from ecs.components.position import PositionComponent
+    
+    if game_state.ecs_manager:
         try:
-            bbox = get_entity_bounding_box(game_state, eid)
-        except TypeError:
-            continue
-        for x in range(bbox['x1'], bbox['x2'] + 1):
-            for y in range(bbox['y1'], bbox['y2'] + 1):
-                occupied.add((x, y))
+            entities_with_position = game_state.ecs_manager.get_components(PositionComponent)
+            for eid, (pos_comp,) in entities_with_position:
+                try:
+                    bbox = get_entity_bounding_box(game_state, str(eid))
+                    for x in range(bbox['x1'], bbox['x2'] + 1):
+                        for y in range(bbox['y1'], bbox['y2'] + 1):
+                            occupied.add((x, y))
+                except TypeError:
+                    continue
+        except AttributeError:
+            # Fallback if get_components doesn't exist
+            for entity_id in game_state.ecs_manager.get_all_entities():
+                try:
+                    pos_comp = game_state.ecs_manager.get_component(entity_id, PositionComponent)
+                    if pos_comp:
+                        bbox = get_entity_bounding_box(game_state, str(entity_id))
+                        for x in range(bbox['x1'], bbox['x2'] + 1):
+                            for y in range(bbox['y1'], bbox['y2'] + 1):
+                                occupied.add((x, y))
+                except (TypeError, AttributeError):
+                    continue
+    
     # Add terrain walls if available
     terrain = getattr(game_state, 'terrain', None)
     if terrain and hasattr(terrain, 'walls'):

@@ -44,24 +44,29 @@ class ECSManager:
     """
     Manages the Entity Component System architecture for the game.
 
-    This class wraps the esper.World instance and provides convenience methods
+    This class wraps the esper module functions and provides convenience methods
     for entity and component management, as well as system processing.
 
     Attributes:
-        world (esper.World): The esper world instance that handles entities and components
+        world_id (str): The unique identifier for this world in esper
         event_bus: The event system used for communication between game components
     """
 
-    def __init__(self, event_bus: Optional[Any] = None):
+    def __init__(self, event_bus: Optional[Any] = None, world_id: str = "default"):
         """
         Initialize the ECS Manager with an optional event bus.
 
         Args:
             event_bus: The event system for communication between components
                        (Default: None)
+            world_id: Unique identifier for this world (Default: "default")
         """
-        self.world = esper.World()
+        self.world_id = world_id
         self.event_bus = event_bus
+        
+        # Switch to our world (esper uses a global context)
+        esper.switch_world(self.world_id)
+        
         # Systems that need to be processed each frame/tick by esper
         # esper.Processor instances are added directly to the world.
         # Other systems might just subscribe to events and not need a process() method.
@@ -80,7 +85,8 @@ class ECSManager:
             > movement_system = MovementSystem()
             > ecs_manager.add_processor(movement_system, priority=2)
         """
-        self.world.add_processor(processor_instance, priority)
+        esper.switch_world(self.world_id)
+        esper.add_processor(processor_instance, priority)
 
     def remove_processor(self, processor_instance: esper.Processor):
         """
@@ -92,7 +98,8 @@ class ECSManager:
         Example:
             > ecs_manager.remove_processor(movement_system)
         """
-        self.world.remove_processor(processor_instance)
+        esper.switch_world(self.world_id)
+        esper.remove_processor(processor_instance)
 
     def get_processor(self, processor_type: type) -> Optional[esper.Processor]:
         """
@@ -109,7 +116,8 @@ class ECSManager:
             > if movement_sys:
             >     movement_sys.set_speed_multiplier(1.5)
         """
-        return self.world.get_processor(processor_type)
+        esper.switch_world(self.world_id)
+        return esper.get_processor(processor_type)
 
     def process(self, *args, **kwargs):
         """
@@ -125,7 +133,8 @@ class ECSManager:
             > # Process systems with delta time
             > ecs_manager.process(dt=0.016)
         """
-        self.world.process(*args, **kwargs)  # Pass any necessary context like dt, game_state
+        esper.switch_world(self.world_id)
+        esper.process(*args, **kwargs)  # Pass any necessary context like dt, game_state
 
     # Entity creation helpers can remain here or be moved to a factory
     def create_entity(self, *components: Any) -> int:
@@ -144,7 +153,8 @@ class ECSManager:
             >     Renderable(sprite_path="player.png")
             > )
         """
-        return self.world.create_entity(*components)
+        esper.switch_world(self.world_id)
+        return esper.create_entity(*components)
 
     def delete_entity(self, entity_id: int):
         """
@@ -156,7 +166,8 @@ class ECSManager:
         Example:
             > ecs_manager.delete_entity(enemy_entity)
         """
-        self.world.delete_entity(entity_id)
+        esper.switch_world(self.world_id)
+        esper.delete_entity(entity_id)
 
     def add_component(self, entity_id: int, component_instance: Any):
         """
@@ -172,7 +183,8 @@ class ECSManager:
         Example:
             > ecs_manager.add_component(player_entity, Health(max_hp=100))
         """
-        self.world.add_component(entity_id, component_instance)
+        esper.switch_world(self.world_id)
+        esper.add_component(entity_id, component_instance)
 
     def get_component(self, entity_id: int, component_type: type) -> Any:
         """
@@ -192,7 +204,8 @@ class ECSManager:
             > position = ecs_manager.get_component(player_entity, Position)
             > position.x += 5
         """
-        return self.world.component_for_entity(entity_id, component_type)
+        esper.switch_world(self.world_id)
+        return esper.component_for_entity(entity_id, component_type)
 
     def get_components(self, *component_types: type) -> List[Any]:
         """
@@ -209,7 +222,8 @@ class ECSManager:
             > for entity_id, (position, renderable) in ecs_manager.get_components(Position, Renderable):
             >     print(f"Entity {entity_id} is at position {position.x}, {position.y}")
         """
-        return self.world.get_components(*component_types)
+        esper.switch_world(self.world_id)
+        return esper.get_components(*component_types)
 
     def try_get_component(self, entity_id: int, component_type: type) -> Optional[Any]:
         """
@@ -230,7 +244,78 @@ class ECSManager:
             > if health:
             >     health.current -= 10
         """
-        try:
-            return self.world.component_for_entity(entity_id, component_type)
-        except KeyError:
-            return None
+        esper.switch_world(self.world_id)
+        return esper.try_component(entity_id, component_type)
+
+    def entity_exists(self, entity_id: int) -> bool:
+        """
+        Check if an entity exists in the world.
+
+        Args:
+            entity_id (int): The ID of the entity to check
+
+        Returns:
+            bool: True if the entity exists, False otherwise
+
+        Example:
+            > if ecs_manager.entity_exists(player_entity):
+            >     print("Player entity exists")
+        """
+        esper.switch_world(self.world_id)
+        return esper.entity_exists(entity_id)
+
+    def get_all_entities(self) -> List[int]:
+        """
+        Get a list of all entity IDs in the world.
+
+        Returns:
+            List[int]: List of all entity IDs
+
+        Example:
+            > all_entities = ecs_manager.get_all_entities()
+            > print(f"Total entities: {len(all_entities)}")
+        """
+        esper.switch_world(self.world_id)
+        # In esper, all entities are stored as keys in _entities
+        return list(esper._entities.keys())
+
+    def add_entity(self, entity_id: int, *components: Any) -> None:
+        """
+        Add an entity with a specific ID and components.
+
+        This is useful for migration scenarios where you need to preserve entity IDs.
+
+        Args:
+            entity_id (int): The desired entity ID
+            *components: Variable number of component instances to add to the entity
+
+        Example:
+            > ecs_manager.add_entity(123, Position(x=5, y=10), Health(100))
+        """
+        esper.switch_world(self.world_id)
+        
+        # Create a temporary entity to get components properly set up
+        temp_id = esper.create_entity(*components)
+        
+        # If we got the desired ID, we're done
+        if temp_id == entity_id:
+            return
+        
+        # Otherwise, manually reassign the entity ID
+        if temp_id in esper._entities:
+            # Move the entity record
+            esper._entities[entity_id] = esper._entities[temp_id]
+            del esper._entities[temp_id]
+            
+            # Update all component mappings
+            for component_type, component in esper._components.items():
+                if temp_id in component:
+                    # Handle both dict and set component containers
+                    if isinstance(component, dict):
+                        component[entity_id] = component[temp_id]
+                        del component[temp_id]
+                    elif isinstance(component, set):
+                        # For sets, we need to remove the old entity and add the new one
+                        # But since sets don't have values, this approach won't work
+                        # We need to reconstruct the entity with the new ID
+                        pass  # This case needs special handling

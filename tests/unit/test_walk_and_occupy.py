@@ -11,11 +11,19 @@ from ecs.components.position import PositionComponent
 class TestWalkAndOccupy(unittest.TestCase):
     def setUp(self):
         """Set up a test environment before each test."""
-        self.game_state = GameState()
+        from ecs.ecs_manager import ECSManager
+        from core.event_bus import EventBus
+        
+        # Create event bus and ECS manager
+        self.event_bus = MagicMock()
+        self.ecs_manager = ECSManager(self.event_bus)
+        
+        # Initialize game state with ECS manager
+        self.game_state = GameState(ecs_manager=self.ecs_manager)
         self.terrain = Terrain(width=10, height=10, game_state=self.game_state)
 
-        # Create mock event_bus
-        self.game_state.event_bus = MagicMock()
+        # Set up event bus
+        self.game_state.event_bus = self.event_bus
         self.terrain.event_bus = self.game_state.event_bus
 
     def test_is_walkable_1x1_entity(self):

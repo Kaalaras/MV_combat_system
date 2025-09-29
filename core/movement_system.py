@@ -101,34 +101,60 @@ class MovementSystem:
             mover_team = getattr(mover['character_ref'].character, 'team', None)
         mx, my = mover['position'].x, mover['position'].y
         sources: List[str] = []
-        for eid, ent in self.game_state.entities.items():
-            if eid == mover_id:
-                continue
-            if 'position' not in ent or 'character_ref' not in ent:
-                continue
-            char_ref = ent['character_ref']
-            char = getattr(char_ref, 'character', None)
-            if not char or not getattr(char, 'toggle_opportunity_attack', False):
-                continue
-            # Team / hostility filter: must be different team if both teams defined
-            attacker_team = getattr(char, 'team', None)
-            if mover_team is not None and attacker_team is not None and attacker_team == mover_team:
-                continue
-            # Require melee-capable weapon (melee or brawl) in equipment
-            equip = ent.get('equipment')
-            melee_capable = False
-            if equip and hasattr(equip, 'weapons'):
-                for w in getattr(equip, 'weapons', {}).values():
-                    wtype = getattr(w, 'weapon_type', None)
-                    base_type = getattr(wtype, 'value', wtype)
-                    if base_type in ('melee', 'brawl'):
-                        melee_capable = True
-                        break
-            if not melee_capable:
-                continue
-            pos = ent['position']
-            if abs(pos.x - mx) + abs(pos.y - my) == 1:  # adjacent
-                sources.append(eid)
+        
+        # Get all entities with character_ref using ECS
+        from ecs.components.character_ref import CharacterRefComponent
+        from ecs.components.position import PositionComponent
+        from ecs.components.equipment import EquipmentComponent
+        
+        if self.game_state.ecs_manager:
+            try:
+                entities_with_char_ref = self.game_state.ecs_manager.get_components(CharacterRefComponent)
+                for eid, (char_ref_comp,) in entities_with_char_ref:
+                    if str(eid) == mover_id:
+                        continue
+                    
+                    # Get position component
+                    try:
+                        pos_comp = self.game_state.ecs_manager.get_component(eid, PositionComponent)
+                        if not pos_comp:
+                            continue
+                    except:
+                        continue
+                    
+                    char = getattr(char_ref_comp, 'character', None)
+                    if not char or not getattr(char, 'toggle_opportunity_attack', False):
+                        continue
+                    
+                    # Team / hostility filter: must be different team if both teams defined
+                    attacker_team = getattr(char, 'team', None)
+                    if mover_team is not None and attacker_team is not None and attacker_team == mover_team:
+                        continue
+                    
+                    # Require melee-capable weapon (melee or brawl) in equipment
+                    melee_capable = False
+                    try:
+                        equip = self.game_state.ecs_manager.get_component(eid, EquipmentComponent)
+                        if equip and hasattr(equip, 'weapons'):
+                            for w in getattr(equip, 'weapons', {}).values():
+                                wtype = getattr(w, 'weapon_type', None)
+                                base_type = getattr(wtype, 'value', wtype)
+                                if base_type in ('melee', 'brawl'):
+                                    melee_capable = True
+                                    break
+                    except:
+                        pass
+                    
+                    if not melee_capable:
+                        continue
+                    
+                    # Range check: adjacent
+                    if abs(pos_comp.x - mx) + abs(pos_comp.y - my) == 1:  # adjacent
+                        sources.append(str(eid))
+            except AttributeError:
+                # Fallback if get_components doesn't exist
+                pass
+        
         return sources
 
     def _trigger_opportunity_attacks(self, mover_id: str, previous_adjacent: List[str]):
