@@ -117,6 +117,7 @@ class GameState:
             except (TypeError, ValueError) as exc:
                 # Ensure partial failures do not leave stale references
                 self.entities.pop(entity_id, None)
+                self._cleanup_partial_ecs_entity(entity_id)
                 logger.error(
                     "Failed to create ECS entity for %s: %s",
                     entity_id,
@@ -425,6 +426,29 @@ class GameState:
         ecs_components = [self._build_identity_component(entity_id, components)]
         ecs_components.extend(components.values())
         return self.ecs_manager.create_entity(*ecs_components)
+
+    def _cleanup_partial_ecs_entity(self, entity_id: str) -> None:
+        """Attempt to delete any ECS entity created for ``entity_id`` during a failed mirror."""
+
+        if not self.ecs_manager:
+            return
+
+        internal_id = self._ecs_entities.pop(entity_id, None)
+        if internal_id is None:
+            internal_id = self.ecs_manager.resolve_entity(entity_id)
+
+        if internal_id is None:
+            return
+
+        try:
+            self.ecs_manager.delete_entity(internal_id)
+        except Exception as cleanup_exc:  # pragma: no cover - defensive logging
+            logger.error(
+                "Failed to clean up orphaned ECS entity for %s (internal id %s): %s",
+                entity_id,
+                internal_id,
+                cleanup_exc,
+            )
 
     def _build_identity_component(self, entity_id: str, components: Dict[str, Any]) -> EntityIdComponent:
         """Construct an :class:`EntityIdComponent` linked to ``BaseObject`` ids when present."""

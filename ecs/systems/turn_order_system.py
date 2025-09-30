@@ -22,7 +22,7 @@ Example:
     game_state.add_entity("enemy1", {"character_ref": EnemyCharacter(...)})
 
     # Initialize the turn order system
-    turn_system = TurnOrderSystem(game_state)
+    turn_system = TurnOrderSystem(game_state, ecs_manager)
 
     # Get the current active entity
     active_entity_id = turn_system.current_entity()
@@ -37,7 +37,7 @@ Example:
     turn_system.delay_current_entity()
 """
 import random
-from typing import List, Dict, Optional, Any, Tuple
+from typing import List, Dict, Any, Tuple, Optional
 
 from ecs.components.character_ref import CharacterRefComponent
 
@@ -57,15 +57,18 @@ class TurnOrderSystem:
         tie_breakers (Dict[str, int]): Random numbers used to break initiative ties
     """
 
-    def __init__(self, game_state: Any, ecs_manager: Optional[Any] = None):
+    def __init__(self, game_state: Any, ecs_manager: Any):
         """
         Initialize the TurnOrderSystem.
 
         Args:
             game_state: The central game state containing all entities
+            ecs_manager: The ECS manager required for turn order operations
         """
+        if ecs_manager is None:
+            raise ValueError("TurnOrderSystem requires an ECS manager during initialization.")
         self.game_state = game_state
-        self.ecs_manager = ecs_manager or getattr(game_state, "ecs_manager", None)
+        self.ecs_manager = ecs_manager
         self.turn_order: List[str] = []
         self.turn_index: int = 0
         self.round_number: int = 0
@@ -134,8 +137,6 @@ class TurnOrderSystem:
         self.round_number += 1
         self.reserved_tiles.clear()
 
-        if not self.ecs_manager and getattr(self.game_state, "ecs_manager", None):
-            self.ecs_manager = self.game_state.ecs_manager
         if not self.ecs_manager:
             raise RuntimeError("TurnOrderSystem requires an ECS manager before starting a round.")
 

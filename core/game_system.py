@@ -30,12 +30,12 @@ class GameSystem:
     game_system = GameSystem(
         game_state=game_state,
         preparation_manager=prep_manager,
+        ecs_manager=ecs_manager,
         event_bus=event_bus,
-        ecs_manager=ecs_manager
     )
 
     # Set up required subsystems
-    turn_order_system = TurnOrderSystem(game_state)
+    turn_order_system = TurnOrderSystem(game_state, ecs_manager)
     action_system = ActionSystem(game_state, event_bus)
     ai_system = BasicAISystem(game_state, event_bus)
 
@@ -55,8 +55,8 @@ class GameSystem:
             self,
             game_state: Any,
             preparation_manager: Any,
+            ecs_manager: Any,
             event_bus: Optional[Any] = None,
-            ecs_manager: Optional[Any] = None,
             enable_map_drawing: bool = True
     ) -> None:
         """
@@ -65,9 +65,9 @@ class GameSystem:
         Args:
             game_state: The central GameState object containing all entity and world data
             preparation_manager: Manager for game setup and preparation phase
+            ecs_manager: Entity-Component-System manager required for game logic processing
             event_bus: Optional event bus for communication between systems;
                        if None, will attempt to use game_state.event_bus
-            ecs_manager: Optional Entity-Component-System manager for game logic processing
             enable_map_drawing: Whether to save battle map visualizations between rounds
 
         Example:
@@ -75,6 +75,7 @@ class GameSystem:
             game_system = GameSystem(
                 game_state=game_state,
                 preparation_manager=prep_manager,
+                ecs_manager=ecs_manager,
                 event_bus=event_bus,
                 enable_map_drawing=True
             )
@@ -82,8 +83,10 @@ class GameSystem:
         """
         self.game_state = game_state
         self.preparation_manager = preparation_manager
-        self.event_bus = event_bus or getattr(game_state, "event_bus", None)
+        if ecs_manager is None:
+            raise ValueError("GameSystem requires an ECS manager during initialization.")
         self.ecs_manager = ecs_manager
+        self.event_bus = event_bus or getattr(game_state, "event_bus", None)
         self.enable_map_drawing = enable_map_drawing
         self.map_dir: Optional[str] = None  # Will be set later
 
@@ -134,7 +137,7 @@ class GameSystem:
 
         Example:
             ```python
-            turn_system = TurnOrderSystem(game_state)
+            turn_system = TurnOrderSystem(game_state, ecs_manager)
             game_system.set_turn_order_system(turn_system)
             ```
         """
@@ -269,9 +272,6 @@ class GameSystem:
             self.turn_order_system.start_new_round()
             if self.action_system:
                 self.action_system.decrement_cooldowns()
-
-            if not self.ecs_manager:
-                raise RuntimeError("GameSystem requires an ECS manager to run the game loop.")
 
             for entity_id in self.turn_order_system.get_turn_order():
                 self._current_turn_entity_id = entity_id

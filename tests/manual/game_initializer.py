@@ -126,6 +126,9 @@ def _deprecated_initialize_game(entity_specs, grid_size, max_rounds=200, map_dir
     event_bus = EventBus()
     game_state.set_event_bus(event_bus)
 
+    ecs_manager = ECSManager(event_bus)
+    game_state.set_ecs_manager(ecs_manager)
+
     prep_manager = PreparationManager(game_state)
     terrain = Terrain(width=grid_size, height=grid_size, game_state=game_state)
     game_state.set_terrain(terrain)
@@ -196,7 +199,7 @@ def _deprecated_initialize_game(entity_specs, grid_size, max_rounds=200, map_dir
     los_manager = LineOfSightManager(game_state, terrain, event_bus)
 
     ai_system = BasicAISystem(game_state, movement, action_system, debug=True, event_bus=event_bus, los_manager=los_manager)
-    turn_order = TurnOrderSystem(game_state)
+    turn_order = TurnOrderSystem(game_state, ecs_manager)
 
     # --- Action Registration ---
     # This step is crucial. It gives characters their abilities.
@@ -219,7 +222,7 @@ def _deprecated_initialize_game(entity_specs, grid_size, max_rounds=200, map_dir
         action_system.register_action(entity_id, end_turn_action)
 
     # --- GameSystem Setup ---
-    game_system = GameSystem(game_state, prep_manager, event_bus=event_bus, enable_map_drawing=True)
+    game_system = GameSystem(game_state, prep_manager, ecs_manager, event_bus=event_bus, enable_map_drawing=True)
 
     try:
         current_dir = os.path.dirname(os.path.abspath(__file__))

@@ -47,7 +47,14 @@ ProcessorType = getattr(esper, "Processor", Any)
 
 
 class _FallbackWorld:
-    """Lightweight stand-in when ``esper.World`` is unavailable."""
+    """Lightweight stand-in when ``esper.World`` is unavailable.
+
+    Notes:
+        This implementation favors portability over performance. Component
+        lookups rely on standard Python dictionaries and lack the indexing
+        optimizations provided by ``esper.World``, so large-scale simulations
+        will process noticeably slower when running against the fallback.
+    """
 
     def __init__(self) -> None:
         self._next_entity_id = 1
