@@ -103,7 +103,11 @@ class Game(arcade.Window):
                 continue
 
             char_ref = components.get("character_ref")
-            team = getattr(char_ref.character, "team", None) if char_ref else None
+            team = (
+                getattr(char_ref.character, "team", None)
+                if char_ref and getattr(char_ref, "character", None)
+                else None
+            )
             if team == "coterie":
                 color = arcade.color.BLUE
             elif team == "rivals":

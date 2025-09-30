@@ -173,12 +173,12 @@ class PreparationManager:
 
         terrain = self.game_state.terrain
         rng = random.Random(seed)
-        forbidden = set(avoid or [])
+        avoid_positions = set(avoid or [])
 
         candidates: List[Tuple[int, int]] = []
         for x in range(margin, terrain.width - margin):
             for y in range(margin, terrain.height - margin):
-                if (x, y) in forbidden or (x, y) in terrain.walls:
+                if (x, y) in avoid_positions or (x, y) in terrain.walls:
                     continue
                 candidates.append((x, y))
 
@@ -186,7 +186,9 @@ class PreparationManager:
             return []
 
         if count is None:
-            count = max(0, int(len(candidates) * density))
+            if density < 0:
+                raise ValueError(f"density must be non-negative, got {density}")
+            count = int(len(candidates) * density)
 
         rng.shuffle(candidates)
         selected = candidates[:count]
@@ -215,9 +217,9 @@ class PreparationManager:
             raise RuntimeError("Terrain must exist before spawning characters.")
 
         if team is not None:
-            try:
+            if hasattr(character, "set_team"):
                 character.set_team(team)
-            except AttributeError:
+            else:
                 setattr(character, "team", team)
 
         if hasattr(character, "set_orientation"):
