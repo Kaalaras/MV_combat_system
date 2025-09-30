@@ -218,11 +218,12 @@ class PreparationManager:
             raise RuntimeError("Terrain must exist before spawning characters.")
 
         if team is not None:
-            if not hasattr(character, "set_team"):
+            set_team = getattr(character, "set_team", None)
+            if not callable(set_team):
                 raise AttributeError(
                     "Characters spawned through PreparationManager must expose set_team()."
                 )
-            character.set_team(team)
+            set_team(team)
 
         if hasattr(character, "set_orientation"):
             character.set_orientation(orientation)
@@ -272,46 +273,62 @@ class PreparationManager:
         }
 
         assigned_id = entity_id or f"entity_{len(self.game_state.entities) + 1}"
-        self.game_state.add_entity(assigned_id, components)
-
         terrain = self.game_state.terrain
-        if not terrain.add_entity(assigned_id, position_comp.x, position_comp.y):
-            self.game_state.remove_entity(assigned_id)
 
-            reasons: List[str] = []
-            if not terrain.is_valid_position(
-                position_comp.x,
-                position_comp.y,
-                position_comp.width,
-                position_comp.height,
-            ):
-                reasons.append("out of bounds")
-            else:
-                if terrain.is_occupied(
-                    position_comp.x,
-                    position_comp.y,
-                    position_comp.width,
-                    position_comp.height,
-                ):
-                    reasons.append("position occupied")
-                if hasattr(terrain, "is_walkable") and not terrain.is_walkable(
-                    position_comp.x,
-                    position_comp.y,
-                    position_comp.width,
-                    position_comp.height,
-                ):
-                    reasons.append("blocked by terrain")
-
-            if not reasons:
-                reasons.append("unknown reason")
-
-            reason_str = ", ".join(reasons)
+        placement_issues = self._describe_placement_issues(terrain, position_comp)
+        if placement_issues:
+            reason_str = ", ".join(placement_issues)
             raise ValueError(
                 f"Unable to place entity '{assigned_id}' at {position}: {reason_str}."
             )
 
+        self.game_state.add_entity(assigned_id, components)
+
+        if not terrain.add_entity(assigned_id, position_comp.x, position_comp.y):
+            self.game_state.remove_entity(assigned_id)
+            raise RuntimeError(
+                "Terrain rejected placement after validation; placement logic may be out of sync."
+            )
+
         self.game_state.update_teams()
         return assigned_id
+
+    def _describe_placement_issues(
+        self,
+        terrain: Any,
+        position: PositionComponent,
+    ) -> List[str]:
+        """Return human-readable reasons an entity cannot occupy ``position`` on ``terrain``."""
+
+        reasons: List[str] = []
+
+        if not terrain.is_valid_position(
+            position.x,
+            position.y,
+            position.width,
+            position.height,
+        ):
+            reasons.append("out of bounds")
+            return reasons
+
+        if terrain.is_occupied(
+            position.x,
+            position.y,
+            position.width,
+            position.height,
+            check_walls=True,
+        ):
+            reasons.append("position occupied")
+
+        if hasattr(terrain, "is_walkable") and not terrain.is_walkable(
+            position.x,
+            position.y,
+            position.width,
+            position.height,
+        ):
+            reasons.append("blocked by terrain")
+
+        return reasons
 
     def _get_nested_trait(self, traits: Dict[str, Any], path: str) -> int:
         """
