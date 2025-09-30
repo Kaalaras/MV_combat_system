@@ -31,23 +31,33 @@ class CommandValidator:
         Returns ValidationResult with validation status and reason
         """
         try:
-            # Basic validation
-            if not command.command_id or not command.command_type:
+            try:
+                command_type = (
+                    command.command_type
+                    if isinstance(command.command_type, CommandType)
+                    else CommandType(command.command_type)
+                )
+            except ValueError:
                 return ValidationResult(
-                    valid=False, 
+                    valid=False,
+                    reason=f"Unknown command type: {command.command_type}"
+                )
+
+            if not command.command_id:
+                return ValidationResult(
+                    valid=False,
                     reason="Missing command_id or command_type"
                 )
-            
-            # Validate command-specific payload
-            if command.command_type == CommandType.MOVE:
+
+            if command_type == CommandType.MOVE:
                 return await self._validate_move_command(command, player_id, room_id)
-            elif command.command_type == CommandType.ATTACK:
+            elif command_type == CommandType.ATTACK:
                 return await self._validate_attack_command(command, player_id, room_id)
-            elif command.command_type == CommandType.USE_DISCIPLINE:
+            elif command_type == CommandType.USE_DISCIPLINE:
                 return await self._validate_discipline_command(command, player_id, room_id)
-            elif command.command_type == CommandType.CHAT:
+            elif command_type == CommandType.CHAT:
                 return await self._validate_chat_command(command, player_id, room_id)
-            elif command.command_type == CommandType.END_TURN:
+            elif command_type == CommandType.END_TURN:
                 return ValidationResult(valid=True)  # End turn is always valid
             else:
                 return ValidationResult(
@@ -259,7 +269,7 @@ class GameRoomManager:
         """Get list of rooms available for joining"""
         return [
             room for room in self.rooms.values()
-            if room.status == GameStatus.WAITING and len(room.players) < room.max_players
+            if room.status == GameStatus.WAITING
         ]
     
     async def execute_command(
@@ -281,13 +291,25 @@ class GameRoomManager:
                 )
             
             # Update turn tracking
-            room.turn_id = max(room.turn_id, command.turn_id)
-            room.sequence_number = max(room.sequence_number, command.sequence_number)
+            if command.turn_id > room.turn_id:
+                room.turn_id = command.turn_id
+                room.sequence_number = command.sequence_number
+            elif command.turn_id == room.turn_id:
+                room.sequence_number = max(room.sequence_number, command.sequence_number)
             
+            try:
+                command_type = (
+                    command.command_type
+                    if isinstance(command.command_type, CommandType)
+                    else CommandType(command.command_type)
+                )
+            except ValueError:
+                command_type = None
+
             # Execute based on command type (simplified for Phase 1)
-            if command.command_type == CommandType.CHAT:
+            if command_type == CommandType.CHAT:
                 return await self._execute_chat_command(room, command, player_id)
-            elif command.command_type == CommandType.MOVE:
+            elif command_type == CommandType.MOVE:
                 # For Phase 1, just return success without actual movement
                 return CommandResponse(
                     command_id=command.command_id,
