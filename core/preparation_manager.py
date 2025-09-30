@@ -3,9 +3,20 @@
 from ecs.systems.action_system import Action, ActionType
 from ecs.actions.attack_actions import AttackAction
 from core.game_state import GameState
+from core.terrain_manager import Terrain
+from ecs.components.inventory import InventoryComponent
+from ecs.components.equipment import EquipmentComponent
+from ecs.components.character_ref import CharacterRefComponent
+from ecs.components.health import HealthComponent
+from ecs.components.willpower import WillpowerComponent
+from ecs.components.velocity import VelocityComponent
+from ecs.components.position import PositionComponent
+from ecs.components.facing import FacingComponent
+from entities.character import Character
 import importlib
+import random
 from core.pathfinding_optimization import optimize_terrain
-from typing import Dict, Any, List, Optional, Callable, Union, Type
+from typing import Dict, Any, List, Optional, Callable, Union, Type, Iterable, Tuple
 
 
 class PreparationManager:
@@ -109,6 +120,163 @@ class PreparationManager:
                         attr = self._get_nested_trait(char.traits, attr_path)
                         skill = self._get_nested_trait(char.traits, skill_path)
                         components["attack_pool_cache"][wtype] = attr + skill
+
+    # ------------------------------------------------------------------
+    # Modern arcade demo helpers
+
+    def create_grid_terrain(self, width: int, height: int, *, cell_size: int = 64) -> Terrain:
+        """Create and attach a :class:`Terrain` instance to the game state.
+
+        Args:
+            width: Number of walkable columns.
+            height: Number of walkable rows.
+            cell_size: Render cell size in pixels. Defaults to ``64``.
+
+        Returns:
+            The newly created :class:`Terrain` instance.
+        """
+
+        terrain = Terrain(width=width, height=height, cell_size=cell_size, game_state=self.game_state)
+        self.game_state.set_terrain(terrain)
+        return terrain
+
+    def scatter_walls(
+        self,
+        *,
+        count: Optional[int] = None,
+        density: float = 0.1,
+        margin: int = 1,
+        avoid: Optional[Iterable[Tuple[int, int]]] = None,
+        seed: Optional[int] = None,
+    ) -> List[Tuple[int, int]]:
+        """Add a collection of random blocking walls to the active terrain.
+
+        This replaces the legacy ``create_simple_arena`` / ``create_obstacle_pattern``
+        helpers that used to live on :mod:`main`.
+
+        Args:
+            count: Explicit number of walls to place. When ``None`` a value is
+                derived from ``density``.
+            density: Ratio of walkable tiles that should become walls when
+                ``count`` is omitted.
+            margin: How many cells to keep clear from the outer border.
+            avoid: Iterable of coordinates that must remain walkable (e.g.,
+                spawn points).
+            seed: Optional deterministic seed for the RNG.
+
+        Returns:
+            List of the coordinates that ended up with walls.
+        """
+
+        if not self.game_state.terrain:
+            raise RuntimeError("Terrain must be created before scattering walls.")
+
+        terrain = self.game_state.terrain
+        rng = random.Random(seed)
+        forbidden = set(avoid or [])
+
+        candidates: List[Tuple[int, int]] = []
+        for x in range(margin, terrain.width - margin):
+            for y in range(margin, terrain.height - margin):
+                if (x, y) in forbidden or (x, y) in terrain.walls:
+                    continue
+                candidates.append((x, y))
+
+        if not candidates:
+            return []
+
+        if count is None:
+            count = max(0, int(len(candidates) * density))
+
+        rng.shuffle(candidates)
+        selected = candidates[:count]
+
+        placed: List[Tuple[int, int]] = []
+        for x, y in selected:
+            if terrain.add_wall(x, y):
+                placed.append((x, y))
+        return placed
+
+    def spawn_character(
+        self,
+        character: Character,
+        position: Tuple[int, int],
+        *,
+        entity_id: Optional[str] = None,
+        size: Tuple[int, int] = (1, 1),
+        team: Optional[str] = None,
+        orientation: str = "up",
+        armor: Optional[Any] = None,
+        weapons: Optional[Dict[str, Any]] = None,
+    ) -> str:
+        """Create an ECS entity for a ``Character`` and place it on the terrain."""
+
+        if not self.game_state.terrain:
+            raise RuntimeError("Terrain must exist before spawning characters.")
+
+        if team is not None:
+            try:
+                character.set_team(team)
+            except AttributeError:
+                setattr(character, "team", team)
+
+        if hasattr(character, "set_orientation"):
+            character.set_orientation(orientation)
+
+        inventory = InventoryComponent()
+        equipment = EquipmentComponent()
+        if armor is not None:
+            equipment.armor = armor
+        if weapons:
+            for slot, weapon in weapons.items():
+                if slot in equipment.weapons:
+                    equipment.weapons[slot] = weapon
+
+        health = HealthComponent(getattr(character, "max_health", 1))
+        willpower = WillpowerComponent(getattr(character, "max_willpower", 1))
+        dexterity = (
+            character.traits
+            .get("Attributes", {})
+            .get("Physical", {})
+            .get("Dexterity", 0)
+        ) if getattr(character, "traits", None) else 0
+        velocity = VelocityComponent(dexterity)
+        position_comp = PositionComponent(
+            x=position[0],
+            y=position[1],
+            width=size[0],
+            height=size[1],
+        )
+
+        orientation_map = {
+            "up": (0.0, 1.0),
+            "down": (0.0, -1.0),
+            "left": (-1.0, 0.0),
+            "right": (1.0, 0.0),
+        }
+        facing = FacingComponent(direction=orientation_map.get(orientation, (0.0, 1.0)))
+
+        components: Dict[str, Any] = {
+            "inventory": inventory,
+            "equipment": equipment,
+            "health": health,
+            "willpower": willpower,
+            "character_ref": CharacterRefComponent(character),
+            "velocity": velocity,
+            "position": position_comp,
+            "facing": facing,
+        }
+
+        assigned_id = entity_id or f"entity_{len(self.game_state.entities) + 1}"
+        self.game_state.add_entity(assigned_id, components)
+
+        terrain = self.game_state.terrain
+        if not terrain.add_entity(assigned_id, position_comp.x, position_comp.y):
+            self.game_state.remove_entity(assigned_id)
+            raise ValueError(f"Unable to place entity '{assigned_id}' at {position}.")
+
+        self.game_state.update_teams()
+        return assigned_id
 
     def _get_nested_trait(self, traits: Dict[str, Any], path: str) -> int:
         """
