@@ -101,11 +101,18 @@ async def get_current_player_from_token(token: str) -> Optional[Player]:
         return None
 
 
-async def get_current_player(credentials: HTTPAuthorizationCredentials = Depends(security)) -> Player:
+async def get_current_player(
+    credentials: HTTPAuthorizationCredentials | str = Depends(security)
+) -> Player:
     """
-    FastAPI dependency to get current player from Bearer token
+    FastAPI dependency to get current player from Bearer token.
+
+    Tests sometimes call this helper directly with a raw token string, so we
+    gracefully handle both the dependency-provided credentials object and a
+    pre-parsed string.
     """
-    player = await get_current_player_from_token(credentials.credentials)
+    token = credentials if isinstance(credentials, str) else credentials.credentials
+    player = await get_current_player_from_token(token)
     if not player:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,

@@ -12,7 +12,7 @@ from dataclasses import dataclass, asdict
 from enum import Enum
 from collections import deque
 
-from .models import GameCommand, Player, GameRoom
+from .models import GameCommand, Player, GameRoom, CommandType
 
 logger = logging.getLogger(__name__)
 
@@ -220,11 +220,27 @@ class TurnOrderManager:
     
     def _get_action_priority(self, command: GameCommand) -> ActionPriority:
         """Determine action priority for execution order"""
-        if command.command_type.value in ['chat', 'surrender']:
+        command_type = None
+        if command.command_type is not None:
+            if isinstance(command.command_type, CommandType):
+                command_type = command.command_type
+            else:
+                try:
+                    command_type = CommandType(command.command_type)
+                except ValueError:
+                    command_type = None
+
+        command_value = getattr(command_type, 'value', command.command_type)
+
+        immediate_aliases = {'chat', 'surrender'}
+        high_aliases = {'defend', 'dodge', 'reaction'}
+        normal_aliases = {'move', 'attack', 'use_discipline'}
+
+        if command_type == CommandType.CHAT or command_value in immediate_aliases:
             return ActionPriority.IMMEDIATE
-        elif command.command_type.value in ['defend', 'dodge', 'reaction']:
+        elif command_value in high_aliases:
             return ActionPriority.HIGH
-        elif command.command_type.value in ['move', 'attack', 'use_discipline']:
+        elif command_value in normal_aliases:
             return ActionPriority.NORMAL
         else:
             return ActionPriority.LOW
@@ -299,7 +315,7 @@ class StateDeltaManager:
             return
         
         max_turn = max(self.deltas.keys())
-        cutoff_turn = max_turn - keep_turns
+        cutoff_turn = max_turn - keep_turns + 1
         
         # Remove old turns
         to_remove = [turn_id for turn_id in self.deltas.keys() if turn_id < cutoff_turn]
@@ -640,7 +656,10 @@ class GameStateSynchronizer:
     async def _execute_pending_actions(self, room_id: str) -> List[Dict[str, Any]]:
         """Execute all pending actions for current turn phase"""
         results = []
-        
+
+        if self.turn_manager.current_turn and self.turn_manager.current_turn.phase == TurnPhase.INITIATIVE:
+            self.turn_manager.current_turn.phase = TurnPhase.ACTIONS
+
         while True:
             # Get next action to execute
             action = await self.turn_manager.get_next_action()
@@ -650,7 +669,11 @@ class GameStateSynchronizer:
             # Execute action and create delta
             execution_result = await self._execute_single_action(room_id, action)
             results.append(execution_result)
-        
+
+            if self.turn_manager.current_turn is not None:
+                self.turn_manager.current_turn.executed_actions.append(action)
+                await self.turn_manager.advance_current_player()
+
         return results
     
     async def _execute_single_action(
@@ -663,10 +686,22 @@ class GameStateSynchronizer:
             # This would integrate with the actual game engine
             # For now, create a mock execution result
             
-            entity_changes = {}
-            events = []
-            
-            if command.command_type.value == 'move':
+            entity_changes: Dict[str, Any] = {}
+            events: List[Dict[str, Any]] = []
+
+            command_type = None
+            if command.command_type is not None:
+                if isinstance(command.command_type, CommandType):
+                    command_type = command.command_type
+                else:
+                    try:
+                        command_type = CommandType(command.command_type)
+                    except ValueError:
+                        command_type = None
+
+            command_value = getattr(command_type, 'value', command.command_type)
+
+            if command_value == 'move':
                 entity_changes[command.player_id] = {
                     'position': {
                         'x': command.payload.get('x', 0),
@@ -677,10 +712,13 @@ class GameStateSynchronizer:
                     'type': 'entity_moved',
                     'entity_id': command.player_id,
                     'from': command.payload.get('from', {}),
-                    'to': command.payload.get('to', {})
+                    'to': {
+                        'x': command.payload.get('x', 0),
+                        'y': command.payload.get('y', 0)
+                    }
                 })
-            
-            elif command.command_type.value == 'attack':
+
+            elif command_value == 'attack':
                 # Mock attack result
                 events.append({
                     'type': 'attack_executed',

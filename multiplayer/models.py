@@ -7,7 +7,7 @@ from enum import Enum
 from typing import Dict, List, Optional, Any, Union
 from datetime import datetime
 from dataclasses import dataclass, asdict
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ConfigDict
 
 
 class GameStatus(Enum):
@@ -61,16 +61,17 @@ class GameCommand(BaseModel):
     """Command sent from client to server"""
     command_id: str = Field(default_factory=lambda: str(uuid.uuid4()))
     command_type: CommandType
-    player_id: str
+    player_id: Optional[str] = None
     turn_id: int = 0
     sequence_number: int = 0
     timestamp: datetime = Field(default_factory=datetime.utcnow)
     payload: Dict[str, Any]
-    
+
     class Config:
         json_encoders = {
             datetime: lambda v: v.isoformat()
         }
+        use_enum_values = True
 
 
 class CommandResponse(BaseModel):
