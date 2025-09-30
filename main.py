@@ -102,12 +102,7 @@ class Game(arcade.Window):
             if not pos:
                 continue
 
-            char_ref = components.get("character_ref")
-            team = (
-                getattr(char_ref.character, "team", None)
-                if char_ref and getattr(char_ref, "character", None)
-                else None
-            )
+            team = self._resolve_entity_team(components)
             if team == "coterie":
                 color = arcade.color.BLUE
             elif team == "rivals":
@@ -143,10 +138,18 @@ class Game(arcade.Window):
     def on_update(self, delta_time):
         """Movement and game logic."""
         pass
-        
+
     def on_key_press(self, key, modifiers):
         """Called whenever a key is pressed."""
         pass
+
+    @staticmethod
+    def _resolve_entity_team(components):
+        """Return the team assigned to the entity's character, if any."""
+
+        char_ref = components.get("character_ref")
+        character = getattr(char_ref, "character", None) if char_ref else None
+        return getattr(character, "team", None) if character else None
 
 def main():
     """Main function to start the game."""

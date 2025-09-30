@@ -121,8 +121,7 @@ class PreparationManager:
                         skill = self._get_nested_trait(char.traits, skill_path)
                         components["attack_pool_cache"][wtype] = attr + skill
 
-    # ------------------------------------------------------------------
-    # Modern arcade demo helpers
+    # --- Modern arcade demo helpers ---
 
     def create_grid_terrain(self, width: int, height: int, *, cell_size: int = 64) -> Terrain:
         """Create and attach a :class:`Terrain` instance to the game state.
@@ -152,7 +151,7 @@ class PreparationManager:
         """Add a collection of random blocking walls to the active terrain.
 
         This replaces the legacy ``create_simple_arena`` / ``create_obstacle_pattern``
-        helpers that used to live on :mod:`main`.
+        helpers that used to live in ``main.py``.
 
         Args:
             count: Explicit number of walls to place. When ``None`` a value is
@@ -217,10 +216,11 @@ class PreparationManager:
             raise RuntimeError("Terrain must exist before spawning characters.")
 
         if team is not None:
-            if hasattr(character, "set_team"):
-                character.set_team(team)
-            else:
-                setattr(character, "team", team)
+            if not hasattr(character, "set_team"):
+                raise AttributeError(
+                    "Characters spawned through PreparationManager must expose set_team()."
+                )
+            character.set_team(team)
 
         if hasattr(character, "set_orientation"):
             character.set_orientation(orientation)
