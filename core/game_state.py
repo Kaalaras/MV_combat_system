@@ -274,8 +274,25 @@ class GameState:
             # game_systems.combat.handle_combat(entity1, entity2, game_state.event_bus)
             ```
         """
+        previous_bus = self._movement_subscription_bus if self._movement_event_registered else None
+        if previous_bus and previous_bus is not event_bus and hasattr(previous_bus, "unsubscribe"):
+            try:
+                previous_bus.unsubscribe(
+                    "movement_reset_requested",
+                    self._handle_movement_reset_requested,
+                )
+            except Exception as exc:  # pragma: no cover - defensive cleanup
+                logger.warning(
+                    "Failed to unsubscribe movement reset handler from previous bus: %s",
+                    exc,
+                )
+        if previous_bus and previous_bus is not event_bus:
+            self._movement_event_registered = False
+            self._movement_subscription_bus = None
+
         self.event_bus = event_bus
-        if self.event_bus and self.event_bus is not self._movement_subscription_bus:
+
+        if self.event_bus and not self._movement_event_registered:
             self.event_bus.subscribe(
                 "movement_reset_requested",
                 self._handle_movement_reset_requested,

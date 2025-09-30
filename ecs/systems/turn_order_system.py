@@ -114,7 +114,9 @@ class TurnOrderSystem:
         character = char_ref.character
         if not hasattr(character, "traits"):
             raise ValueError(
-                f"Character {getattr(character, 'name', repr(character))} is missing required 'traits' attribute."
+                "Character {} is missing required 'traits' attribute.".format(
+                    getattr(character, "name", "<unnamed character>")
+                )
             )
         traits = character.traits
         virtues = traits.get("Virtues", {})

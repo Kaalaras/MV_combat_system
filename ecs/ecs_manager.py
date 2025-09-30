@@ -33,7 +33,7 @@ Example:
     # Process all systems
     ecs_manager.process(dt=0.016)
 """
-from typing import Any, Dict, Iterator, Optional, Tuple, Type
+from typing import Any, Dict, Iterator, List, Optional, Tuple, Type
 
 try:  # pragma: no cover - import guard for environments without esper
     import esper  # type: ignore
@@ -59,7 +59,7 @@ class _FallbackWorld:
     def __init__(self) -> None:
         self._next_entity_id = 1
         self._components: Dict[int, Dict[Type[Any], Any]] = {}
-        self._processors: list[Tuple[int, Any]] = []
+        self._processors: List[Tuple[int, Any]] = []
 
     def create_entity(self, *components: Any) -> int:
         entity_id = self._next_entity_id
