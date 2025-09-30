@@ -291,7 +291,7 @@ class ActionSystem:
         # Check per-turn limits
         per_turn_map = self.per_turn_action_counts.setdefault(entity_id, {})
         used_count = per_turn_map.get(action.name, 0)
-        if used_count >= action.per_turn_limit:
+        if action.per_turn_limit is not None and used_count >= action.per_turn_limit:
             print(f"[ActionSystem][DEBUG] per-turn limit reached for {action.name} ({used_count}/{action.per_turn_limit})")
             return False
 

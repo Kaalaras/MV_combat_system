@@ -105,10 +105,22 @@ class TurnOrderSystem:
             > turn_system.calculate_initiative(entity)
             7
         """
-        traits = entity["character_ref"].character.traits
-        virtues = traits.get("Virtues", {})
-        attributes = traits.get("Attributes", {}).get("Mental", {})
-        return max(virtues.get("Self-Control", 0), virtues.get("Instinct", 0)) + attributes.get("Wits", 0)
+        char_ref = entity.get("character_ref")
+        character = getattr(char_ref, 'character', None) if char_ref else None
+        traits = getattr(character, 'traits', {}) or {}
+        virtues = traits.get("Virtues", {}) if isinstance(traits, dict) else {}
+        mental_attrs = {}
+        if isinstance(traits, dict):
+            attributes = traits.get("Attributes", {})
+            if isinstance(attributes, dict):
+                mental_attrs = attributes.get("Mental", {}) or {}
+        def _safe_value(mapping, key):
+            try:
+                return int(mapping.get(key, 0)) if isinstance(mapping, dict) else 0
+            except (TypeError, ValueError):
+                return 0
+
+        return max(_safe_value(virtues, "Self-Control"), _safe_value(virtues, "Instinct")) + _safe_value(mental_attrs, "Wits")
 
     def start_new_round(self) -> None:
         """
@@ -130,22 +142,34 @@ class TurnOrderSystem:
         from ecs.components.character_ref import CharacterRefComponent
         
         living_entities = []
+        reverse_mapping = getattr(self.game_state, "_reverse_entity_id_mapping", {})
+
+        def _to_external_id(raw_id: Any) -> str:
+            """Translate internal ECS identifiers back to the original game IDs."""
+            try:
+                lookup_key = int(raw_id)
+            except (TypeError, ValueError):
+                lookup_key = raw_id
+
+            if lookup_key in reverse_mapping:
+                return reverse_mapping[lookup_key]
+            return str(raw_id)
         if self.game_state.ecs_manager:
             try:
                 entities_with_char_ref = self.game_state.ecs_manager.get_components(CharacterRefComponent)
                 for eid, (char_ref_comp,) in entities_with_char_ref:
                     if not char_ref_comp.character.is_dead:
-                        living_entities.append(str(eid))
+                        living_entities.append(_to_external_id(eid))
             except AttributeError:
                 # Fallback if get_components doesn't exist
                 for entity_id in self.game_state.ecs_manager.get_all_entities():
                     try:
                         char_ref_comp = self.game_state.ecs_manager.get_component(entity_id, CharacterRefComponent)
                         if char_ref_comp and not char_ref_comp.character.is_dead:
-                            living_entities.append(str(entity_id))
+                            living_entities.append(_to_external_id(entity_id))
                     except:
                         continue
-        
+
         self.turn_order = living_entities
         # Sort by initiative desc, tie-breaker desc
         self.turn_order.sort(
