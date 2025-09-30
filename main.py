@@ -1,9 +1,13 @@
+from typing import Optional
+
 import arcade
+
+from core.event_bus import EventBus
 from core.game_state import GameState
 from core.preparation_manager import PreparationManager
-from renderer.arcade_renderer import ArcadeRenderer
 from entities.character import Character
 from entities.default_entities.weapons import Sword, LightPistol
+from renderer.arcade_renderer import ArcadeRenderer
 from utils.logger import log_calls
 
 class Game(arcade.Window):
@@ -14,7 +18,9 @@ class Game(arcade.Window):
         super().__init__(width, height, title)
         self.game_state = None
         self.prep_manager = None
-        self.renderer = None
+        self.event_bus = None
+        self.cell_size = 64
+        self.renderer: Optional[ArcadeRenderer] = None
         
         # Set up the game components
         self.setup()
@@ -22,92 +28,73 @@ class Game(arcade.Window):
     @log_calls
     def setup(self):
         """Set up the game and initialize the game state."""
-        # Create game state and terrain
-        self.game_state = GameState(20, 15)
+        # Core state containers
+        self.game_state = GameState()
+        self.event_bus = EventBus()
+        self.game_state.set_event_bus(self.event_bus)
         self.prep_manager = PreparationManager(self.game_state)
-        
-        # Create an arena with scattered obstacles
-        self.prep_manager.create_simple_arena(20, 15)
-        self.prep_manager.create_obstacle_pattern("scattered")
-        
-        # Create and place a player character
+
+        # --- Terrain setup ---
+        cell_size = 48
+        terrain = self.prep_manager.create_grid_terrain(20, 15, cell_size=cell_size)
+        self.cell_size = terrain.cell_size
+
+        # Keep a few spawn cells clear while scattering cover
+        spawn_points = {(5, 5), (15, 10)}
+        self.prep_manager.scatter_walls(count=25, avoid=spawn_points, margin=1, seed=7)
+
+        # --- Entity creation ---
         player_character = Character(
-            name="Player", 
-            clan="Brujah", 
-            generation=12, 
-            archetype="Rebel", 
+            name="Player",
+            clan="Brujah",
+            generation=12,
+            archetype="Rebel",
             sprite_path="assets/sprites/characters/player.png"
         )
-        player_id = self.prep_manager.place_character(player_character, 5, 5)
-        
-        # Create an opponent character
+        self.prep_manager.spawn_character(
+            player_character,
+            (5, 5),
+            entity_id="player",
+            team="coterie",
+            weapons={"melee": Sword(), "ranged": LightPistol()},
+        )
+
         opponent = Character(
-            name="Opponent", 
-            clan="Ventrue", 
-            generation=11, 
-            archetype="Leader", 
+            name="Opponent",
+            clan="Ventrue",
+            generation=11,
+            archetype="Leader",
             sprite_path="assets/sprites/characters/opponent.png"
         )
-        opponent_id = self.prep_manager.place_character(opponent, 15, 10)
-        
-        # Place some weapons
-        sword = Sword()
-        self.game_state.add_weapon(sword, 8, 8)
-        
-        pistol = LightPistol()
-        self.game_state.add_weapon(pistol, 12, 3)
-        
-        # Add some random weapons
-        self.prep_manager.place_random_weapons(7)
-        
-        # Set up renderer
-        cell_size = self.game_state.terrain.cell_size
-        self.width = self.game_state.terrain.width * cell_size
-        self.height = self.game_state.terrain.height * cell_size
-        
-        # Create the renderer
-        self.renderer = ArcadeRenderer(self.game_state, "Combat System")
+        self.prep_manager.spawn_character(
+            opponent,
+            (15, 10),
+            entity_id="opponent",
+            team="rivals",
+            weapons={"ranged": LightPistol()},
+        )
+
+        # Precompute caches (pathfinding, attack pools, etc.)
+        self.prep_manager.prepare()
+
+        # Build renderer after the world has been initialized
+        self.renderer = ArcadeRenderer(self.game_state)
+
+        # Resize the window to match the terrain
+        self.set_size(terrain.width * self.cell_size, terrain.height * self.cell_size)
+        arcade.set_background_color(arcade.color.DARK_SLATE_GRAY)
         
     def on_draw(self):
         """Render the screen."""
         arcade.start_render()
         
-        # Draw the grid
-        self.renderer.draw_grid()
-        
-        # Draw all game objects
-        terrain = self.game_state.terrain
-        
-        # Draw walls
-        for wall_pos in terrain.walls:
-            x, y = wall_pos
-            arcade.draw_rectangle_filled(
-                (x + 0.5) * terrain.cell_size,
-                (y + 0.5) * terrain.cell_size,
-                terrain.cell_size * 0.9,
-                terrain.cell_size * 0.9,
-                arcade.color.DARK_BROWN
-            )
-        
-        # Draw entities
-        for entity_id, entity in self.game_state.entities.items():
-            pos = terrain.get_entity_position(entity_id)
-            if pos:
-                x, y = pos
-                color = arcade.color.BLUE if isinstance(entity, Character) else arcade.color.RED
-                
-                arcade.draw_rectangle_filled(
-                    (x + 0.5) * terrain.cell_size,
-                    (y + 0.5) * terrain.cell_size,
-                    terrain.cell_size * 0.7,
-                    terrain.cell_size * 0.7,
-                    color
-                )
-                
+        if self.renderer:
+            self.renderer.draw()
+
     def on_update(self, delta_time):
         """Movement and game logic."""
         pass
-        
+
     def on_key_press(self, key, modifiers):
         """Called whenever a key is pressed."""
         pass

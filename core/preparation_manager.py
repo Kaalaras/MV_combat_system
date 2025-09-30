@@ -1,11 +1,23 @@
 # PreparationManager is responsible for initial setup (entities, terrain, etc.), but does not hardcode any values.
 # It uses the GameState class to manage the game state and ECS components.
-from ecs.systems.action_system import Action, ActionType
-from ecs.actions.attack_actions import AttackAction
-from core.game_state import GameState
 import importlib
+import random
+from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple, Type, Union
+
+from core.game_state import GameState
 from core.pathfinding_optimization import optimize_terrain
-from typing import Dict, Any, List, Optional, Callable, Union, Type
+from core.terrain_manager import Terrain
+from ecs.actions.attack_actions import AttackAction
+from ecs.components.character_ref import CharacterRefComponent
+from ecs.components.equipment import EquipmentComponent
+from ecs.components.facing import FacingComponent
+from ecs.components.health import HealthComponent
+from ecs.components.inventory import InventoryComponent
+from ecs.components.position import PositionComponent
+from ecs.components.velocity import VelocityComponent
+from ecs.components.willpower import WillpowerComponent
+from ecs.systems.action_system import Action, ActionType
+from entities.character import Character
 
 
 class PreparationManager:
@@ -110,7 +122,228 @@ class PreparationManager:
                         skill = self._get_nested_trait(char.traits, skill_path)
                         components["attack_pool_cache"][wtype] = attr + skill
 
-    def _get_nested_trait(self, traits: Dict[str, Any], path: str) -> int:
+    # --- Modern arcade demo helpers ---
+
+    def create_grid_terrain(self, width: int, height: int, *, cell_size: int = 64) -> Terrain:
+        """Create and attach a :class:`Terrain` instance to the game state.
+
+        Args:
+            width: Number of walkable columns.
+            height: Number of walkable rows.
+            cell_size: Render cell size in pixels. Defaults to ``64``.
+
+        Returns:
+            The newly created :class:`Terrain` instance.
+        """
+
+        terrain = Terrain(width=width, height=height, cell_size=cell_size, game_state=self.game_state)
+        self.game_state.set_terrain(terrain)
+        return terrain
+
+    def scatter_walls(
+        self,
+        *,
+        count: Optional[int] = None,
+        density: float = 0.1,
+        margin: int = 1,
+        avoid: Optional[Iterable[Tuple[int, int]]] = None,
+        seed: Optional[int] = None,
+    ) -> List[Tuple[int, int]]:
+        """Add a collection of random blocking walls to the active terrain.
+
+        This replaces the legacy ``create_simple_arena`` / ``create_obstacle_pattern``
+        helpers that used to live in ``main.py``.
+
+        Args:
+            count: Explicit number of walls to place. When ``None`` a value is
+                derived from ``density``.
+            density: Ratio of walkable tiles that should become walls when
+                ``count`` is omitted.
+            margin: How many cells to keep clear from the outer border.
+            avoid: Iterable of coordinates that must remain walkable (e.g.,
+                spawn points).
+            seed: Optional deterministic seed for the RNG.
+
+        Returns:
+            List of the coordinates that ended up with walls.
+        """
+
+        if not self.game_state.terrain:
+            raise RuntimeError("Terrain must be created before scattering walls.")
+
+        terrain = self.game_state.terrain
+        rng = random.Random(seed)
+        avoid_positions = set(avoid or [])
+
+        candidates: List[Tuple[int, int]] = []
+        for x in range(margin, terrain.width - margin):
+            for y in range(margin, terrain.height - margin):
+                if (x, y) in avoid_positions or (x, y) in terrain.walls:
+                    continue
+                candidates.append((x, y))
+
+        if not candidates:
+            return []
+
+        if count is None:
+            if not 0.0 <= density <= 1.0:
+                raise ValueError(f"density must be between 0.0 and 1.0 inclusive, got {density}")
+            count = int(len(candidates) * density)
+
+        count = min(count, len(candidates))
+
+        rng.shuffle(candidates)
+        selected = candidates[:count]
+
+        placed: List[Tuple[int, int]] = []
+        for x, y in selected:
+            if terrain.add_wall(x, y):
+                placed.append((x, y))
+        return placed
+
+    def spawn_character(
+        self,
+        character: Character,
+        position: Tuple[int, int],
+        *,
+        entity_id: Optional[str] = None,
+        size: Tuple[int, int] = (1, 1),
+        team: Optional[str] = None,
+        orientation: str = "up",
+        armor: Optional[Any] = None,
+        weapons: Optional[Dict[str, Any]] = None,
+    ) -> str:
+        """Create an ECS entity for a ``Character`` and place it on the terrain."""
+
+        if not self.game_state.terrain:
+            raise RuntimeError("Terrain must exist before spawning characters.")
+
+        if team is not None:
+            set_team = getattr(character, "set_team", None)
+            if not callable(set_team):
+                raise AttributeError(
+                    "Characters spawned through PreparationManager must expose set_team()."
+                )
+            set_team(team)
+
+        if hasattr(character, "set_orientation"):
+            character.set_orientation(orientation)
+
+        inventory = InventoryComponent()
+        equipment = EquipmentComponent()
+        if armor is not None:
+            equipment.armor = armor
+        if weapons:
+            for slot, weapon in weapons.items():
+                if slot in equipment.weapons:
+                    equipment.weapons[slot] = weapon
+
+        health = HealthComponent(getattr(character, "max_health", 1))
+        willpower = WillpowerComponent(getattr(character, "max_willpower", 1))
+        dexterity = self._get_character_trait(character, "Attributes.Physical.Dexterity")
+        velocity = VelocityComponent(dexterity)
+        position_comp = PositionComponent(
+            x=position[0],
+            y=position[1],
+            width=size[0],
+            height=size[1],
+        )
+
+        orientation_map = {
+            "up": (0.0, 1.0),
+            "down": (0.0, -1.0),
+            "left": (-1.0, 0.0),
+            "right": (1.0, 0.0),
+        }
+        facing = FacingComponent(direction=orientation_map.get(orientation, (0.0, 1.0)))
+
+        components: Dict[str, Any] = {
+            "inventory": inventory,
+            "equipment": equipment,
+            "health": health,
+            "willpower": willpower,
+            "character_ref": CharacterRefComponent(character),
+            "velocity": velocity,
+            "position": position_comp,
+            "facing": facing,
+        }
+
+        assigned_id = entity_id or f"entity_{len(self.game_state.entities) + 1}"
+        terrain = self.game_state.terrain
+
+        placement_issues = self._describe_placement_issues(terrain, position_comp)
+        if placement_issues:
+            reason_str = ", ".join(placement_issues)
+            raise ValueError(
+                f"Unable to place entity '{assigned_id}' at {position}: {reason_str}."
+            )
+
+        self.game_state.add_entity(assigned_id, components)
+
+        if not terrain.add_entity(assigned_id, position_comp.x, position_comp.y):
+            self.game_state.remove_entity(assigned_id)
+            raise RuntimeError(
+                "Terrain rejected placement after validation; placement logic may be out of sync."
+            )
+
+        self.game_state.update_teams()
+        return assigned_id
+
+    def _describe_placement_issues(
+        self,
+        terrain: Any,
+        position: PositionComponent,
+    ) -> List[str]:
+        """Return human-readable reasons an entity cannot occupy ``position`` on ``terrain``."""
+
+        reasons: List[str] = []
+
+        if not terrain.is_valid_position(
+            position.x,
+            position.y,
+            position.width,
+            position.height,
+        ):
+            reasons.append("out of bounds")
+            return reasons
+
+        if terrain.is_occupied(
+            position.x,
+            position.y,
+            position.width,
+            position.height,
+            check_walls=True,
+        ):
+            reasons.append("position occupied")
+
+        if hasattr(terrain, "is_walkable") and not terrain.is_walkable(
+            position.x,
+            position.y,
+            position.width,
+            position.height,
+        ):
+            reasons.append("blocked by terrain")
+
+        return reasons
+
+    def _get_character_trait(
+        self,
+        character: Character,
+        path: str,
+        *,
+        default: int = 0,
+    ) -> int:
+        """Return a nested trait value from ``character`` or ``default`` if unavailable."""
+
+        traits = getattr(character, "traits", None)
+        return self._get_nested_trait(traits, path, default=default)
+
+    def _get_nested_trait(
+        self,
+        traits: Optional[Dict[str, Any]],
+        path: str,
+        default: int = 0,
+    ) -> int:
         """
         Retrieve a nested trait value from a character's trait dictionary using a dot-notation path.
 
@@ -122,7 +355,7 @@ class PreparationManager:
             path: Dot-notation string path to the desired trait (e.g., 'Attributes.Physical.Strength')
 
         Returns:
-            The integer value of the trait, or 0 if the path is invalid or the trait is not an integer
+            The integer value of the trait, or ``default`` if the path is invalid or the trait is not an integer
 
         Example:
             ```python
@@ -147,15 +380,18 @@ class PreparationManager:
             missing = prep_manager._get_nested_trait(traits, 'Skills.Magic.Spellcasting')  # Returns 0
             ```
         """
+        if not isinstance(traits, dict):
+            return default
+
         keys = path.split('.')
-        value = traits
+        value: Any = traits
         for key in keys:
             if not isinstance(value, dict):
-                return 0
-            value = value.get(key, 0)
+                return default
+            value = value.get(key, default)
         if isinstance(value, int):
             return value
-        return 0
+        return default
 
     def initialize_character_actions(self) -> None:
         """
