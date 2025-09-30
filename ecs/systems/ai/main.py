@@ -204,6 +204,9 @@ class BasicAISystem:
             self.turn_order_system = turn_order_system
         self.debug = debug
 
+        if self.event_bus and hasattr(self.event_bus, "subscribe"):
+            self.event_bus.subscribe("ai_take_turn", self._handle_ai_take_turn)
+
     def _debug(self, msg: str) -> None:
         """Print debug messages if debug mode is enabled."""
         if self.debug:
@@ -712,3 +715,16 @@ class BasicAISystem:
         else:
             self._debug(f"WARNING: End Turn action not found for {char_id}!")
             return False
+
+    def _handle_ai_take_turn(self, entity_id: str, **kwargs: Any) -> None:
+        """Bridge ``ai_take_turn`` events into decision making."""
+
+        success = self.choose_action(entity_id)
+        if not success:
+            char_name = entity_id
+            entity = getattr(self.game_state, "get_entity", lambda _: None)(entity_id)
+            if entity and "character_ref" in entity:
+                char_name = getattr(entity["character_ref"].character, "name", char_name)
+            print(f"AI for {char_name} failed to choose a valid action. Ending turn.")
+            if self.event_bus:
+                self.event_bus.publish("request_end_turn", entity_id=entity_id)

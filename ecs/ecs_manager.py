@@ -34,7 +34,9 @@ Example:
     ecs_manager.process(dt=0.016)
 """
 import esper
-from typing import Any, Optional, List
+from typing import Any, Dict, Iterator, Optional, Tuple, Type
+
+from ecs.components.entity_id import EntityIdComponent
 
 
 # Placeholder for actual component imports if needed directly by ECSManager
@@ -62,6 +64,8 @@ class ECSManager:
         """
         self.world = esper.World()
         self.event_bus = event_bus
+        self._entity_lookup: Dict[str, int] = {}
+        self._reverse_lookup: Dict[int, str] = {}
         # Systems that need to be processed each frame/tick by esper
         # esper.Processor instances are added directly to the world.
         # Other systems might just subscribe to events and not need a process() method.
@@ -144,7 +148,13 @@ class ECSManager:
             >     Renderable(sprite_path="player.png")
             > )
         """
-        return self.world.create_entity(*components)
+        entity_id = self.world.create_entity(*components)
+        for component in components:
+            if isinstance(component, EntityIdComponent):
+                self._entity_lookup[component.entity_id] = entity_id
+                self._reverse_lookup[entity_id] = component.entity_id
+                break
+        return entity_id
 
     def delete_entity(self, entity_id: int):
         """
@@ -156,6 +166,9 @@ class ECSManager:
         Example:
             > ecs_manager.delete_entity(enemy_entity)
         """
+        string_id = self._reverse_lookup.pop(entity_id, None)
+        if string_id:
+            self._entity_lookup.pop(string_id, None)
         self.world.delete_entity(entity_id)
 
     def add_component(self, entity_id: int, component_instance: Any):
@@ -173,6 +186,9 @@ class ECSManager:
             > ecs_manager.add_component(player_entity, Health(max_hp=100))
         """
         self.world.add_component(entity_id, component_instance)
+        if isinstance(component_instance, EntityIdComponent):
+            self._entity_lookup[component_instance.entity_id] = entity_id
+            self._reverse_lookup[entity_id] = component_instance.entity_id
 
     def get_component(self, entity_id: int, component_type: type) -> Any:
         """
@@ -194,7 +210,7 @@ class ECSManager:
         """
         return self.world.component_for_entity(entity_id, component_type)
 
-    def get_components(self, *component_types: type) -> List[Any]:
+    def get_components(self, *component_types: type):
         """
         Retrieves all entities and their specified component instances.
 
@@ -210,6 +226,42 @@ class ECSManager:
             >     print(f"Entity {entity_id} is at position {position.x}, {position.y}")
         """
         return self.world.get_components(*component_types)
+
+    # New helpers ---------------------------------------------------------------
+    def resolve_entity(self, entity_id: str) -> Optional[int]:
+        """Return the internal ECS integer id for a string ``entity_id``."""
+
+        return self._entity_lookup.get(entity_id)
+
+    def iter_with_id(self, *component_types: Type[Any]) -> Iterator[Tuple[str, ...]]:
+        """
+        Yield tuples of ``(entity_id_str, components...)`` for entities that
+        provide ``EntityIdComponent`` in addition to ``component_types``.
+        """
+
+        query_types = (EntityIdComponent,) + component_types
+        for _, components in self.world.get_components(*query_types):
+            entity_id_component: EntityIdComponent = components[0]
+            yield (entity_id_component.entity_id, *components[1:])
+
+    def get_components_for_entity(self, entity_id: str, *component_types: Type[Any]) -> Optional[Tuple[Any, ...]]:
+        """
+        Return component instances for the entity identified by ``entity_id``.
+
+        Returns ``None`` if the entity does not exist or lacks any requested
+        component.
+        """
+
+        internal_id = self.resolve_entity(entity_id)
+        if internal_id is None:
+            return None
+        results = []
+        for comp_type in component_types:
+            try:
+                results.append(self.world.component_for_entity(internal_id, comp_type))
+            except KeyError:
+                return None
+        return tuple(results)
 
     def try_get_component(self, entity_id: int, component_type: type) -> Optional[Any]:
         """

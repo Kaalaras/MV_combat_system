@@ -1,6 +1,8 @@
 # core/game_state.py
 from typing import Dict, List, Any, Optional
 
+from ecs.components.entity_id import EntityIdComponent
+
 
 # (Assuming EventBus and MovementSystem types are imported or defined elsewhere)
 # from core.event_bus import EventBus # Example
@@ -50,7 +52,7 @@ class GameState:
     ```
     """
 
-    def __init__(self):
+    def __init__(self, ecs_manager: Optional[Any] = None):
         """
         Initialize an empty game state with no entities or system references.
         """
@@ -66,6 +68,10 @@ class GameState:
         self.terrain_version = 0  # increments on wall add/remove
         self.blocker_version = 0  # increments on blocking entity move / cover changes
         self.vision_system: Optional[Any] = None  # Optional: VisionSystem auto-wired on set_terrain
+        self.ecs_manager: Optional[Any] = ecs_manager
+        self._ecs_entities: Dict[str, int] = {}
+        self._movement_event_registered = False
+        self._movement_subscription_bus: Optional[Any] = None
         # Add other global state or system references as needed
         # e.g., self.action_system_ref for quick access if needed by some non-ECS logic
 
@@ -99,6 +105,17 @@ class GameState:
 
         # Add the entity and its components to the dictionary
         self.entities[entity_id] = components
+
+        if self.ecs_manager:
+            ecs_components = [EntityIdComponent(entity_id)]
+            ecs_components.extend(components.values())
+            try:
+                internal_id = self.ecs_manager.create_entity(*ecs_components)
+                self._ecs_entities[entity_id] = internal_id
+            except Exception:
+                # Ensure partial failures do not leave stale references
+                self.entities.pop(entity_id, None)
+                raise
 
     def get_entity(self, entity_id: str) -> Optional[Dict[str, Any]]:
         """
@@ -141,6 +158,12 @@ class GameState:
         """
         if entity_id in self.entities:
             del self.entities[entity_id]
+        internal_id = self._ecs_entities.pop(entity_id, None)
+        if self.ecs_manager and internal_id is not None:
+            try:
+                self.ecs_manager.delete_entity(internal_id)
+            except Exception:
+                pass
         # If the entity had a mapped position in a terrain grid, update that too if needed
 
     def get_component(self, entity_id: str, component_name: str) -> Optional[Any]:
@@ -238,6 +261,13 @@ class GameState:
             ```
         """
         self.event_bus = event_bus
+        if self.event_bus and self.event_bus is not self._movement_subscription_bus:
+            self.event_bus.subscribe(
+                "movement_reset_requested",
+                self._handle_movement_reset_requested,
+            )
+            self._movement_subscription_bus = self.event_bus
+            self._movement_event_registered = True
 
     def set_movement_system(self, movement_system: Any) -> None:
         """
@@ -261,6 +291,24 @@ class GameState:
             ```
         """
         self.movement = movement_system
+
+    def set_ecs_manager(self, ecs_manager: Any) -> None:
+        """Attach an ``ecs_manager`` and mirror existing entities into the ECS world."""
+
+        if ecs_manager is self.ecs_manager:
+            return
+        self.ecs_manager = ecs_manager
+        self._ecs_entities.clear()
+        if not self.ecs_manager:
+            return
+        for entity_id, components in self.entities.items():
+            ecs_components = [EntityIdComponent(entity_id)]
+            ecs_components.extend(components.values())
+            try:
+                internal_id = self.ecs_manager.create_entity(*ecs_components)
+            except Exception:
+                continue
+            self._ecs_entities[entity_id] = internal_id
 
     def set_condition_system(self, condition_system: Any) -> None:
         """
@@ -327,6 +375,11 @@ class GameState:
         return 1, 1  # Default size if entity doesn't exist or has no position
 
     # Movement tracking --------------------------------------------------
+    def _handle_movement_reset_requested(self, entity_id: str, **_: Any) -> None:
+        """Event callback to reset an entity's tracked movement usage."""
+
+        self.reset_movement_usage(entity_id)
+
     def reset_movement_usage(self, entity_id: str):
         """Reset per-turn movement tracking for an entity (called at turn start)."""
         self.movement_turn_usage[entity_id] = {"distance": 0}

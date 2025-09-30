@@ -2,6 +2,9 @@ from typing import Dict, Optional, Any, List
 from core.visualization.battle_map import draw_battle_map
 import os
 
+from ecs.components.character_ref import CharacterRefComponent
+from ecs.components.position import PositionComponent
+
 
 class GameSystem:
     """
@@ -92,6 +95,12 @@ class GameSystem:
         self._turn_ended_flag: bool = False
 
         self.player_controller: Optional[Any] = None  # Optional PlayerTurnController
+
+        if self.event_bus and hasattr(self.game_state, "set_event_bus"):
+            self.game_state.set_event_bus(self.event_bus)
+
+        if self.ecs_manager and hasattr(self.game_state, "set_ecs_manager"):
+            self.game_state.set_ecs_manager(self.ecs_manager)
 
         if self.event_bus:
             self.event_bus.subscribe("action_performed", self.handle_action_resolved)
@@ -261,16 +270,28 @@ class GameSystem:
             if self.action_system:
                 self.action_system.decrement_cooldowns()
 
+            ecs_snapshot: Dict[str, Dict[str, Any]] = {}
+            if self.ecs_manager:
+                for entity_id, char_ref in self.ecs_manager.iter_with_id(CharacterRefComponent):
+                    ecs_snapshot.setdefault(entity_id, {})["character_ref"] = char_ref
+                for entity_id, position in self.ecs_manager.iter_with_id(PositionComponent):
+                    ecs_snapshot.setdefault(entity_id, {})["position"] = position
+
             for entity_id in self.turn_order_system.get_turn_order():
                 self._current_turn_entity_id = entity_id
                 self._turn_ended_flag = False
 
-                entity_data = self.game_state.get_entity(entity_id)
-                if not entity_data or "character_ref" not in entity_data:
-                    print(f"Skipping turn for entity {entity_id}: missing data.")
-                    continue
+                char_ref = ecs_snapshot.get(entity_id, {}).get("character_ref")
+                position_comp = ecs_snapshot.get(entity_id, {}).get("position")
+                entity_data: Optional[Dict[str, Any]] = None
+                if not char_ref:
+                    entity_data = self.game_state.get_entity(entity_id)
+                    if not entity_data or "character_ref" not in entity_data:
+                        print(f"Skipping turn for entity {entity_id}: missing data.")
+                        continue
+                    char_ref = entity_data["character_ref"]
+                    position_comp = entity_data.get("position")
 
-                char_ref = entity_data["character_ref"]
                 char = char_ref.character
                 if char.is_dead:
                     continue
@@ -280,7 +301,9 @@ class GameSystem:
                     self.event_bus.publish("turn_start", entity_id=entity_id)
                 if self.action_system:
                     self.action_system.reset_counters(entity_id)
-                if hasattr(self.game_state, 'reset_movement_usage'):
+                if self.event_bus:
+                    self.event_bus.publish("movement_reset_requested", entity_id=entity_id, position=position_comp)
+                elif hasattr(self.game_state, 'reset_movement_usage'):
                     self.game_state.reset_movement_usage(entity_id)
 
                 # Handle AI-controlled vs player-controlled entities differently
@@ -290,12 +313,13 @@ class GameSystem:
                     ai_system = self.ai_systems.get(ai_name)
 
                     if ai_system:
-                        # Let the AI choose and execute an action
-                        # The updated AI returns True if it successfully chose an action
-                        action_success = ai_system.choose_action(entity_id)
-                        if not action_success and self.event_bus:
-                            print(f"AI for {char.name} failed to choose a valid action. Ending turn.")
-                            self.event_bus.publish("request_end_turn", entity_id=entity_id)
+                        if self.event_bus:
+                            self.event_bus.publish("ai_take_turn", entity_id=entity_id, ai_name=ai_name)
+                        else:
+                            action_success = ai_system.choose_action(entity_id)
+                            if not action_success and self.event_bus:
+                                print(f"AI for {char.name} failed to choose a valid action. Ending turn.")
+                                self.event_bus.publish("request_end_turn", entity_id=entity_id)
                     else:
                         print(f"AI script '{ai_name}' not found for {char.name}. Ending turn.")
                         if self.event_bus:
