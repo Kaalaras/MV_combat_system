@@ -281,7 +281,7 @@ class GameState:
                     "movement_reset_requested",
                     self._handle_movement_reset_requested,
                 )
-            except Exception as exc:  # pragma: no cover - defensive cleanup
+            except (AttributeError, KeyError, ValueError) as exc:  # pragma: no cover - defensive cleanup
                 logger.warning(
                     "Failed to unsubscribe movement reset handler from previous bus: %s",
                     exc,
@@ -459,12 +459,18 @@ class GameState:
 
         try:
             self.ecs_manager.delete_entity(internal_id)
-        except Exception as cleanup_exc:  # pragma: no cover - defensive logging
+        except (AttributeError, KeyError) as cleanup_exc:  # pragma: no cover - defensive logging
             logger.error(
                 "Failed to clean up orphaned ECS entity for %s (internal id %s): %s",
                 entity_id,
                 internal_id,
                 cleanup_exc,
+            )
+        except Exception as unexpected_exc:  # pragma: no cover - truly unexpected
+            logger.exception(
+                "Unexpected error during cleanup of ECS entity for %s (internal id %s):",
+                entity_id,
+                internal_id,
             )
 
     def _build_identity_component(self, entity_id: str, components: Dict[str, Any]) -> EntityIdComponent:

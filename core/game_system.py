@@ -279,7 +279,12 @@ class GameSystem:
 
                 char_ref = self.ecs_manager.get_component_for_entity(entity_id, CharacterRefComponent)
                 if char_ref is None:
-                    raise RuntimeError(f"Turn participant {entity_id} is missing CharacterRefComponent.")
+                    raise RuntimeError(
+                        "Error during turn processing in the game loop: "
+                        f"Turn participant entity_id={entity_id} is missing CharacterRefComponent. "
+                        "This may indicate that the entity was not properly initialized, "
+                        "was removed from the ECS, or there is a bug in the component management system."
+                    )
                 position_comp = self.ecs_manager.get_component_for_entity(entity_id, PositionComponent)
 
                 char = char_ref.character

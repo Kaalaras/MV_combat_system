@@ -37,7 +37,7 @@ from typing import Any, Dict, Iterator, List, Optional, Tuple, Type
 
 try:  # pragma: no cover - import guard for environments without esper
     import esper  # type: ignore
-except Exception:  # pragma: no cover - fallback for missing dependency
+except ImportError:  # pragma: no cover - fallback for missing dependency
     esper = None
 
 from ecs.components.entity_id import EntityIdComponent
@@ -79,7 +79,9 @@ class _FallbackWorld:
         try:
             return self._components[entity_id][component_type]
         except KeyError as exc:  # pragma: no cover - parity with esper error shape
-            raise KeyError(component_type) from exc
+            raise KeyError(
+                f"Entity {entity_id} does not have component {component_type}"
+            ) from exc
 
     def get_components(self, *component_types: Type[Any]):
         results = []
