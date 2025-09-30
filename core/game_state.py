@@ -1,4 +1,5 @@
 # core/game_state.py
+import logging
 from typing import Dict, List, Any, Optional
 
 from ecs.components.entity_id import EntityIdComponent
@@ -7,6 +8,9 @@ from ecs.components.entity_id import EntityIdComponent
 # (Assuming EventBus and MovementSystem types are imported or defined elsewhere)
 # from core.event_bus import EventBus # Example
 # from core.movement_system import MovementSystem # Example
+
+logger = logging.getLogger(__name__)
+
 
 class GameState:
     """
@@ -112,9 +116,14 @@ class GameState:
             try:
                 internal_id = self.ecs_manager.create_entity(*ecs_components)
                 self._ecs_entities[entity_id] = internal_id
-            except Exception:
+            except (TypeError, ValueError) as exc:
                 # Ensure partial failures do not leave stale references
                 self.entities.pop(entity_id, None)
+                logger.error(
+                    "Failed to create ECS entity for %s: %s",
+                    entity_id,
+                    exc,
+                )
                 raise
 
     def get_entity(self, entity_id: str) -> Optional[Dict[str, Any]]:
@@ -162,8 +171,14 @@ class GameState:
         if self.ecs_manager and internal_id is not None:
             try:
                 self.ecs_manager.delete_entity(internal_id)
-            except Exception:
-                pass
+            except KeyError as exc:
+                logger.warning(
+                    "Failed to delete ECS entity %s for %s: %s",
+                    internal_id,
+                    entity_id,
+                    exc,
+                )
+                raise
         # If the entity had a mapped position in a terrain grid, update that too if needed
 
     def get_component(self, entity_id: str, component_name: str) -> Optional[Any]:
@@ -306,7 +321,12 @@ class GameState:
             ecs_components.extend(components.values())
             try:
                 internal_id = self.ecs_manager.create_entity(*ecs_components)
-            except Exception:
+            except (TypeError, ValueError) as exc:
+                logger.warning(
+                    "Failed to mirror entity %s into ECS: %s",
+                    entity_id,
+                    exc,
+                )
                 continue
             self._ecs_entities[entity_id] = internal_id
 

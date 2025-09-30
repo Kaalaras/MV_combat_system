@@ -112,7 +112,11 @@ class TurnOrderSystem:
             character = entity.character
         else:
             character = entity["character_ref"].character
-        traits = getattr(character, "traits", {})
+        if not hasattr(character, "traits"):
+            raise ValueError(
+                f"Character {getattr(character, 'name', repr(character))} is missing required 'traits' attribute."
+            )
+        traits = character.traits
         virtues = traits.get("Virtues", {})
         attributes = traits.get("Attributes", {}).get("Mental", {})
         return max(virtues.get("Self-Control", 0), virtues.get("Instinct", 0)) + attributes.get("Wits", 0)

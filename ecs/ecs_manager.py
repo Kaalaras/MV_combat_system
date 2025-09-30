@@ -255,13 +255,13 @@ class ECSManager:
         internal_id = self.resolve_entity(entity_id)
         if internal_id is None:
             return None
-        results = []
-        for comp_type in component_types:
-            try:
-                results.append(self.world.component_for_entity(internal_id, comp_type))
-            except KeyError:
-                return None
-        return tuple(results)
+        try:
+            return tuple(
+                self.world.component_for_entity(internal_id, comp_type)
+                for comp_type in component_types
+            )
+        except KeyError:
+            return None
 
     def try_get_component(self, entity_id: int, component_type: type) -> Optional[Any]:
         """
