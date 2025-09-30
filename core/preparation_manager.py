@@ -185,9 +185,11 @@ class PreparationManager:
             return []
 
         if count is None:
-            if density < 0:
-                raise ValueError(f"density must be non-negative, got {density}")
+            if density < 0 or density > 1.0:
+                raise ValueError(f"density must be between 0 and 1.0 inclusive, got {density}")
             count = int(len(candidates) * density)
+
+        count = min(count, len(candidates))
 
         rng.shuffle(candidates)
         selected = candidates[:count]
@@ -275,7 +277,38 @@ class PreparationManager:
         terrain = self.game_state.terrain
         if not terrain.add_entity(assigned_id, position_comp.x, position_comp.y):
             self.game_state.remove_entity(assigned_id)
-            raise ValueError(f"Unable to place entity '{assigned_id}' at {position}.")
+
+            reasons: List[str] = []
+            if not terrain.is_valid_position(
+                position_comp.x,
+                position_comp.y,
+                position_comp.width,
+                position_comp.height,
+            ):
+                reasons.append("out of bounds")
+            else:
+                if terrain.is_occupied(
+                    position_comp.x,
+                    position_comp.y,
+                    position_comp.width,
+                    position_comp.height,
+                ):
+                    reasons.append("position occupied")
+                if hasattr(terrain, "is_walkable") and not terrain.is_walkable(
+                    position_comp.x,
+                    position_comp.y,
+                    position_comp.width,
+                    position_comp.height,
+                ):
+                    reasons.append("blocked by terrain")
+
+            if not reasons:
+                reasons.append("unknown reason")
+
+            reason_str = ", ".join(reasons)
+            raise ValueError(
+                f"Unable to place entity '{assigned_id}' at {position}: {reason_str}."
+            )
 
         self.game_state.update_teams()
         return assigned_id
