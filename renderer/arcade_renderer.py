@@ -18,7 +18,7 @@ class ArcadeRenderer:
     def draw(self) -> None:
         """Render the current terrain, walls, and entities."""
 
-        terrain = getattr(self._game_state, "terrain", None)
+        terrain = self._game_state.terrain
         if terrain is None:
             return
 

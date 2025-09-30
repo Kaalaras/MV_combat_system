@@ -1,22 +1,23 @@
 # PreparationManager is responsible for initial setup (entities, terrain, etc.), but does not hardcode any values.
 # It uses the GameState class to manage the game state and ECS components.
-from ecs.systems.action_system import Action, ActionType
-from ecs.actions.attack_actions import AttackAction
-from core.game_state import GameState
-from core.terrain_manager import Terrain
-from ecs.components.inventory import InventoryComponent
-from ecs.components.equipment import EquipmentComponent
-from ecs.components.character_ref import CharacterRefComponent
-from ecs.components.health import HealthComponent
-from ecs.components.willpower import WillpowerComponent
-from ecs.components.velocity import VelocityComponent
-from ecs.components.position import PositionComponent
-from ecs.components.facing import FacingComponent
-from entities.character import Character
 import importlib
 import random
+from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple, Type, Union
+
+from core.game_state import GameState
 from core.pathfinding_optimization import optimize_terrain
-from typing import Dict, Any, List, Optional, Callable, Union, Type, Iterable, Tuple
+from core.terrain_manager import Terrain
+from ecs.actions.attack_actions import AttackAction
+from ecs.components.character_ref import CharacterRefComponent
+from ecs.components.equipment import EquipmentComponent
+from ecs.components.facing import FacingComponent
+from ecs.components.health import HealthComponent
+from ecs.components.inventory import InventoryComponent
+from ecs.components.position import PositionComponent
+from ecs.components.velocity import VelocityComponent
+from ecs.components.willpower import WillpowerComponent
+from ecs.systems.action_system import Action, ActionType
+from entities.character import Character
 
 
 class PreparationManager:
@@ -239,12 +240,7 @@ class PreparationManager:
 
         health = HealthComponent(getattr(character, "max_health", 1))
         willpower = WillpowerComponent(getattr(character, "max_willpower", 1))
-        dexterity = (
-            character.traits
-            .get("Attributes", {})
-            .get("Physical", {})
-            .get("Dexterity", 0)
-        ) if getattr(character, "traits", None) else 0
+        dexterity = self._get_character_trait(character, "Attributes.Physical.Dexterity")
         velocity = VelocityComponent(dexterity)
         position_comp = PositionComponent(
             x=position[0],
@@ -330,7 +326,24 @@ class PreparationManager:
 
         return reasons
 
-    def _get_nested_trait(self, traits: Dict[str, Any], path: str) -> int:
+    def _get_character_trait(
+        self,
+        character: Character,
+        path: str,
+        *,
+        default: int = 0,
+    ) -> int:
+        """Return a nested trait value from ``character`` or ``default`` if unavailable."""
+
+        traits = getattr(character, "traits", None)
+        return self._get_nested_trait(traits, path, default=default)
+
+    def _get_nested_trait(
+        self,
+        traits: Optional[Dict[str, Any]],
+        path: str,
+        default: int = 0,
+    ) -> int:
         """
         Retrieve a nested trait value from a character's trait dictionary using a dot-notation path.
 
@@ -342,7 +355,7 @@ class PreparationManager:
             path: Dot-notation string path to the desired trait (e.g., 'Attributes.Physical.Strength')
 
         Returns:
-            The integer value of the trait, or 0 if the path is invalid or the trait is not an integer
+            The integer value of the trait, or ``default`` if the path is invalid or the trait is not an integer
 
         Example:
             ```python
@@ -367,15 +380,18 @@ class PreparationManager:
             missing = prep_manager._get_nested_trait(traits, 'Skills.Magic.Spellcasting')  # Returns 0
             ```
         """
+        if not isinstance(traits, dict):
+            return default
+
         keys = path.split('.')
-        value = traits
+        value: Any = traits
         for key in keys:
             if not isinstance(value, dict):
-                return 0
-            value = value.get(key, 0)
+                return default
+            value = value.get(key, default)
         if isinstance(value, int):
             return value
-        return 0
+        return default
 
     def initialize_character_actions(self) -> None:
         """

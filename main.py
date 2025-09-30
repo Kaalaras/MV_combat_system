@@ -1,5 +1,6 @@
-import arcade
 from typing import Optional
+
+import arcade
 
 from core.event_bus import EventBus
 from core.game_state import GameState
@@ -36,7 +37,7 @@ class Game(arcade.Window):
         # --- Terrain setup ---
         cell_size = 48
         terrain = self.prep_manager.create_grid_terrain(20, 15, cell_size=cell_size)
-        self.cell_size = cell_size
+        self.cell_size = terrain.cell_size
 
         # Keep a few spawn cells clear while scattering cover
         spawn_points = {(5, 5), (15, 10)}
