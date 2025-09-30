@@ -35,7 +35,7 @@ from ecs.actions.movement_actions import StandardMoveAction, SprintAction, JumpA
 from ecs.actions.attack_actions import RegisteredAttackAction
 from ecs.actions.aoe_attack_actions import RegisteredAoEAttackAction
 from ecs.actions.turn_actions import EndTurnAction
-from tests.manual.battle_map_utils import assemble_gif
+from core.visualization.battle_map import assemble_gif
 from core.terrain_effect_system import TerrainEffectSystem
 
 
