@@ -270,27 +270,17 @@ class GameSystem:
             if self.action_system:
                 self.action_system.decrement_cooldowns()
 
-            ecs_snapshot: Dict[str, Dict[str, Any]] = {}
-            if self.ecs_manager:
-                for entity_id, char_ref in self.ecs_manager.iter_with_id(CharacterRefComponent):
-                    ecs_snapshot.setdefault(entity_id, {})["character_ref"] = char_ref
-                for entity_id, position in self.ecs_manager.iter_with_id(PositionComponent):
-                    ecs_snapshot.setdefault(entity_id, {})["position"] = position
+            if not self.ecs_manager:
+                raise RuntimeError("GameSystem requires an ECS manager to run the game loop.")
 
             for entity_id in self.turn_order_system.get_turn_order():
                 self._current_turn_entity_id = entity_id
                 self._turn_ended_flag = False
 
-                char_ref = ecs_snapshot.get(entity_id, {}).get("character_ref")
-                position_comp = ecs_snapshot.get(entity_id, {}).get("position")
-                entity_data: Optional[Dict[str, Any]] = None
-                if not char_ref:
-                    entity_data = self.game_state.get_entity(entity_id)
-                    if not entity_data or "character_ref" not in entity_data:
-                        print(f"Skipping turn for entity {entity_id}: missing data.")
-                        continue
-                    char_ref = entity_data["character_ref"]
-                    position_comp = entity_data.get("position")
+                char_ref = self.ecs_manager.get_component_for_entity(entity_id, CharacterRefComponent)
+                if char_ref is None:
+                    raise RuntimeError(f"Turn participant {entity_id} is missing CharacterRefComponent.")
+                position_comp = self.ecs_manager.get_component_for_entity(entity_id, PositionComponent)
 
                 char = char_ref.character
                 if char.is_dead:

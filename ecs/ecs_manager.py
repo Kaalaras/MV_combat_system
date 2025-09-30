@@ -33,14 +33,78 @@ Example:
     # Process all systems
     ecs_manager.process(dt=0.016)
 """
-import esper
 from typing import Any, Dict, Iterator, Optional, Tuple, Type
+
+try:  # pragma: no cover - import guard for environments without esper
+    import esper  # type: ignore
+except Exception:  # pragma: no cover - fallback for missing dependency
+    esper = None
 
 from ecs.components.entity_id import EntityIdComponent
 
 
-# Placeholder for actual component imports if needed directly by ECSManager
-# from ecs.components.position import Position # etc.
+ProcessorType = getattr(esper, "Processor", Any)
+
+
+class _FallbackWorld:
+    """Lightweight stand-in when ``esper.World`` is unavailable."""
+
+    def __init__(self) -> None:
+        self._next_entity_id = 1
+        self._components: Dict[int, Dict[Type[Any], Any]] = {}
+        self._processors: list[Tuple[int, Any]] = []
+
+    def create_entity(self, *components: Any) -> int:
+        entity_id = self._next_entity_id
+        self._next_entity_id += 1
+        self._components[entity_id] = {}
+        for component in components:
+            self.add_component(entity_id, component)
+        return entity_id
+
+    def delete_entity(self, entity_id: int) -> None:
+        self._components.pop(entity_id, None)
+
+    def add_component(self, entity_id: int, component_instance: Any) -> None:
+        self._components.setdefault(entity_id, {})[type(component_instance)] = component_instance
+
+    def component_for_entity(self, entity_id: int, component_type: Type[Any]) -> Any:
+        try:
+            return self._components[entity_id][component_type]
+        except KeyError as exc:  # pragma: no cover - parity with esper error shape
+            raise KeyError(component_type) from exc
+
+    def get_components(self, *component_types: Type[Any]):
+        results = []
+        for entity_id, components in self._components.items():
+            try:
+                comp_tuple = tuple(components[ctype] for ctype in component_types)
+            except KeyError:
+                continue
+            results.append((entity_id, comp_tuple))
+        return results
+
+    # Processor support -------------------------------------------------
+    def add_processor(self, processor_instance: Any, priority: int = 0) -> None:
+        self._processors.append((priority, processor_instance))
+        self._processors.sort(key=lambda item: item[0])
+
+    def remove_processor(self, processor_instance: Any) -> None:
+        self._processors = [item for item in self._processors if item[1] is not processor_instance]
+
+    def get_processor(self, processor_type: Type[Any]) -> Optional[Any]:
+        for _, processor in self._processors:
+            if isinstance(processor, processor_type):
+                return processor
+        return None
+
+    def process(self, *args: Any, **kwargs: Any) -> None:
+        for _, processor in self._processors:
+            if hasattr(processor, "process"):
+                processor.process(*args, **kwargs)
+
+
+WorldType = getattr(esper, "World", _FallbackWorld)
 
 class ECSManager:
     """
@@ -62,7 +126,7 @@ class ECSManager:
             event_bus: The event system for communication between components
                        (Default: None)
         """
-        self.world = esper.World()
+        self.world = WorldType()
         self.event_bus = event_bus
         self._entity_lookup: Dict[str, int] = {}
         self._reverse_lookup: Dict[int, str] = {}
@@ -70,7 +134,7 @@ class ECSManager:
         # esper.Processor instances are added directly to the world.
         # Other systems might just subscribe to events and not need a process() method.
 
-    def add_processor(self, processor_instance: esper.Processor, priority: int = 0):
+    def add_processor(self, processor_instance: ProcessorType, priority: int = 0):
         """
         Adds a system processor to the ECS world with the specified priority.
 
@@ -84,9 +148,10 @@ class ECSManager:
             > movement_system = MovementSystem()
             > ecs_manager.add_processor(movement_system, priority=2)
         """
-        self.world.add_processor(processor_instance, priority)
+        if hasattr(self.world, "add_processor"):
+            self.world.add_processor(processor_instance, priority)
 
-    def remove_processor(self, processor_instance: esper.Processor):
+    def remove_processor(self, processor_instance: ProcessorType):
         """
         Removes a system processor from the ECS world.
 
@@ -96,9 +161,10 @@ class ECSManager:
         Example:
             > ecs_manager.remove_processor(movement_system)
         """
-        self.world.remove_processor(processor_instance)
+        if hasattr(self.world, "remove_processor"):
+            self.world.remove_processor(processor_instance)
 
-    def get_processor(self, processor_type: type) -> Optional[esper.Processor]:
+    def get_processor(self, processor_type: type) -> Optional[ProcessorType]:
         """
         Gets a processor of a specific type from the ECS world.
 
@@ -113,7 +179,9 @@ class ECSManager:
             > if movement_sys:
             >     movement_sys.set_speed_multiplier(1.5)
         """
-        return self.world.get_processor(processor_type)
+        if hasattr(self.world, "get_processor"):
+            return self.world.get_processor(processor_type)
+        return None
 
     def process(self, *args, **kwargs):
         """
@@ -150,10 +218,7 @@ class ECSManager:
         """
         entity_id = self.world.create_entity(*components)
         for component in components:
-            if isinstance(component, EntityIdComponent):
-                self._entity_lookup[component.entity_id] = entity_id
-                self._reverse_lookup[entity_id] = component.entity_id
-                break
+            self._register_entity_identity(entity_id, component)
         return entity_id
 
     def delete_entity(self, entity_id: int):
@@ -186,9 +251,7 @@ class ECSManager:
             > ecs_manager.add_component(player_entity, Health(max_hp=100))
         """
         self.world.add_component(entity_id, component_instance)
-        if isinstance(component_instance, EntityIdComponent):
-            self._entity_lookup[component_instance.entity_id] = entity_id
-            self._reverse_lookup[entity_id] = component_instance.entity_id
+        self._register_entity_identity(entity_id, component_instance)
 
     def get_component(self, entity_id: int, component_type: type) -> Any:
         """
@@ -233,6 +296,14 @@ class ECSManager:
 
         return self._entity_lookup.get(entity_id)
 
+    def get_component_for_entity(self, entity_id: str, component_type: Type[Any]) -> Optional[Any]:
+        """Return a specific component for the entity identified by ``entity_id``."""
+
+        components = self.get_components_for_entity(entity_id, component_type)
+        if components is None:
+            return None
+        return components[0]
+
     def iter_with_id(self, *component_types: Type[Any]) -> Iterator[Tuple[str, ...]]:
         """
         Yield tuples of ``(entity_id_str, components...)`` for entities that
@@ -262,6 +333,14 @@ class ECSManager:
             )
         except KeyError:
             return None
+
+    # Internal helpers ---------------------------------------------------
+    def _register_entity_identity(self, internal_id: int, component: Any) -> None:
+        """Track mappings whenever an :class:`EntityIdComponent` is encountered."""
+
+        if isinstance(component, EntityIdComponent):
+            self._entity_lookup[component.entity_id] = internal_id
+            self._reverse_lookup[internal_id] = component.entity_id
 
     def try_get_component(self, entity_id: int, component_type: type) -> Optional[Any]:
         """

@@ -26,6 +26,7 @@ from core.game_state import GameState
 from core.preparation_manager import PreparationManager
 from core.game_system import GameSystem
 from core.event_bus import EventBus
+from ecs.ecs_manager import ECSManager
 from core.movement_system import MovementSystem
 from ecs.systems.turn_order_system import TurnOrderSystem
 from ecs.systems.action_system import ActionSystem
@@ -110,6 +111,8 @@ def initialize_game(
     game_state = GameState()
     event_bus = EventBus()
     game_state.set_event_bus(event_bus)
+    ecs_manager = ECSManager(event_bus)
+    game_state.set_ecs_manager(ecs_manager)
 
     prep_manager = PreparationManager(game_state)
     terrain = Terrain(width=grid_size, height=grid_size, game_state=game_state)
@@ -173,7 +176,7 @@ def initialize_game(
     los_manager = LineOfSightManager(game_state, terrain, event_bus)
 
     ai_system = BasicAISystem(game_state, movement, action_system, debug=True, event_bus=event_bus, los_manager=los_manager)
-    turn_order = TurnOrderSystem(game_state)
+    turn_order = TurnOrderSystem(game_state, ecs_manager)
 
     # --- Action Registration ---
     prep_manager.action_system = action_system
@@ -193,7 +196,13 @@ def initialize_game(
         action_system.register_action(entity_id, end_turn_action)
 
     # --- GameSystem Setup ---
-    game_system = GameSystem(game_state, prep_manager, event_bus=event_bus, enable_map_drawing=True)
+    game_system = GameSystem(
+        game_state,
+        prep_manager,
+        event_bus=event_bus,
+        ecs_manager=ecs_manager,
+        enable_map_drawing=True,
+    )
 
     try:
         current_dir = os.path.dirname(os.path.abspath(__file__))

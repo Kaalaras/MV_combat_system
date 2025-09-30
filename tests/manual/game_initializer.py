@@ -26,6 +26,7 @@ from core.game_state import GameState
 from core.preparation_manager import PreparationManager
 from core.game_system import GameSystem
 from core.event_bus import EventBus
+from ecs.ecs_manager import ECSManager
 from core.movement_system import MovementSystem
 from ecs.systems.turn_order_system import TurnOrderSystem
 from ecs.systems.action_system import ActionSystem
@@ -299,6 +300,8 @@ def initialize_game(*, entity_specs: List[EntitySpec], grid_size: int, max_round
     """
     game_state = GameState()
     event_bus = EventBus(); game_state.set_event_bus(event_bus)
+    ecs_manager = ECSManager(event_bus)
+    game_state.set_ecs_manager(ecs_manager)
     prep_manager = PreparationManager(game_state)
     terrain = Terrain(width=grid_size, height=grid_size, game_state=game_state); game_state.set_terrain(terrain)
     # Terrain effects system (currents, hazards)
@@ -333,7 +336,7 @@ def initialize_game(*, entity_specs: List[EntitySpec], grid_size: int, max_round
     facing_system = FacingSystem(game_state, event_bus); game_state.facing_system = facing_system
     los_manager = LineOfSightManager(game_state, terrain, event_bus)
     ai_system = BasicAISystem(game_state, movement, action_system, debug=True, event_bus=event_bus, los_manager=los_manager)
-    turn_order = TurnOrderSystem(game_state)
+    turn_order = TurnOrderSystem(game_state, ecs_manager)
     # Actions
     prep_manager.action_system = action_system; prep_manager.initialize_character_actions()
     std = StandardMoveAction(movement); spr = SprintAction(movement); jmp = JumpAction(movement); atk = RegisteredAttackAction(); aoe = RegisteredAoEAttackAction(); end = EndTurnAction()
@@ -344,7 +347,13 @@ def initialize_game(*, entity_specs: List[EntitySpec], grid_size: int, max_round
         action_system.register_action(eid, atk)
         action_system.register_action(eid, aoe)
         action_system.register_action(eid, end)
-    game_system = GameSystem(game_state, prep_manager, event_bus=event_bus, enable_map_drawing=False)
+    game_system = GameSystem(
+        game_state,
+        prep_manager,
+        event_bus=event_bus,
+        ecs_manager=ecs_manager,
+        enable_map_drawing=False,
+    )
     game_system.set_turn_order_system(turn_order)
     game_system.set_action_system(action_system)
     game_system.register_ai_system("basic", ai_system)

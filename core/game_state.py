@@ -111,10 +111,8 @@ class GameState:
         self.entities[entity_id] = components
 
         if self.ecs_manager:
-            ecs_components = [EntityIdComponent(entity_id)]
-            ecs_components.extend(components.values())
             try:
-                internal_id = self.ecs_manager.create_entity(*ecs_components)
+                internal_id = self._mirror_entity(entity_id, components)
                 self._ecs_entities[entity_id] = internal_id
             except (TypeError, ValueError) as exc:
                 # Ensure partial failures do not leave stale references
@@ -317,10 +315,8 @@ class GameState:
         if not self.ecs_manager:
             return
         for entity_id, components in self.entities.items():
-            ecs_components = [EntityIdComponent(entity_id)]
-            ecs_components.extend(components.values())
             try:
-                internal_id = self.ecs_manager.create_entity(*ecs_components)
+                internal_id = self._mirror_entity(entity_id, components)
             except (TypeError, ValueError) as exc:
                 logger.warning(
                     "Failed to mirror entity %s into ECS: %s",
@@ -418,6 +414,27 @@ class GameState:
 
     def bump_blocker_version(self):
         self.blocker_version += 1
+
+    # Internal helpers ---------------------------------------------------
+    def _mirror_entity(self, entity_id: str, components: Dict[str, Any]) -> int:
+        """Create an ECS entity mirroring ``entity_id`` and return its internal id."""
+
+        if not self.ecs_manager:
+            raise ValueError("ECS manager is not configured on GameState.")
+
+        ecs_components = [self._build_identity_component(entity_id, components)]
+        ecs_components.extend(components.values())
+        return self.ecs_manager.create_entity(*ecs_components)
+
+    def _build_identity_component(self, entity_id: str, components: Dict[str, Any]) -> EntityIdComponent:
+        """Construct an :class:`EntityIdComponent` linked to ``BaseObject`` ids when present."""
+
+        base_object_id: Optional[int] = None
+        char_ref = components.get("character_ref")
+        if char_ref is not None:
+            character = getattr(char_ref, "character", None)
+            base_object_id = getattr(character, "id", None)
+        return EntityIdComponent(entity_id, base_object_id)
 
     # Optional helpers to apply lethal/cleanup logic
     def kill_entity(self, entity_id: str, killer_id: Optional[str] = None, cause: str = 'unknown') -> bool:

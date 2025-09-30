@@ -90,7 +90,7 @@ class TurnOrderSystem:
             self.tie_breakers[entity_id] = random.randint(0, int(1e9))
         return self.tie_breakers[entity_id]
 
-    def calculate_initiative(self, entity: Any) -> int:
+    def calculate_initiative(self, char_ref: CharacterRefComponent) -> int:
         """
         Calculate an initiative value for an entity based on its traits.
 
@@ -98,7 +98,7 @@ class TurnOrderSystem:
         plus the Wits attribute.
 
         Args:
-            entity: The entity object or component containing character traits
+            char_ref: The character reference component providing trait access
 
         Returns:
             int: The calculated initiative value
@@ -108,10 +108,7 @@ class TurnOrderSystem:
             > turn_system.calculate_initiative(entity)
             7
         """
-        if isinstance(entity, CharacterRefComponent):
-            character = entity.character
-        else:
-            character = entity["character_ref"].character
+        character = char_ref.character
         if not hasattr(character, "traits"):
             raise ValueError(
                 f"Character {getattr(character, 'name', repr(character))} is missing required 'traits' attribute."
@@ -139,19 +136,14 @@ class TurnOrderSystem:
 
         if not self.ecs_manager and getattr(self.game_state, "ecs_manager", None):
             self.ecs_manager = self.game_state.ecs_manager
+        if not self.ecs_manager:
+            raise RuntimeError("TurnOrderSystem requires an ECS manager before starting a round.")
 
-        if self.ecs_manager:
-            live_entities: List[Tuple[str, CharacterRefComponent]] = [
-                (entity_id, char_ref)
-                for entity_id, char_ref in self.ecs_manager.iter_with_id(CharacterRefComponent)
-                if not getattr(char_ref.character, "is_dead", False)
-            ]
-        else:
-            live_entities = [
-                (eid, ent["character_ref"])
-                for eid, ent in self.game_state.entities.items()
-                if "character_ref" in ent and not ent["character_ref"].character.is_dead
-            ]
+        live_entities: List[Tuple[str, CharacterRefComponent]] = [
+            (entity_id, char_ref)
+            for entity_id, char_ref in self.ecs_manager.iter_with_id(CharacterRefComponent)
+            if not getattr(char_ref.character, "is_dead", False)
+        ]
 
         live_entities.sort(
             key=lambda item: (
