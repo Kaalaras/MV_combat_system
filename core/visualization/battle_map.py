@@ -3,8 +3,9 @@ import os
 import datetime
 import uuid
 
+
 def get_entity_color(team, weapon_type):
-    # Color map for teams and weapon types
+    """Return an RGB color for an entity based on its team and weapon type."""
     color_map = {
         "A": {
             "pistol": (173, 216, 230),    # light blue
@@ -32,6 +33,7 @@ def get_entity_color(team, weapon_type):
         },
     }
     return color_map.get(team, {}).get(weapon_type, (128, 128, 128))  # default gray
+
 
 def draw_battle_map(game_state, terrain, *team_ids, round_num, out_dir, grid_size=50, px_size=8):
     img = Image.new("RGB", (grid_size * px_size, grid_size * px_size), (255, 255, 255))
@@ -71,12 +73,13 @@ def draw_battle_map(game_state, terrain, *team_ids, round_num, out_dir, grid_siz
     # Overlay round number
     try:
         font = ImageFont.truetype("arial.ttf", 16)
-    except:
+    except Exception:
         font = ImageFont.load_default()
     draw.text((5, 5), f"Round {round_num}", fill=(0, 0, 0), font=font)
     if not os.path.exists(out_dir):
         os.makedirs(out_dir)
     img.save(os.path.join(out_dir, f"battle_map_{round_num:03d}.png"))
+
 
 def get_battle_subfolder(base_dir):
     now_str = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -85,11 +88,9 @@ def get_battle_subfolder(base_dir):
         os.makedirs(subfolder)
     return subfolder
 
+
 def get_unique_battle_subfolder(base_dir, prefix="game_"):
-    """
-    Create a unique subfolder for a battle run, using a timestamp and a short UUID.
-    Returns the full path to the created subfolder.
-    """
+    """Create a unique subfolder for a battle run using a timestamp and a short UUID."""
     now_str = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
     short_id = str(uuid.uuid4())[:8]
     subfolder = os.path.join(base_dir, f"{prefix}{now_str}_{short_id}")
@@ -97,8 +98,8 @@ def get_unique_battle_subfolder(base_dir, prefix="game_"):
         os.makedirs(subfolder)
     return subfolder
 
+
 def assemble_gif(out_dir, num_rounds, gif_name="battle.gif", grid_size=50, px_size=8, duration=200):
-    from PIL import Image
     frames = []
     for i in range(1, num_rounds + 1):
         path = os.path.join(out_dir, f"battle_map_{i:03d}.png")
