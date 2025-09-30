@@ -1,9 +1,12 @@
 import arcade
+from typing import Optional
+
 from core.event_bus import EventBus
 from core.game_state import GameState
 from core.preparation_manager import PreparationManager
 from entities.character import Character
 from entities.default_entities.weapons import Sword, LightPistol
+from renderer.arcade_renderer import ArcadeRenderer
 from utils.logger import log_calls
 
 class Game(arcade.Window):
@@ -16,6 +19,7 @@ class Game(arcade.Window):
         self.prep_manager = None
         self.event_bus = None
         self.cell_size = 64
+        self.renderer: Optional[ArcadeRenderer] = None
         
         # Set up the game components
         self.setup()
@@ -30,8 +34,9 @@ class Game(arcade.Window):
         self.prep_manager = PreparationManager(self.game_state)
 
         # --- Terrain setup ---
-        terrain = self.prep_manager.create_grid_terrain(20, 15, cell_size=48)
-        self.cell_size = terrain.cell_size
+        cell_size = 48
+        terrain = self.prep_manager.create_grid_terrain(20, 15, cell_size=cell_size)
+        self.cell_size = cell_size
 
         # Keep a few spawn cells clear while scattering cover
         spawn_points = {(5, 5), (15, 10)}
@@ -71,6 +76,9 @@ class Game(arcade.Window):
         # Precompute caches (pathfinding, attack pools, etc.)
         self.prep_manager.prepare()
 
+        # Build renderer after the world has been initialized
+        self.renderer = ArcadeRenderer(self.game_state)
+
         # Resize the window to match the terrain
         self.set_size(terrain.width * self.cell_size, terrain.height * self.cell_size)
         arcade.set_background_color(arcade.color.DARK_SLATE_GRAY)
@@ -79,62 +87,9 @@ class Game(arcade.Window):
         """Render the screen."""
         arcade.start_render()
         
-        # Draw the grid
-        self._draw_grid()
-        
-        # Draw all game objects
-        terrain = self.game_state.terrain
-        
-        # Draw walls
-        for wall_pos in terrain.walls:
-            x, y = wall_pos
-            arcade.draw_rectangle_filled(
-                (x + 0.5) * terrain.cell_size,
-                (y + 0.5) * terrain.cell_size,
-                terrain.cell_size * 0.9,
-                terrain.cell_size * 0.9,
-                arcade.color.DARK_BROWN
-            )
-        
-        # Draw entities
-        for entity_id, components in self.game_state.entities.items():
-            pos = terrain.get_entity_position(entity_id)
-            if not pos:
-                continue
+        if self.renderer:
+            self.renderer.draw()
 
-            team = self._resolve_entity_team(components)
-            if team == "coterie":
-                color = arcade.color.BLUE
-            elif team == "rivals":
-                color = arcade.color.RED
-            else:
-                color = arcade.color.LIGHT_GRAY
-
-            arcade.draw_rectangle_filled(
-                (pos[0] + 0.5) * terrain.cell_size,
-                (pos[1] + 0.5) * terrain.cell_size,
-                terrain.cell_size * 0.7,
-                terrain.cell_size * 0.7,
-                color
-            )
-
-    def _draw_grid(self):
-        terrain = self.game_state.terrain
-        cell = terrain.cell_size
-        width_px = terrain.width * cell
-        height_px = terrain.height * cell
-
-        # Filled background for clarity
-        arcade.draw_lrtb_rectangle_filled(0, width_px, height_px, 0, arcade.color.ASH_GREY)
-
-        # Grid lines
-        for x in range(terrain.width + 1):
-            px = x * cell
-            arcade.draw_line(px, 0, px, height_px, arcade.color.DARK_SLATE_BLUE, 1)
-        for y in range(terrain.height + 1):
-            py = y * cell
-            arcade.draw_line(0, py, width_px, py, arcade.color.DARK_SLATE_BLUE, 1)
-                
     def on_update(self, delta_time):
         """Movement and game logic."""
         pass
@@ -142,14 +97,6 @@ class Game(arcade.Window):
     def on_key_press(self, key, modifiers):
         """Called whenever a key is pressed."""
         pass
-
-    @staticmethod
-    def _resolve_entity_team(components):
-        """Return the team assigned to the entity's character, if any."""
-
-        char_ref = components.get("character_ref")
-        character = getattr(char_ref, "character", None) if char_ref else None
-        return getattr(character, "team", None) if character else None
 
 def main():
     """Main function to start the game."""

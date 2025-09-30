@@ -185,8 +185,8 @@ class PreparationManager:
             return []
 
         if count is None:
-            if density < 0 or density > 1.0:
-                raise ValueError(f"density must be between 0 and 1.0 inclusive, got {density}")
+            if not 0.0 <= density <= 1.0:
+                raise ValueError(f"density must be between 0.0 and 1.0 inclusive, got {density}")
             count = int(len(candidates) * density)
 
         count = min(count, len(candidates))
