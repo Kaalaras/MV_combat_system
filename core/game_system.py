@@ -1,9 +1,11 @@
 from typing import Dict, Optional, Any, List, Tuple
+
+from typing import TYPE_CHECKING
 from core.visualization.battle_map import draw_battle_map
 import os
 
-from ecs.components.character_ref import CharacterRefComponent
-from ecs.components.position import PositionComponent
+if TYPE_CHECKING:  # pragma: no cover - hints only
+    from ecs.ecs_manager import CharacterTeamSnapshot, TeamSnapshot
 
 
 class GameSystem:
@@ -267,16 +269,28 @@ class GameSystem:
         """
         for round_num in range(1, max_rounds + 1):
             print(f"\n=== Round {round_num} ===")
+
+            round_snapshots: List["CharacterTeamSnapshot"] = list(
+                self.ecs_manager.iter_character_team_snapshots(include_position=True)
+            )
+            team_state_start = self.ecs_manager.collect_team_rosters(
+                include_position=True,
+                snapshots=round_snapshots,
+            )
+
             if self.event_bus:
-                self.event_bus.publish("round_start", round_number=round_num)
+                self.event_bus.publish(
+                    "round_start",
+                    round_number=round_num,
+                    team_state=team_state_start,
+                )
 
             self.turn_order_system.start_new_round()
             if self.action_system:
                 self.action_system.decrement_cooldowns()
 
-            character_snapshot: Dict[str, Tuple[CharacterRefComponent, Optional[PositionComponent]]] = {
-                entity_id: (char_ref, position)
-                for entity_id, char_ref, position in self.ecs_manager.iter_character_snapshots()
+            character_snapshot: Dict[str, "CharacterTeamSnapshot"] = {
+                snapshot.entity_id: snapshot for snapshot in round_snapshots
             }
 
             for entity_id in self.turn_order_system.get_turn_order():
@@ -291,10 +305,10 @@ class GameSystem:
                         "This may indicate that the entity was not properly initialized, "
                         "was removed from the ECS, or there is a bug in the component management system."
                     )
-                char_ref, position_comp = snapshot
-                char = char_ref.character
-                if char.is_dead:
+                if not snapshot.is_alive:
                     continue
+
+                char = snapshot.character
 
                 print(f"\n-- {char.name}'s turn (ID: {entity_id}) --")
                 if self.event_bus:
@@ -302,7 +316,11 @@ class GameSystem:
                 if self.action_system:
                     self.action_system.reset_counters(entity_id)
                 if self.event_bus:
-                    self.event_bus.publish("movement_reset_requested", entity_id=entity_id, position=position_comp)
+                    self.event_bus.publish(
+                        "movement_reset_requested",
+                        entity_id=entity_id,
+                        position=snapshot.position,
+                    )
 
                 # Handle AI-controlled vs player-controlled entities differently
                 if char.is_ai_controlled:
@@ -337,10 +355,20 @@ class GameSystem:
                     self.event_bus.publish("turn_end", entity_id=entity_id)
                 self._current_turn_entity_id = None
 
+            latest_snapshots: List["CharacterTeamSnapshot"] = list(
+                self.ecs_manager.iter_character_team_snapshots(include_position=True)
+            )
+            team_state = self.ecs_manager.collect_team_rosters(
+                include_position=True,
+                snapshots=latest_snapshots,
+            )
+
             # Draw the battle map if enabled
             if self.enable_map_drawing and self.map_dir:
-                teamA_ids = self.game_state.get_teams().get("A", [])
-                teamB_ids = self.game_state.get_teams().get("B", [])
+                team_a = team_state.get("A")
+                team_b = team_state.get("B")
+                teamA_ids = list(team_a.member_ids) if team_a else []
+                teamB_ids = list(team_b.member_ids) if team_b else []
                 draw_battle_map(
                     self.game_state,
                     self.game_state.terrain,
@@ -353,9 +381,9 @@ class GameSystem:
                 )
 
             if self.event_bus:
-                self.event_bus.publish("round_end", round_number=round_num)
+                self.event_bus.publish("round_end", round_number=round_num, team_state=team_state)
 
-            if self.check_end_conditions():
+            if self.check_end_conditions(team_state):
                 print("Game ended!")
                 if self.event_bus:
                     self.event_bus.publish("game_end")
@@ -422,44 +450,31 @@ class GameSystem:
             else:
                 print("Invalid choice.")
 
-    def check_end_conditions(self) -> bool:
-        """
-        Determine if the game has reached an end state by checking if only 0 or 1 teams
-        have surviving entities.
+    def check_end_conditions(
+        self,
+        team_state: Optional[Dict[str, "TeamSnapshot"]] = None,
+    ) -> bool:
+        """Determine if the game has reached an end state using ECS snapshots."""
 
-        Returns:
-            True if game end conditions are met, False otherwise
+        if team_state is None:
+            latest_snapshots: List["CharacterTeamSnapshot"] = list(
+                self.ecs_manager.iter_character_team_snapshots(include_position=False)
+            )
+            team_state = self.ecs_manager.collect_team_rosters(
+                include_position=False,
+                snapshots=latest_snapshots,
+            )
 
-        Example:
-            ```python
-            # Inside a custom game loop
-            if game_system.check_end_conditions():
-                print("Game over!")
-                break
-            ```
-        """
-        self.game_state.update_teams()
-        teams_data = self.game_state.get_teams()
-        if not teams_data or len(teams_data) < 1:
+        if not team_state:
             return False
 
-        active_teams = 0
-        for team_name, team_members in teams_data.items():
-            if not team_members:
-                continue
-            team_alive = False
-            for entity_id in team_members:
-                entity = self.game_state.get_entity(entity_id)
-                if not entity or "character_ref" not in entity:
-                    continue
-                char = entity["character_ref"].character
-                if not char.is_dead:
-                    team_alive = True
-                    break
-            if team_alive:
-                active_teams += 1
+        active_teams = [
+            team_id
+            for team_id, snapshot in team_state.items()
+            if snapshot.is_active
+        ]
 
-        if active_teams <= 1 and len(teams_data) > 1:
-            print(f"End condition met: {active_teams} active team(s) remaining.")
+        if len(active_teams) <= 1 and len(team_state) > 1:
+            print(f"End condition met: {len(active_teams)} active team(s) remaining.")
             return True
         return False

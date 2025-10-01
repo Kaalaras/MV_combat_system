@@ -33,7 +33,9 @@ Example:
     # Process all systems
     ecs_manager.process(dt=0.016)
 """
-from typing import TYPE_CHECKING, Any, Dict, Iterator, List, Optional, Tuple, Type
+from collections import defaultdict
+from dataclasses import dataclass
+from typing import TYPE_CHECKING, Any, Dict, Iterable, Iterator, List, Optional, Tuple, Type
 
 try:  # pragma: no cover - import guard for environments without esper
     import esper  # type: ignore
@@ -49,6 +51,36 @@ if TYPE_CHECKING:  # pragma: no cover - import hints only
 
 ProcessorType = getattr(esper, "Processor", Any) if esper else Any
 
+
+@dataclass(frozen=True)
+class CharacterTeamSnapshot:
+    """Immutable view of a character entity's team-related ECS data."""
+
+    entity_id: str
+    character_ref: "CharacterRefComponent"
+    character: Any
+    position: Optional["PositionComponent"]
+    team_id: Optional[str]
+    is_alive: bool
+
+
+@dataclass(frozen=True)
+class TeamSnapshot:
+    """Aggregate team state derived from :class:`CharacterTeamSnapshot` data."""
+
+    team_id: str
+    members: Tuple[CharacterTeamSnapshot, ...]
+    member_ids: Tuple[str, ...]
+    alive_member_ids: Tuple[str, ...]
+    defeated_member_ids: Tuple[str, ...]
+
+    @property
+    def alive_count(self) -> int:
+        return len(self.alive_member_ids)
+
+    @property
+    def is_active(self) -> bool:
+        return self.alive_count > 0
 
 class _FallbackWorld:
     """Lightweight stand-in when ``esper.World`` is unavailable.
@@ -372,6 +404,95 @@ class ECSManager:
                 if internal_id is not None:
                     position_component = self.try_get_component(internal_id, _PositionComponent)
             yield entity_id, char_ref, position_component
+
+    def iter_character_team_snapshots(
+        self,
+        include_position: bool = True,
+        include_unassigned: bool = True,
+    ) -> Iterator[CharacterTeamSnapshot]:
+        """Yield :class:`CharacterTeamSnapshot` records for character entities."""
+
+        from ecs.components.character_ref import CharacterRefComponent as _CharacterRefComponent
+        from ecs.components.position import PositionComponent as _PositionComponent
+
+        for entity_id, char_ref in self.iter_with_id(_CharacterRefComponent):
+            character = getattr(char_ref, "character", None)
+            if character is None:
+                continue
+            raw_team = getattr(character, "team", None)
+            team_id: Optional[str] = None if raw_team is None else str(raw_team)
+            if not include_unassigned and team_id is None:
+                continue
+            position_component: Optional[_PositionComponent] = None
+            if include_position:
+                internal_id = self.resolve_entity(entity_id)
+                if internal_id is not None:
+                    position_component = self.try_get_component(internal_id, _PositionComponent)
+            is_alive = not getattr(character, "is_dead", False)
+            yield CharacterTeamSnapshot(
+                entity_id=entity_id,
+                character_ref=char_ref,
+                character=character,
+                position=position_component,
+                team_id=team_id,
+                is_alive=is_alive,
+            )
+
+    def collect_team_rosters(
+        self,
+        include_position: bool = True,
+        include_unassigned: bool = False,
+        snapshots: Optional[Iterable[CharacterTeamSnapshot]] = None,
+    ) -> Dict[str, TeamSnapshot]:
+        """Return a mapping of team identifiers to :class:`TeamSnapshot` data."""
+
+        teams: Dict[str, List[CharacterTeamSnapshot]] = defaultdict(list)
+        snapshot_iterable: Iterable[CharacterTeamSnapshot]
+        if snapshots is not None:
+            snapshot_iterable = snapshots
+        else:
+            snapshot_iterable = self.iter_character_team_snapshots(
+                include_position=include_position,
+                include_unassigned=include_unassigned,
+            )
+
+        for snapshot in snapshot_iterable:
+            if snapshot.team_id is None:
+                if include_unassigned:
+                    teams.setdefault("__unassigned__", []).append(snapshot)
+                continue
+            teams[snapshot.team_id].append(snapshot)
+
+        team_state: Dict[str, TeamSnapshot] = {}
+        for team_id, members in teams.items():
+            ordered_members = tuple(sorted(members, key=lambda snap: snap.entity_id))
+            member_ids = tuple(member.entity_id for member in ordered_members)
+            alive_ids = tuple(member.entity_id for member in ordered_members if member.is_alive)
+            defeated_ids = tuple(
+                member.entity_id for member in ordered_members if not member.is_alive
+            )
+            team_state[team_id] = TeamSnapshot(
+                team_id=team_id,
+                members=ordered_members,
+                member_ids=member_ids,
+                alive_member_ids=alive_ids,
+                defeated_member_ids=defeated_ids,
+            )
+        return team_state
+
+    def iter_team_rosters(
+        self,
+        include_position: bool = True,
+        include_unassigned: bool = False,
+        snapshots: Optional[Iterable[CharacterTeamSnapshot]] = None,
+    ) -> Iterator[TeamSnapshot]:
+        """Iterate over :class:`TeamSnapshot` instances grouped by team."""
+
+        yield from self.collect_team_rosters(
+            include_position=include_position,
+            include_unassigned=include_unassigned,
+            snapshots=snapshots,
+        ).values()
 
     # Internal helpers ---------------------------------------------------
     def _register_entity_identity(self, internal_id: int, component: Any) -> None:
