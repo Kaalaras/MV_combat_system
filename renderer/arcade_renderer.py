@@ -11,6 +11,7 @@ from ecs.components.character_ref import CharacterRefComponent
 from ecs.components.position import PositionComponent
 
 if TYPE_CHECKING:  # pragma: no cover - imported for typing only
+    from core.terrain_manager import Terrain
     from ecs.ecs_manager import ECSManager
 
 
@@ -123,8 +124,14 @@ class ArcadeRenderer:
     ) -> Iterator[Tuple[str, Union["PositionComponent", _LegacyPosition], Optional[str]]]:
         terrain = self._game_state.terrain
         if terrain is None:
-            return
+            return iter(())
 
+        return self._iter_render_snapshots_for_terrain(terrain)
+
+    def _iter_render_snapshots_for_terrain(
+        self,
+        terrain: "Terrain",
+    ) -> Iterator[Tuple[str, Union["PositionComponent", _LegacyPosition], Optional[str]]]:
         yielded: Set[str] = set()
         team_cache: Dict[str, Optional[str]] = {}
 
@@ -132,10 +139,12 @@ class ArcadeRenderer:
             for entity_id, position in self._ecs_manager.iter_with_id(PositionComponent):
                 if position is None:
                     continue
+                team_id = team_cache.get(entity_id)
                 if entity_id not in team_cache:
-                    team_cache[entity_id] = self._resolve_entity_team(entity_id)
+                    team_id = self._resolve_entity_team(entity_id)
+                    team_cache[entity_id] = team_id
                 yielded.add(entity_id)
-                yield entity_id, position, team_cache[entity_id]
+                yield entity_id, position, team_id
 
         for entity_id in self._game_state.entities:
             if entity_id in yielded:
@@ -143,9 +152,11 @@ class ArcadeRenderer:
             pos = terrain.get_entity_position(entity_id)
             if not pos:
                 continue
+            team_id = team_cache.get(entity_id)
             if entity_id not in team_cache:
-                team_cache[entity_id] = self._resolve_entity_team(entity_id)
-            yield entity_id, _LegacyPosition(pos[0], pos[1]), team_cache[entity_id]
+                team_id = self._resolve_entity_team(entity_id)
+                team_cache[entity_id] = team_id
+            yield entity_id, _LegacyPosition(pos[0], pos[1]), team_id
 
     def _team_color(self, team_id: Optional[str]) -> arcade.Color:
         if team_id == "coterie":
