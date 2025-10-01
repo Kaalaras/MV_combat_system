@@ -10,17 +10,15 @@ from core.game_state import GameState
 from ecs.ecs_manager import ECSManager
 from ecs.systems.condition_system import ConditionSystem
 from ecs.systems.action_system import ActionSystem, ActionType
+from ecs.components.character_ref import CharacterRefComponent
 from entities.character import Character
 from utils.condition_utils import (
     WEAKENED_PHYSICAL, WEAKENED_MENTAL_SOCIAL, WEAKENED_TOTAL,
     POISONED, SLOWED, IMMOBILIZED, HANDICAP,
+    INVISIBLE, SEE_INVISIBLE,
 )
 
 print('Executing test_conditions module')
-
-class DummyCharRef:
-    def __init__(self, character):
-        self.character = character
 
 class TestConditions(unittest.TestCase):
     def setUp(self):
@@ -43,7 +41,7 @@ class TestConditions(unittest.TestCase):
         }
         self.char = Character(name="Test", traits=traits, base_traits=traits)
         self.entity_id = 'E1'
-        self.gs.add_entity(self.entity_id, {'character_ref': DummyCharRef(self.char)})
+        self.gs.add_entity(self.entity_id, {'character_ref': CharacterRefComponent(self.char)})
 
     # ------------------------------------------------------------------
     # Tests
@@ -107,6 +105,21 @@ class TestConditions(unittest.TestCase):
         self.action_sys.reset_counters(self.entity_id)
         self.assertEqual(self.action_sys.action_counters[self.entity_id][ActionType.PRIMARY], 0)
         self.assertEqual(self.action_sys.action_counters[self.entity_id][ActionType.SECONDARY], 0)
+
+    def test_visibility_event_emission(self):
+        events = []
+
+        def _capture(**payload):
+            events.append(payload)
+
+        self.event_bus.subscribe('visibility_state_changed', _capture)
+        self.cond_sys.add_condition(self.entity_id, INVISIBLE)
+        self.assertTrue(events)
+        self.assertEqual(events[-1]['state'], INVISIBLE)
+        self.assertTrue(events[-1]['active'])
+        self.cond_sys.remove_condition(self.entity_id, INVISIBLE)
+        self.assertGreaterEqual(len(events), 2)
+        self.assertFalse(events[-1]['active'])
 
 if __name__ == '__main__':
     unittest.main(verbosity=2)

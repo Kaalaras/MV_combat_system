@@ -21,6 +21,7 @@ from typing import Optional, Dict, Any, Set
 from ecs.components.condition_tracker import ConditionTrackerComponent
 from ecs.components.character_ref import CharacterRefComponent
 from ecs.components.health import HealthComponent
+from ecs.components.initiative import InitiativeComponent
 from ecs.components.willpower import WillpowerComponent
 from ecs.ecs_manager import ECSManager
 from utils.condition_utils import (
@@ -83,7 +84,6 @@ class ConditionSystem:
             resolved_bus = getattr(resolved_game_state, "event_bus", None)
         self.event_bus = resolved_bus
 
-        self._conditions: Dict[str, Dict[str, Condition]] = {}
         self._pool_modifier_registry: Dict[str, Any] = {}
         self._start_turn_handlers: Dict[str, Any] = {}
         self._movement_modifiers: Dict[str, Any] = {}
@@ -203,21 +203,17 @@ class ConditionSystem:
             if internal_id is None:
                 return None
             tracker = ConditionTrackerComponent()
-            if entity_id in self._conditions:
-                tracker.conditions.update(self._conditions[entity_id])
             self.ecs_manager.add_component(internal_id, tracker)
-        if tracker is not None:
-            self._conditions[entity_id] = tracker.conditions
         return tracker
+
+    def get_tracker(self, entity_id: str) -> Optional[ConditionTrackerComponent]:
+        """Return the tracked condition component for ``entity_id`` if present."""
+
+        return self._ensure_tracker(entity_id, create=False)
 
     def _get_condition_store(self, entity_id: str, create: bool = False) -> Optional[Dict[str, Condition]]:
         tracker = self._ensure_tracker(entity_id, create=create)
         if tracker is None:
-            if entity_id in self._conditions:
-                return self._conditions[entity_id]
-            if create:
-                self._conditions.setdefault(entity_id, {})
-                return self._conditions[entity_id]
             return None
         return tracker.conditions
 
@@ -236,37 +232,46 @@ class ConditionSystem:
             character = self._get_character(entity_id)
         if character is not None and hasattr(character, 'states'):
             states |= set(character.states)
-        if not states and entity_id in self._conditions:
-            states |= set(self._conditions[entity_id].keys())
         return states
 
     def _get_character(self, entity_id: str) -> Optional[Any]:
-        character = None
-        if self.ecs_manager:
-            cref = self.ecs_manager.get_component_for_entity(entity_id, CharacterRefComponent)
-            if cref:
-                character = getattr(cref, 'character', None)
-        if character is None and self.game_state is not None:
-            ent = getattr(self.game_state, 'get_entity', lambda _eid: None)(entity_id)
-            if ent:
-                cref = ent.get('character_ref')
-                if cref is not None:
-                    character = getattr(cref, 'character', None)
-        return character
+        if not self.ecs_manager:
+            return None
+        cref = self.ecs_manager.get_component_for_entity(entity_id, CharacterRefComponent)
+        if cref:
+            return getattr(cref, 'character', None)
+        return None
+
+    def _get_health_component(self, entity_id: str) -> Optional[HealthComponent]:
+        if not self.ecs_manager:
+            return None
+        return self.ecs_manager.get_component_for_entity(entity_id, HealthComponent)
+
+    def _get_willpower_component(self, entity_id: str) -> Optional[WillpowerComponent]:
+        if not self.ecs_manager:
+            return None
+        return self.ecs_manager.get_component_for_entity(entity_id, WillpowerComponent)
+
+    def _get_initiative_component(self, entity_id: str) -> Optional[InitiativeComponent]:
+        if not self.ecs_manager:
+            return None
+        return self.ecs_manager.get_component_for_entity(entity_id, InitiativeComponent)
 
     def _sync_health_components(self, entity_id: str, target_pool: str, character: Any) -> None:
         if not self.ecs_manager:
             return
         if target_pool == 'health':
-            health_comp = self.ecs_manager.get_component_for_entity(entity_id, HealthComponent)
+            health_comp = self._get_health_component(entity_id)
             if health_comp is not None and character is not None:
+                health_comp.max_health = character.max_health
                 health_comp.superficial_damage = character._health_damage['superficial']
                 health_comp.aggravated_damage = character._health_damage['aggravated']
                 total = health_comp.superficial_damage + health_comp.aggravated_damage
                 health_comp.current_health = max(0, character.max_health - total)
         elif target_pool == 'willpower':
-            will_comp = self.ecs_manager.get_component_for_entity(entity_id, WillpowerComponent)
+            will_comp = self._get_willpower_component(entity_id)
             if will_comp is not None and character is not None:
+                will_comp.max_willpower = character.max_willpower
                 will_comp.superficial_damage = character._willpower_damage['superficial']
                 will_comp.aggravated_damage = character._willpower_damage['aggravated']
                 total = will_comp.superficial_damage + will_comp.aggravated_damage
@@ -326,6 +331,9 @@ class ConditionSystem:
             delta = condition.data.get('delta', 0)
             current = getattr(char, 'initiative_mod', 0)
             setattr(char, 'initiative_mod', current + delta)
+            init_comp = self._get_initiative_component(entity_id)
+            if init_comp is not None:
+                init_comp.bonus += delta
         elif base == 'MaxHealthMod':
             delta = int(condition.data.get('delta', 0))
             if delta == 0:
@@ -343,6 +351,9 @@ class ConditionSystem:
                 condition.data['removed_superficial'] = removed_super
                 condition.data['removed_aggravated'] = removed_aggr
             self._sync_health_components(entity_id, 'health', char)
+            health_comp = self._get_health_component(entity_id)
+            if health_comp is not None:
+                health_comp.max_health = char.max_health
         elif base == 'DamageOutMod':
             key = condition.data.get('category') or condition.data.get('severity') or 'all'
             delta = int(condition.data.get('delta', 0))
@@ -364,6 +375,9 @@ class ConditionSystem:
             delta = condition.data.get('delta', 0)
             current = getattr(char, 'initiative_mod', 0)
             setattr(char, 'initiative_mod', current - delta)
+            init_comp = self._get_initiative_component(entity_id)
+            if init_comp is not None:
+                init_comp.bonus -= delta
         elif base == 'MaxHealthMod':
             delta = int(condition.data.get('delta', 0))
             if delta != 0:
@@ -374,6 +388,9 @@ class ConditionSystem:
                     char._health_damage['superficial'] += rs
                     char._health_damage['aggravated'] += ra
                 self._sync_health_components(entity_id, 'health', char)
+                health_comp = self._get_health_component(entity_id)
+                if health_comp is not None:
+                    health_comp.max_health = char.max_health
         elif base == 'DamageOutMod':
             key = condition.data.get('category') or condition.data.get('severity') or 'all'
             delta = int(condition.data.get('delta', 0))
@@ -426,8 +443,7 @@ class ConditionSystem:
             self._apply_side_effects(entity_id, cond)
             self._publish('condition_added', entity_id=entity_id, condition=key_name, rounds=rounds, source=source)
             base = key_name.split('#')[0]
-            if base in (INVISIBLE, SEE_INVISIBLE) and hasattr(self.game_state, 'bump_blocker_version'):
-                self.game_state.bump_blocker_version()
+            self._notify_visibility_change(entity_id, base, True)
 
     def remove_condition(self, entity_id: str, name: str, reason: str = 'removed'):
         base = name.split('#')[0]
@@ -458,8 +474,7 @@ class ConditionSystem:
             char.states.remove(name)
         self._publish('condition_removed', entity_id=entity_id, condition=name, reason=reason)
         base = name.split('#')[0]
-        if base in (INVISIBLE, SEE_INVISIBLE) and hasattr(self.game_state, 'bump_blocker_version'):
-            self.game_state.bump_blocker_version()
+        self._notify_visibility_change(entity_id, base, False)
 
     # Reintroduce earlier methods lost during edit
     def adjust_damage(self, attacker_id: str, target_id: str, amount: int, severity: str, category: str) -> int:
@@ -598,21 +613,23 @@ class ConditionSystem:
         if self.event_bus:
             self.event_bus.publish(evt, **payload)
 
+    def _notify_visibility_change(self, entity_id: str, state: str, active: bool) -> None:
+        if state not in (INVISIBLE, SEE_INVISIBLE):
+            return
+        self._publish(
+            'visibility_state_changed',
+            entity_id=entity_id,
+            state=state,
+            active=active,
+        )
+
     def _on_round_started(self, **evt):
         expired = []
-        processed: Set[str] = set()
         if self.ecs_manager:
             for entity_id, tracker in self.ecs_manager.iter_with_id(ConditionTrackerComponent):
-                processed.add(entity_id)
                 for name, cond in list(tracker.conditions.items()):
                     if cond.tick():
                         expired.append((entity_id, name))
-        for entity_id, conds in list(self._conditions.items()):
-            if entity_id in processed:
-                continue
-            for name, cond in list(conds.items()):
-                if cond.tick():
-                    expired.append((entity_id, name))
         for entity_id, name in expired:
             self.remove_condition(entity_id, name, reason='expired')
             self._publish('condition_expired', entity_id=entity_id, condition=name)

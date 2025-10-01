@@ -13,11 +13,8 @@ from entities.weapon import Weapon, WeaponType
 from entities.armor import Armor
 from ecs.actions.attack_actions import AttackAction
 from ecs.components.equipment import EquipmentComponent
+from ecs.components.character_ref import CharacterRefComponent
 from utils.damage_types import classify_damage
-
-class DummyCharRef:
-    def __init__(self, character):
-        self.character = character
 
 class Pos:
     def __init__(self, x, y):
@@ -71,10 +68,10 @@ class TestAdditionalEdgeCases(unittest.TestCase):
         armor = Armor(name='Mixed', armor_value=2, damage_type=['superficial'], weapon_type_protected=['brawl','melee'],
                       resistance_multipliers={'superficial':0.5, 'fire':0.0, 'all':2.0})
         equip = EquipmentComponent(); equip.armor = armor
-        self.gs.add_entity(d_id, {'character_ref': DummyCharRef(defender), 'position': Pos(0,0), 'equipment': equip})
+        self.gs.add_entity(d_id, {'character_ref': CharacterRefComponent(defender), 'position': Pos(0,0), 'equipment': equip})
         # Attacker with no modifiers
         attacker = Character(name='Att', traits=traits, base_traits=traits)
-        a_id='A'; self.gs.add_entity(a_id, {'character_ref': DummyCharRef(attacker), 'position': Pos(0,0)})
+        a_id='A'; self.gs.add_entity(a_id, {'character_ref': CharacterRefComponent(attacker), 'position': Pos(0,0)})
         # Apply DamageInMod conditions for defender: category fire +2, severity superficial +3, all +1
         self.gs.condition_system.add_condition(d_id, 'DamageInMod', data={'category':'fire','delta':2})
         self.gs.condition_system.add_condition(d_id, 'DamageInMod', data={'severity':'superficial','delta':3})
@@ -100,8 +97,8 @@ class TestAdditionalEdgeCases(unittest.TestCase):
         attacker = Character(name='Att', traits=traits, base_traits=traits)
         defender = Character(name='Def', traits=traits, base_traits=traits)
         a_id='A2'; d_id='D2'
-        self.gs.add_entity(a_id, {'character_ref': DummyCharRef(attacker), 'position': Pos(0,0)})
-        self.gs.add_entity(d_id, {'character_ref': DummyCharRef(defender), 'position': Pos(0,0)})
+        self.gs.add_entity(a_id, {'character_ref': CharacterRefComponent(attacker), 'position': Pos(0,0)})
+        self.gs.add_entity(d_id, {'character_ref': CharacterRefComponent(defender), 'position': Pos(0,0)})
         # Add outgoing mods
         self.gs.condition_system.add_condition(a_id, 'DamageOutMod', data={'category':'fire','delta':2})
         self.gs.condition_system.add_condition(a_id, 'DamageOutMod', data={'severity':'superficial','delta':1})
@@ -121,7 +118,7 @@ class TestAdditionalEdgeCases(unittest.TestCase):
         traits = self._traits(sta=2)  # base max health = 5
         c = Character(name='HP', traits=traits, base_traits=traits)
         eid='HP1'
-        self.gs.add_entity(eid, {'character_ref': DummyCharRef(c)})
+        self.gs.add_entity(eid, {'character_ref': CharacterRefComponent(c)})
         # Deal superficial damage 4
         c.take_damage(4, 'superficial')
         self.assertEqual(c._health_damage['superficial'], 4)
@@ -143,7 +140,7 @@ class TestAdditionalEdgeCases(unittest.TestCase):
         traits = self._traits()
         c = Character(name='Init', traits=traits, base_traits=traits)
         eid='INIT'
-        self.gs.add_entity(eid, {'character_ref': DummyCharRef(c)})
+        self.gs.add_entity(eid, {'character_ref': CharacterRefComponent(c)})
         self.gs.condition_system.add_condition(eid, 'InitiativeMod', rounds=2, data={'delta':3})
         self.gs.condition_system.add_condition(eid, 'InitiativeMod', rounds=1, data={'delta':-1})
         self.assertEqual(c.initiative_mod, 2)  # 3 + (-1)
@@ -165,8 +162,8 @@ class TestAdditionalEdgeCases(unittest.TestCase):
         armor = Armor(name='SupImmune', armor_value=2, damage_type=['superficial'], weapon_type_protected=['brawl','melee'],
                       resistance_multipliers={'superficial':0.0})
         equip = EquipmentComponent(); equip.armor = armor
-        self.gs.add_entity(a_id, {'character_ref': DummyCharRef(attacker), 'position': Pos(0,0)})
-        self.gs.add_entity(d_id, {'character_ref': DummyCharRef(defender), 'position': Pos(0,0), 'equipment': equip})
+        self.gs.add_entity(a_id, {'character_ref': CharacterRefComponent(attacker), 'position': Pos(0,0)})
+        self.gs.add_entity(d_id, {'character_ref': CharacterRefComponent(defender), 'position': Pos(0,0), 'equipment': equip})
         weapon = Weapon(name='ClawsMulti', damage_bonus=0, weapon_range=1, damage_type='superficial', weapon_type=WeaponType.BRAWL,
                         damage_components=[{'damage_bonus':2,'damage_type':'superficial'},
                                            {'damage_bonus':1,'damage_type':'aggravated'},

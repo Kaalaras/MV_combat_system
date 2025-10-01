@@ -5,29 +5,37 @@ if PACKAGE_ROOT not in sys.path:
     sys.path.insert(0, PACKAGE_ROOT)
 
 from core.event_bus import EventBus
-from core.game_state import GameState
 from ecs.ecs_manager import ECSManager
 from ecs.systems.condition_system import ConditionSystem
+from ecs.components.entity_id import EntityIdComponent
+from ecs.components.character_ref import CharacterRefComponent
+from ecs.components.condition_tracker import ConditionTrackerComponent
+from ecs.components.health import HealthComponent
+from ecs.components.willpower import WillpowerComponent
+from ecs.components.initiative import InitiativeComponent
 from entities.character import Character
-
-class DummyCharRef:
-    def __init__(self, character):
-        self.character = character
 
 class TestDamageClamp(unittest.TestCase):
     def setUp(self):
         self.event_bus = EventBus()
         self.ecs_manager = ECSManager(self.event_bus)
-        self.gs = GameState(self.ecs_manager)
-        self.gs.set_event_bus(self.event_bus)
-        self.cond = ConditionSystem(self.ecs_manager, self.event_bus, game_state=self.gs)
-        self.gs.set_condition_system(self.cond)
+        self.cond = ConditionSystem(self.ecs_manager, self.event_bus)
         traits = {'Attributes': {'Physical': {'Strength':2,'Dexterity':2,'Stamina':2}}, 'Virtues': {'Courage':1}}
         self.att = Character(name='Att', traits=traits, base_traits=traits)
         self.defn = Character(name='Def', traits=traits, base_traits=traits)
         self.att_id='ATT_CLAMP'; self.def_id='DEF_CLAMP'
-        self.gs.add_entity(self.att_id, {'character_ref': DummyCharRef(self.att)})
-        self.gs.add_entity(self.def_id, {'character_ref': DummyCharRef(self.defn)})
+        self._create_entity(self.att_id, self.att)
+        self._create_entity(self.def_id, self.defn)
+
+    def _create_entity(self, entity_id: str, character: Character):
+        self.ecs_manager.create_entity(
+            EntityIdComponent(entity_id),
+            CharacterRefComponent(character),
+            ConditionTrackerComponent(),
+            InitiativeComponent(),
+            HealthComponent(character.max_health),
+            WillpowerComponent(character.max_willpower),
+        )
 
     def test_full_negative_clamp(self):
         base = 5
@@ -45,7 +53,12 @@ class TestDamageClamp(unittest.TestCase):
         adj0 = self.cond.adjust_damage(self.att_id, self.def_id, base, severity='unknown', category='fire')
         self.assertEqual(adj0, 0)
         # Remove the strong negative (find suffix)
-        neg_name = [n for n in self.cond.list_conditions(self.att_id) if n.startswith('DamageOutMod') and self.cond._conditions[self.att_id][n].data.get('delta') == -7][0]
+        tracker = self.cond.get_tracker(self.att_id)
+        neg_name = [
+            n
+            for n, cond in (tracker.conditions.items() if tracker else [])
+            if n.startswith('DamageOutMod') and cond.data.get('delta') == -7
+        ][0]
         self.cond.remove_condition(self.att_id, neg_name)
         adj1 = self.cond.adjust_damage(self.att_id, self.def_id, base, severity='unknown', category='fire')
         self.assertEqual(adj1, base + 2)

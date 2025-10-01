@@ -9,15 +9,12 @@ from core.game_state import GameState
 from ecs.ecs_manager import ECSManager
 from ecs.systems.condition_system import ConditionSystem
 from ecs.systems.action_system import ActionSystem, ActionType
+from ecs.components.character_ref import CharacterRefComponent
 from entities.character import Character
 from utils.condition_utils import (
     WEAKENED_PHYSICAL, WEAKENED_MENTAL_SOCIAL, WEAKENED_TOTAL,
     POISONED, SLOWED, IMMOBILIZED, HANDICAP,
 )
-
-class DummyCharRef:
-    def __init__(self, character):
-        self.character = character
 
 class ConditionSystemTests(unittest.TestCase):
     def setUp(self):
@@ -39,7 +36,7 @@ class ConditionSystemTests(unittest.TestCase):
         }
         self.char = Character(name="Test", traits=traits, base_traits=traits)
         self.entity_id = 'E1'
-        self.gs.add_entity(self.entity_id, {'character_ref': DummyCharRef(self.char)})
+        self.gs.add_entity(self.entity_id, {'character_ref': CharacterRefComponent(self.char)})
 
     def test_weakened_physical_activation(self):
         max_health = self.char.max_health

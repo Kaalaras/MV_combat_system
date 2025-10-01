@@ -11,11 +11,8 @@ from core.game_state import GameState
 from ecs.ecs_manager import ECSManager
 from ecs.systems.condition_system import ConditionSystem
 from ecs.actions.discipline_actions import BloodPulsationAction, BloodHealingAction
+from ecs.components.character_ref import CharacterRefComponent
 from entities.subtypes import Undead, Ghost, Vampire
-
-class DummyCharRef:
-    def __init__(self, character):
-        self.character = character
 
 BASIC_VIRTUES = {'Virtues': {'Courage': 1}}
 
@@ -33,7 +30,7 @@ class TestUndeadAndDisciplines(unittest.TestCase):
         random.randint = self.original_randint
 
     def _add_entity(self, eid, char):
-        self.gs.add_entity(eid, {'character_ref': DummyCharRef(char)})
+        self.gs.add_entity(eid, {'character_ref': CharacterRefComponent(char)})
         return eid
 
     def _mk_traits(self, strength=3, dex=2, sta=2):

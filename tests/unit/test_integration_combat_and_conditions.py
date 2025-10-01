@@ -14,11 +14,8 @@ from entities.subtypes import Vampire, Ghost, Undead
 from entities.character import Character
 from entities.weapon import Weapon, WeaponType
 from ecs.components.equipment import EquipmentComponent
+from ecs.components.character_ref import CharacterRefComponent
 from entities.armor import Armor
-
-class DummyCharRef:
-    def __init__(self, character):
-        self.character = character
 
 class Pos:
     def __init__(self, x, y):
@@ -69,8 +66,8 @@ class TestIntegrationCombatAndConditions(unittest.TestCase):
         armor = Armor(name='Leather', armor_value=2, damage_type=['superficial'], weapon_type_protected=['brawl','melee'])
         equip = EquipmentComponent(); equip.armor = armor
         # Entities
-        self.gs.add_entity('A', {'character_ref': DummyCharRef(attacker), 'position': Pos(0,0)})
-        self.gs.add_entity('D', {'character_ref': DummyCharRef(defender), 'position': Pos(0,0), 'equipment': equip})
+        self.gs.add_entity('A', {'character_ref': CharacterRefComponent(attacker), 'position': Pos(0,0)})
+        self.gs.add_entity('D', {'character_ref': CharacterRefComponent(defender), 'position': Pos(0,0), 'equipment': equip})
         # Weapon aggravated (non-magic) brawl
         weapon = Weapon(name='Claws', damage_bonus=3, weapon_range=1, damage_type='aggravated', weapon_type=WeaponType.BRAWL)
         atk = _TestAttackAction('A','D', weapon, self.gs)
@@ -88,7 +85,7 @@ class TestIntegrationCombatAndConditions(unittest.TestCase):
     def test_magic_damage_hits_ghost_only_when_magic(self):
         ghost_traits = self._base_traits()
         g = Ghost(name='Specter', traits=ghost_traits, base_traits=ghost_traits)
-        self.gs.add_entity('G', {'character_ref': DummyCharRef(g), 'position': Pos(0,0)})
+        self.gs.add_entity('G', {'character_ref': CharacterRefComponent(g), 'position': Pos(0,0)})
         # Non-magic superficial
         g.take_damage(5, 'superficial')
         self.assertEqual(g._health_damage['superficial'], 0)
@@ -100,7 +97,7 @@ class TestIntegrationCombatAndConditions(unittest.TestCase):
     def test_blood_pulsation_simultaneous_expiry(self):
         v_traits = self._base_traits(str_=6)
         v = Vampire(name='PulseSim', traits=v_traits, base_traits=v_traits)
-        self.gs.add_entity('VS', {'character_ref': DummyCharRef(v)})
+        self.gs.add_entity('VS', {'character_ref': CharacterRefComponent(v)})
         bp = BloodPulsationAction()
         random.randint = lambda a,b: 3
         # Add three increments without advancing rounds: 7,8,9
@@ -127,7 +124,7 @@ class TestIntegrationCombatAndConditions(unittest.TestCase):
     def test_manual_removal_of_pulsation_condition(self):
         v_traits = self._base_traits(str_=6)
         v = Vampire(name='ManualRem', traits=v_traits, base_traits=v_traits)
-        self.gs.add_entity('VM', {'character_ref': DummyCharRef(v)})
+        self.gs.add_entity('VM', {'character_ref': CharacterRefComponent(v)})
         bp = BloodPulsationAction(); random.randint=lambda a,b:2
         bp.execute('VM', self.gs, attribute='Strength')  # 7
         # Find condition name

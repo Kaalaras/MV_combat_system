@@ -8,11 +8,8 @@ from core.event_bus import EventBus
 from core.game_state import GameState
 from ecs.ecs_manager import ECSManager
 from ecs.systems.condition_system import ConditionSystem
+from ecs.components.character_ref import CharacterRefComponent
 from entities.character import Character
-
-class DummyCharRef:
-    def __init__(self, character):
-        self.character = character
 
 class TestDamageModExpiry(unittest.TestCase):
     def setUp(self):
@@ -27,8 +24,8 @@ class TestDamageModExpiry(unittest.TestCase):
         self.att = Character(name='Att', traits=traits_att, base_traits=traits_att)
         self.defn = Character(name='Def', traits=traits_def, base_traits=traits_def)
         self.att_id='A_MOD'; self.def_id='D_MOD'
-        self.gs.add_entity(self.att_id, {'character_ref': DummyCharRef(self.att)})
-        self.gs.add_entity(self.def_id, {'character_ref': DummyCharRef(self.defn)})
+        self.gs.add_entity(self.att_id, {'character_ref': CharacterRefComponent(self.att)})
+        self.gs.add_entity(self.def_id, {'character_ref': CharacterRefComponent(self.defn)})
         self.round = 0
 
     def _advance_round(self):
