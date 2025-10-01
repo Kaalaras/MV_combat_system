@@ -640,7 +640,7 @@ class ConditionSystem:
         expired = []
         if self.ecs_manager:
             for entity_id, tracker in self.ecs_manager.iter_with_id(ConditionTrackerComponent):
-                for name, cond in tracker.conditions.items():
+                for name, cond in list(tracker.conditions.items()):
                     if cond.tick():
                         expired.append((entity_id, name))
         for entity_id, name in expired:
