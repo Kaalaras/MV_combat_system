@@ -293,7 +293,9 @@ class ActionSystem:
         used_count = per_turn_map.get(action.name, 0)
         per_turn_limit = action.per_turn_limit
         if per_turn_limit is not None and used_count >= per_turn_limit:
-            print(f"[ActionSystem][DEBUG] per-turn limit reached for {action.name} ({used_count}/{action.per_turn_limit})")
+            print(
+                f"[ActionSystem][DEBUG] per-turn limit reached for {action.name} ({used_count}/{per_turn_limit})"
+            )
             return False
 
         # Check cooldowns
