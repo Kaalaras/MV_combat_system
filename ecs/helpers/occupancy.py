@@ -18,21 +18,21 @@ def _expand_footprint(
     anchor_x = int(getattr(position, "x", 0))
     anchor_y = int(getattr(position, "y", 0))
     if footprint is not None:
-        return {(
-            anchor_x + int(dx),
-            anchor_y + int(dy),
-        ) for dx, dy in footprint.iter_offsets()}
+        offsets = list(footprint.iter_offsets())
+        if offsets:
+            return {(
+                anchor_x + int(dx),
+                anchor_y + int(dy),
+            ) for dx, dy in offsets}
 
     width = int(getattr(position, "width", 1))
     height = int(getattr(position, "height", 1))
 
     if width <= 0 or height <= 0:
-        # Defensive fallback – malformed components occasionally surface in tests
-        # or fixtures where width/height end up as zero.  Prior behaviour silently
-        # produced an empty set, allowing those entities to be ignored by
-        # occupancy queries.  Mirror the legacy game_state.entities walk that
-        # always at least blocked the anchor tile.
-        return {(anchor_x, anchor_y)}
+        raise ValueError(
+            "PositionComponent dimensions must be positive to compute occupancy: "
+            f"width={width}, height={height}"
+        )
 
     return {
         (anchor_x + dx, anchor_y + dy)

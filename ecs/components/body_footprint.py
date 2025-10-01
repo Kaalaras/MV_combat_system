@@ -15,9 +15,13 @@ Offset = Tuple[int, int]
 
 @dataclass(frozen=True)
 class BodyFootprintComponent:
-    """Relative offsets describing the occupied tiles for an entity."""
+    """Relative offsets describing the occupied tiles for an entity.
 
-    cells: FrozenSet[Offset] = field(default_factory=lambda: frozenset({(0, 0)}))
+    The default footprint is empty; callers that omit explicit offsets rely on
+    position dimensions to supply the occupied tiles.
+    """
+
+    cells: FrozenSet[Offset] = field(default_factory=frozenset)
 
     def __post_init__(self) -> None:
         """Validate offsets without mutating the frozen dataclass."""
