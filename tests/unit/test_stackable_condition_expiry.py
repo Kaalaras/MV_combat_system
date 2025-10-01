@@ -14,6 +14,7 @@ from ecs.components.health import HealthComponent
 from ecs.components.willpower import WillpowerComponent
 from ecs.components.initiative import InitiativeComponent
 from entities.character import Character
+from tests.unit.helpers import find_condition_by_prefix_and_delta
 
 class TestStackableExpiry(unittest.TestCase):
     def setUp(self):
@@ -78,14 +79,7 @@ class TestStackableExpiry(unittest.TestCase):
         # Manually remove the negative modifier (suffix unknown; find it)
         tracker = self.cond.get_tracker(self.eid)
         self.assertIsNotNone(tracker, "Condition tracker missing for stackable entity")
-        neg_name = next(
-            (
-                n
-                for n, cond in tracker.conditions.items()
-                if n.startswith('MaxHealthMod') and cond.data.get('delta') == -2
-            ),
-            None,
-        )
+        neg_name = find_condition_by_prefix_and_delta(tracker, 'MaxHealthMod', -2)
         self.assertIsNotNone(
             neg_name,
             "No MaxHealthMod condition with delta -2 found",

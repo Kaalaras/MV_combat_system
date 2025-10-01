@@ -609,25 +609,35 @@ class ConditionSystem:
         for r in removed:
             self._publish('condition_removed', entity_id=entity_id, condition=r, reason='threshold')
 
-    def _publish(self, evt: str, **payload):
-        if self.event_bus:
+    def _publish(self, evt: str, **payload) -> bool:
+        if not self.event_bus:
+            return False
+        try:
             self.event_bus.publish(evt, **payload)
+        except Exception as exc:
+            print(f"[ConditionSystem] Failed publishing {evt}: {exc}")
+            return False
+        return True
 
     def _notify_visibility_change(self, entity_id: str, state: str, active: bool) -> None:
         if state not in (INVISIBLE, SEE_INVISIBLE):
             return
-        self._publish(
+        published = self._publish(
             'visibility_state_changed',
             entity_id=entity_id,
             state=state,
             active=active,
         )
+        if self.game_state and hasattr(self.game_state, 'bump_blocker_version'):
+            gs_bus = getattr(self.game_state, 'event_bus', None)
+            if not published or gs_bus is None or gs_bus is not self.event_bus:
+                self.game_state.bump_blocker_version()
 
     def _on_round_started(self, **evt):
         expired = []
         if self.ecs_manager:
             for entity_id, tracker in self.ecs_manager.iter_with_id(ConditionTrackerComponent):
-                for name, cond in list(tracker.conditions.items()):
+                for name, cond in tracker.conditions.items():
                     if cond.tick():
                         expired.append((entity_id, name))
         for entity_id, name in expired:

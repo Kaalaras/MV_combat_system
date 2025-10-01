@@ -14,6 +14,7 @@ from ecs.components.health import HealthComponent
 from ecs.components.willpower import WillpowerComponent
 from ecs.components.initiative import InitiativeComponent
 from entities.character import Character
+from tests.unit.helpers import find_condition_by_prefix_and_delta
 
 class TestDamageClamp(unittest.TestCase):
     def setUp(self):
@@ -55,14 +56,7 @@ class TestDamageClamp(unittest.TestCase):
         # Remove the strong negative (find suffix)
         tracker = self.cond.get_tracker(self.att_id)
         self.assertIsNotNone(tracker, "Condition tracker missing for attacker entity")
-        neg_name = next(
-            (
-                n
-                for n, cond in tracker.conditions.items()
-                if n.startswith('DamageOutMod') and cond.data.get('delta') == -7
-            ),
-            None,
-        )
+        neg_name = find_condition_by_prefix_and_delta(tracker, 'DamageOutMod', -7)
         self.assertIsNotNone(
             neg_name,
             "Could not find the negative DamageOutMod condition with delta -7",
