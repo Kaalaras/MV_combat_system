@@ -19,7 +19,13 @@ class TeamComponent:
 
     @staticmethod
     def _normalize_team_id(team_id: Optional[str]) -> Optional[str]:
-        return str(team_id) if team_id is not None else None
+        if team_id is None:
+            return None
+        if not isinstance(team_id, str):
+            raise TypeError(
+                f"team_id must be a string or None, got {type(team_id).__name__}"
+            )
+        return team_id
 
     def __repr__(self) -> str:  # pragma: no cover - debug helper
         return f"TeamComponent(team_id={self.team_id!r})"
