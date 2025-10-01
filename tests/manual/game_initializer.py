@@ -199,7 +199,7 @@ def _deprecated_initialize_game(entity_specs, grid_size, max_rounds=200, map_dir
     los_manager = LineOfSightManager(game_state, terrain, event_bus)
 
     ai_system = BasicAISystem(game_state, movement, action_system, debug=True, event_bus=event_bus, los_manager=los_manager)
-    turn_order = TurnOrderSystem(game_state, ecs_manager)
+    turn_order = TurnOrderSystem(ecs_manager, event_bus)
 
     # --- Action Registration ---
     # This step is crucial. It gives characters their abilities.
@@ -339,7 +339,7 @@ def initialize_game(*, entity_specs: List[EntitySpec], grid_size: int, max_round
     facing_system = FacingSystem(game_state, event_bus); game_state.facing_system = facing_system
     los_manager = LineOfSightManager(game_state, terrain, event_bus)
     ai_system = BasicAISystem(game_state, movement, action_system, debug=True, event_bus=event_bus, los_manager=los_manager)
-    turn_order = TurnOrderSystem(game_state, ecs_manager)
+    turn_order = TurnOrderSystem(ecs_manager, event_bus)
     # Actions
     prep_manager.action_system = action_system; prep_manager.initialize_character_actions()
     std = StandardMoveAction(movement); spr = SprintAction(movement); jmp = JumpAction(movement); atk = RegisteredAttackAction(); aoe = RegisteredAoEAttackAction(); end = EndTurnAction()

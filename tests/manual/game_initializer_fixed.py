@@ -176,7 +176,7 @@ def initialize_game(
     los_manager = LineOfSightManager(game_state, terrain, event_bus)
 
     ai_system = BasicAISystem(game_state, movement, action_system, debug=True, event_bus=event_bus, los_manager=los_manager)
-    turn_order = TurnOrderSystem(game_state, ecs_manager)
+    turn_order = TurnOrderSystem(ecs_manager, event_bus)
 
     # --- Action Registration ---
     prep_manager.action_system = action_system

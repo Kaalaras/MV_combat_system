@@ -3,6 +3,7 @@ import logging
 from typing import Dict, List, Any, Optional
 
 from ecs.components.entity_id import EntityIdComponent
+from ecs.components.initiative import InitiativeComponent
 
 
 # (Assuming EventBus and MovementSystem types are imported or defined elsewhere)
@@ -109,6 +110,10 @@ class GameState:
 
         # Optionally validate components (if there's a schema)
         # For simplicity, we assume components are already properly formed
+
+        # Ensure initiative data is mirrored into ECS when characters are present
+        if "character_ref" in components and "initiative" not in components:
+            components["initiative"] = InitiativeComponent()
 
         # Add the entity and its components to the dictionary
         self.entities[entity_id] = components

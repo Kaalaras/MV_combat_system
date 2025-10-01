@@ -35,7 +35,7 @@ class GameSystem:
     )
 
     # Set up required subsystems
-    turn_order_system = TurnOrderSystem(game_state, ecs_manager)
+    turn_order_system = TurnOrderSystem(ecs_manager, event_bus)
     action_system = ActionSystem(game_state, event_bus)
     ai_system = BasicAISystem(game_state, event_bus)
 
@@ -138,7 +138,7 @@ class GameSystem:
 
         Example:
             ```python
-            turn_system = TurnOrderSystem(game_state, ecs_manager)
+            turn_system = TurnOrderSystem(ecs_manager, self.event_bus)
             game_system.set_turn_order_system(turn_system)
             ```
         """
