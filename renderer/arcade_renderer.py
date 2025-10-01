@@ -139,10 +139,7 @@ class ArcadeRenderer:
             for entity_id, position in self._ecs_manager.iter_with_id(PositionComponent):
                 if position is None:
                     continue
-                team_id = team_cache.get(entity_id)
-                if entity_id not in team_cache:
-                    team_id = self._resolve_entity_team(entity_id)
-                    team_cache[entity_id] = team_id
+                team_id = self._get_cached_team_id(entity_id, team_cache)
                 yielded.add(entity_id)
                 yield entity_id, position, team_id
 
@@ -152,10 +149,7 @@ class ArcadeRenderer:
             pos = terrain.get_entity_position(entity_id)
             if not pos:
                 continue
-            team_id = team_cache.get(entity_id)
-            if entity_id not in team_cache:
-                team_id = self._resolve_entity_team(entity_id)
-                team_cache[entity_id] = team_id
+            team_id = self._get_cached_team_id(entity_id, team_cache)
             yield entity_id, _LegacyPosition(pos[0], pos[1]), team_id
 
     def _team_color(self, team_id: Optional[str]) -> arcade.Color:
@@ -164,6 +158,15 @@ class ArcadeRenderer:
         if team_id == "rivals":
             return arcade.color.RED
         return arcade.color.LIGHT_GRAY
+
+    def _get_cached_team_id(
+        self, entity_id: str, team_cache: Dict[str, Optional[str]]
+    ) -> Optional[str]:
+        team_id = team_cache.get(entity_id)
+        if entity_id not in team_cache:
+            team_id = self._resolve_entity_team(entity_id)
+            team_cache[entity_id] = team_id
+        return team_id
 
     @staticmethod
     def _dimension_with_fallback(
