@@ -468,12 +468,10 @@ class MovementSystem:
                 future_position=future_position,
             )
         # Perform move and update terrain occupancy
-        move_performed = False
         if hasattr(terrain, 'move_entity'):
             move_result = terrain.move_entity(entity_id, dest_x, dest_y)
             if move_result is False:
                 return False
-            move_performed = True
         pos_comp.x, pos_comp.y = dest_x, dest_y
         self._record_movement_usage(entity_id, distance)
         if (

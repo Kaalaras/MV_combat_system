@@ -80,7 +80,9 @@ def collect_blocked_tiles(
         if terrain is None:
             terrain = getattr(ecs_manager, "terrain", None)
             if terrain is None:
-                terrain = getattr(getattr(ecs_manager, "game_state", None), "terrain", None)
+                game_state = getattr(ecs_manager, "game_state", None)
+                if game_state is not None:
+                    terrain = getattr(game_state, "terrain", None)
         walls = getattr(terrain, "walls", None)
         if isinstance(walls, (set, list, tuple)):
             blocked.update({(int(x), int(y)) for x, y in walls})
