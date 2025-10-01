@@ -93,6 +93,7 @@ def run_headless_four_way_battle(*, max_rounds: int = 12, grid_size: int = 15, v
 
     game_setup = setup_four_way_battle(grid_size=grid_size, max_rounds=max_rounds)
     game_state = game_setup["game_state"]
+    ecs_manager = getattr(game_state, "ecs_manager", None)
     game_system = game_setup["game_system"]
     event_bus = game_setup["event_bus"]
     all_ids = game_setup["all_ids"]
@@ -108,8 +109,9 @@ def run_headless_four_way_battle(*, max_rounds: int = 12, grid_size: int = 15, v
 
     spectator = SpectatorController(event_bus, entity_order=all_ids)
 
-    if verbose:
-        print(f"🏁 Teams: {list(game_state.get_teams().keys())}")
+    if verbose and ecs_manager:
+        team_rosters = ecs_manager.collect_team_rosters(include_position=False)
+        print(f"🏁 Teams: {list(team_rosters.keys())}")
         print(f"👥 Entities: {all_ids}")
         print(f"⚔️  Running for up to {max_rounds} rounds headlessly...")
 
@@ -123,18 +125,15 @@ def run_headless_four_way_battle(*, max_rounds: int = 12, grid_size: int = 15, v
 
         # Survivor aggregation
         survivors: Dict[str, List[str]] = {}
-        for eid in all_ids:
-            ent = game_state.get_entity(eid)
-            if not ent:  # eliminated from ECS
-                continue
-            char_ref = ent.get("character_ref")
-            if not char_ref:
-                continue
-            char = getattr(char_ref, "character", None)
-            if not char or getattr(char, "is_dead", True):
-                continue
-            team = char.team
-            survivors.setdefault(team, []).append(eid)
+        if ecs_manager:
+            team_rosters = ecs_manager.collect_team_rosters(include_position=False)
+            known_ids = set(all_ids)
+            for team_id, snapshot in team_rosters.items():
+                alive_ids = [
+                    eid for eid in snapshot.alive_member_ids if eid in known_ids
+                ]
+                if alive_ids:
+                    survivors[team_id] = alive_ids
 
         final_state = adapter.latest_state()
 
@@ -211,10 +210,9 @@ class TestFourWayBattle(unittest.TestCase):
         final_state = result["final_state"]
         state_updates = result["state_updates"]
 
-        # Teams present & stable
-        game_state.update_teams()
-        teams = game_state.get_teams()
-        self.assertEqual(set(teams.keys()), {"A","B","C","D"}, f"Unexpected teams registered: {teams}")
+        # Teams present & stable via ECS snapshot
+        team_rosters = game_state.ecs_manager.collect_team_rosters(include_position=False)
+        self.assertEqual(set(team_rosters.keys()), {"A","B","C","D"}, f"Unexpected teams registered: {team_rosters}")
 
         # All initial entity IDs should exist (pre-elimination) and be unique
         self.assertEqual(len(all_ids), 4)

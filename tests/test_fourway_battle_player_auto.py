@@ -171,8 +171,11 @@ def run_headless_four_way_battle_with_player(*, max_rounds: int = 12, grid_size:
     # Set up spectator for non-player entities
     spectator = SpectatorController(event_bus, entity_order=all_ids)
 
-    if verbose:
-        print(f"🏁 Teams: {list(game_state.get_teams().keys())}")
+    ecs_manager = getattr(game_state, "ecs_manager", None)
+
+    if verbose and ecs_manager:
+        team_rosters = ecs_manager.collect_team_rosters(include_position=False)
+        print(f"🏁 Teams: {list(team_rosters.keys())}")
         print(f"👥 All Entities: {all_ids}")
         print(f"🎮 Player-controlled (Team A): {team_a_entities}")
         print(f"🤖 AI-controlled (Teams B,C,D): {[eid for eid in all_ids if eid not in team_a_entities]}")
@@ -190,18 +193,15 @@ def run_headless_four_way_battle_with_player(*, max_rounds: int = 12, grid_size:
 
         # Survivor aggregation
         survivors: Dict[str, List[str]] = {}
-        for eid in all_ids:
-            ent = game_state.get_entity(eid)
-            if not ent:
-                continue
-            char_ref = ent.get("character_ref")
-            if not char_ref:
-                continue
-            char = getattr(char_ref, "character", None)
-            if not char or getattr(char, "is_dead", True):
-                continue
-            team = char.team
-            survivors.setdefault(team, []).append(eid)
+        if ecs_manager:
+            team_rosters = ecs_manager.collect_team_rosters(include_position=False)
+            known_ids = set(all_ids)
+            for team_id, snapshot in team_rosters.items():
+                alive_ids = [
+                    eid for eid in snapshot.alive_member_ids if eid in known_ids
+                ]
+                if alive_ids:
+                    survivors[team_id] = alive_ids
 
         final_state = adapter.latest_state()
 
@@ -251,10 +251,9 @@ class TestFourWayBattleWithPlayer(unittest.TestCase):
                 self.assertFalse(player_controller.is_player_entity(entity_id),
                                f"Entity {entity_id} should NOT be player-controlled")
 
-        # Basic game state validation
-        game_state.update_teams()
-        teams = game_state.get_teams()
-        self.assertEqual(set(teams.keys()), {"A","B","C","D"}, f"Unexpected teams: {teams}")
+        # Basic game state validation via ECS
+        team_rosters = game_state.ecs_manager.collect_team_rosters(include_position=False)
+        self.assertEqual(set(team_rosters.keys()), {"A","B","C","D"}, f"Unexpected teams: {team_rosters}")
 
         # Game completed successfully
         self.assertGreaterEqual(final_state.round_number, 1, "No rounds recorded.")

@@ -271,11 +271,13 @@ def run_and_visualize_game(game_setup: Dict[str, Any], gif_name_prefix: str):
 
     game_system.run_game_loop(max_rounds=max_rounds)
 
-    teams = game_state.get_teams()
-    alive_teams = []
-    for team_id, members in teams.items():
-        if any(not game_state.get_entity(eid)["character_ref"].character.is_dead for eid in members):
-            alive_teams.append(team_id)
+    ecs_manager = getattr(game_state, "ecs_manager", None)
+    alive_teams: List[str] = []
+    if ecs_manager:
+        team_rosters = ecs_manager.collect_team_rosters(include_position=False)
+        for team_id, snapshot in team_rosters.items():
+            if snapshot.alive_member_ids:
+                alive_teams.append(team_id)
     if len(alive_teams) == 1:
         print(f"Team {alive_teams[0]} wins.")
     elif len(alive_teams) > 1:
