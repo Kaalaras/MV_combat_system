@@ -7,6 +7,7 @@ if PACKAGE_ROOT not in sys.path:
 import unittest
 from core.event_bus import EventBus
 from core.game_state import GameState
+from ecs.ecs_manager import ECSManager
 from ecs.systems.condition_system import ConditionSystem
 from ecs.systems.action_system import ActionSystem, ActionType
 from entities.character import Character
@@ -23,9 +24,11 @@ class DummyCharRef:
 
 class TestConditions(unittest.TestCase):
     def setUp(self):
-        self.gs = GameState()
-        self.gs.set_event_bus(EventBus())
-        self.cond_sys = ConditionSystem(self.gs)
+        self.event_bus = EventBus()
+        self.ecs_manager = ECSManager(self.event_bus)
+        self.gs = GameState(self.ecs_manager)
+        self.gs.set_event_bus(self.event_bus)
+        self.cond_sys = ConditionSystem(self.ecs_manager, self.event_bus, game_state=self.gs)
         self.gs.set_condition_system(self.cond_sys)
         self.action_sys = ActionSystem(self.gs, self.gs.event_bus)
         self.gs.action_system = self.action_sys
@@ -52,14 +55,24 @@ class TestConditions(unittest.TestCase):
         self.cond_sys.recheck_damage_based(self.entity_id)
         self.assertIn(WEAKENED_PHYSICAL, self.char.states)
         base_pool = 6
-        modified = self.cond_sys.apply_pool_modifiers(self.char, base_pool, {'Strength'})
+        modified = self.cond_sys.apply_pool_modifiers(
+            self.char,
+            base_pool,
+            {'Strength'},
+            entity_id=self.entity_id,
+        )
         self.assertEqual(modified, base_pool - 2)
 
     def test_weakened_total_overrides(self):
         self.cond_sys.add_condition(self.entity_id, WEAKENED_TOTAL, rounds=3)
         self.char.states.add(WEAKENED_PHYSICAL)
         base_pool = 5
-        modified = self.cond_sys.apply_pool_modifiers(self.char, base_pool, {'Strength'})
+        modified = self.cond_sys.apply_pool_modifiers(
+            self.char,
+            base_pool,
+            {'Strength'},
+            entity_id=self.entity_id,
+        )
         self.assertEqual(modified, base_pool - 2)  # not -4
 
     def test_poisoned_tick_and_expire(self):

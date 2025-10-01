@@ -67,7 +67,12 @@ class AttackAction:
     def _apply_condition_modifiers(self, character: Character, base_pool: int, used_traits: List[str]) -> int:
         cs = getattr(self.game_state, 'condition_system', None)
         if cs:
-            return cs.apply_pool_modifiers(character, base_pool, set(used_traits))
+            return cs.apply_pool_modifiers(
+                character,
+                base_pool,
+                set(used_traits),
+                entity_id=self.attacker_id,
+            )
         return base_pool
 
     def _get_distance_point_to_entity(self, point: Tuple[int, int], entity_id: str) -> int:

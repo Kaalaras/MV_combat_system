@@ -6,6 +6,7 @@ if PACKAGE_ROOT not in sys.path:
 
 from core.event_bus import EventBus
 from core.game_state import GameState
+from ecs.ecs_manager import ECSManager
 from ecs.systems.condition_system import ConditionSystem
 from ecs.actions.discipline_actions import BloodPulsationAction, BloodHealingAction
 from entities.subtypes import Undead, Ghost, Vampire
@@ -24,9 +25,12 @@ class DummyPosition:
 
 class MinimalGameState(GameState):
     def __init__(self):
-        super().__init__()
-        self.set_event_bus(EventBus())
-        self.condition_system = ConditionSystem(self)
+        bus = EventBus()
+        ecs_manager = ECSManager(bus)
+        super().__init__(ecs_manager)
+        self.set_event_bus(bus)
+        self.condition_system = ConditionSystem(ecs_manager, bus, game_state=self)
+        self.set_condition_system(self.condition_system)
         # Provide movement stub with required methods for dodge but not used in tests with 0 pool
         class MovementStub:
             def get_reachable_tiles(self, entity_id, dist):

@@ -2,6 +2,7 @@ import unittest
 from unittest.mock import MagicMock
 from core.game_state import GameState
 from core.event_bus import EventBus
+from ecs.ecs_manager import ECSManager
 from ecs.systems.condition_system import ConditionSystem
 from ecs.systems.ai.main import AITurnContext
 
@@ -41,10 +42,15 @@ class TerrainStub:
 class BaseAITestCase(unittest.TestCase):
     def setUp(self):
         # Core systems
-        self.game_state = GameState()
         self.event_bus = EventBus()
+        self.ecs_manager = ECSManager(self.event_bus)
+        self.game_state = GameState(self.ecs_manager)
         self.game_state.set_event_bus(self.event_bus)
-        self.condition_system = ConditionSystem(self.game_state)
+        self.condition_system = ConditionSystem(
+            self.ecs_manager,
+            self.event_bus,
+            game_state=self.game_state,
+        )
         self.game_state.set_condition_system(self.condition_system)
         self.game_state.terrain = TerrainStub()
 

@@ -38,7 +38,7 @@ def gs_full():
     gs.los_manager = los
     cover_sys = CoverSystem(gs)
     gs.set_cover_system(cover_sys)
-    cond = ConditionSystem(gs)
+    cond = ConditionSystem(ecs, bus, game_state=gs)
     gs.set_condition_system(cond)
     return gs
 

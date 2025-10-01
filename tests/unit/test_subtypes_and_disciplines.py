@@ -8,6 +8,7 @@ import unittest
 import random
 from core.event_bus import EventBus
 from core.game_state import GameState
+from ecs.ecs_manager import ECSManager
 from ecs.systems.condition_system import ConditionSystem
 from ecs.actions.discipline_actions import BloodPulsationAction, BloodHealingAction
 from entities.subtypes import Undead, Ghost, Vampire
@@ -21,9 +22,11 @@ BASIC_VIRTUES = {'Virtues': {'Courage': 1}}
 class TestUndeadAndDisciplines(unittest.TestCase):
     def setUp(self):
         self.original_randint = random.randint
-        self.gs = GameState()
-        self.gs.set_event_bus(EventBus())
-        self.cond_sys = ConditionSystem(self.gs)
+        self.event_bus = EventBus()
+        self.ecs_manager = ECSManager(self.event_bus)
+        self.gs = GameState(self.ecs_manager)
+        self.gs.set_event_bus(self.event_bus)
+        self.cond_sys = ConditionSystem(self.ecs_manager, self.event_bus, game_state=self.gs)
         self.gs.set_condition_system(self.cond_sys)
 
     def tearDown(self):
