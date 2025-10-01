@@ -8,8 +8,10 @@ from core.game_state import GameState
 from core.pathfinding_optimization import optimize_terrain
 from core.terrain_manager import Terrain
 from ecs.actions.attack_actions import AttackAction
+from ecs.components.attack_pool_cache import AttackPoolCacheComponent
 from ecs.components.character_ref import CharacterRefComponent
 from ecs.components.equipment import EquipmentComponent
+from ecs.components.entity_id import EntityIdComponent
 from ecs.components.facing import FacingComponent
 from ecs.components.health import HealthComponent
 from ecs.components.inventory import InventoryComponent
@@ -60,6 +62,34 @@ class PreparationManager:
     ```
     """
 
+    _DEFENSE_POOL_SPECS: Dict[str, Tuple[str, ...]] = {
+        "dodge_close": (
+            "Attributes.Physical.Dexterity",
+            "Abilities.Talents.Athletics",
+        ),
+        "parry": (
+            "Attributes.Physical.Dexterity",
+            "Abilities.Skills.Melee",
+        ),
+        "absorb": (
+            "Attributes.Physical.Stamina",
+            "Abilities.Talents.Brawl",
+        ),
+    }
+    _UTILITY_POOL_SPECS: Dict[str, Tuple[str, ...]] = {
+        "jump": (
+            "Attributes.Physical.Strength",
+            "Abilities.Talents.Athletics",
+        ),
+    }
+    _DICE_POOL_REFRESH_EVENTS: Tuple[str, ...] = (
+        "entity_equipment_changed",
+        "entity_equipment_updated",
+        "entity_traits_changed",
+        "entity_traits_updated",
+        "entity_character_updated",
+    )
+
     def __init__(self, game_state: GameState):
         """
         Initialize the PreparationManager with a reference to the game state.
@@ -75,6 +105,7 @@ class PreparationManager:
         """
         self.game_state = game_state
         self.action_system = None
+        self._dice_pool_events_registered = False
 
     def prepare(self, *args, **kwargs) -> None:
         """
@@ -107,20 +138,184 @@ class PreparationManager:
             # Now run the optimized precomputation
             self.game_state.terrain.precompute_paths()
             self.game_state.terrain.precompute_reachable_tiles(move_distances=(7, 15))
-        # Precompute attack/defense pool sizes for all characters and weapons
-        if hasattr(self.game_state, 'entities'):
+        self._ensure_dice_pool_event_handlers()
+        self.refresh_all_dice_pools()
+
+    def refresh_all_dice_pools(self) -> None:
+        """Rebuild cached dice pools for every character in the game state."""
+
+        ecs_manager = getattr(self.game_state, "ecs_manager", None)
+        if ecs_manager is not None:
+            for internal_id, components in ecs_manager.get_components(
+                EntityIdComponent,
+                CharacterRefComponent,
+                EquipmentComponent,
+            ):
+                entity_id_component, char_ref, equipment = components
+                character = getattr(char_ref, "character", None)
+                if character is None:
+                    continue
+
+                payload = self._build_dice_pool_cache(character, equipment)
+                self._apply_dice_pool_cache(
+                    ecs_manager,
+                    internal_id,
+                    entity_id_component.entity_id,
+                    payload,
+                )
+        elif hasattr(self.game_state, "entities"):
             for entity_id, components in self.game_state.entities.items():
-                char = components.get("character_ref").character if components.get("character_ref") else None
+                char_ref = components.get("character_ref")
+                character = getattr(char_ref, "character", None) if char_ref else None
+                if character is None:
+                    continue
                 equipment = components.get("equipment")
-                if char and equipment:
-                    components["attack_pool_cache"] = {}
-                    for wtype, weapon in equipment.weapons.items():
-                        if weapon is None:  # Skip empty weapon slots
-                            continue
-                        attr_path, skill_path = weapon.attack_traits
-                        attr = self._get_nested_trait(char.traits, attr_path)
-                        skill = self._get_nested_trait(char.traits, skill_path)
-                        components["attack_pool_cache"][wtype] = attr + skill
+                attack_pools, defense_pools, utility_pools = self._build_dice_pool_cache(
+                    character,
+                    equipment,
+                )
+                cache_component = components.get("attack_pool_cache")
+                if isinstance(cache_component, AttackPoolCacheComponent):
+                    cache_component.update(
+                        weapon_pools=attack_pools,
+                        defense_pools=defense_pools,
+                        utility_pools=utility_pools,
+                    )
+                else:
+                    components["attack_pool_cache"] = AttackPoolCacheComponent(
+                        attack_pools,
+                        defense_pools,
+                        utility_pools,
+                    )
+
+    def refresh_entity_dice_pools(self, entity_id: str) -> None:
+        """Rebuild cached dice pools for a specific entity."""
+
+        ecs_manager = getattr(self.game_state, "ecs_manager", None)
+        if ecs_manager is None:
+            components = getattr(self.game_state, "entities", {}).get(entity_id)
+            if not components:
+                return
+            char_ref = components.get("character_ref")
+            character = getattr(char_ref, "character", None) if char_ref else None
+            if character is None:
+                return
+            equipment = components.get("equipment")
+            attack_pools, defense_pools, utility_pools = self._build_dice_pool_cache(
+                character,
+                equipment,
+            )
+            cache_component = components.get("attack_pool_cache")
+            if isinstance(cache_component, AttackPoolCacheComponent):
+                cache_component.update(
+                    weapon_pools=attack_pools,
+                    defense_pools=defense_pools,
+                    utility_pools=utility_pools,
+                )
+            else:
+                components["attack_pool_cache"] = AttackPoolCacheComponent(
+                    attack_pools,
+                    defense_pools,
+                    utility_pools,
+                )
+            return
+
+        internal_id = ecs_manager.resolve_entity(entity_id)
+        if internal_id is None:
+            return
+
+        char_ref = ecs_manager.try_get_component(internal_id, CharacterRefComponent)
+        if char_ref is None:
+            return
+        character = getattr(char_ref, "character", None)
+        if character is None:
+            return
+        equipment = ecs_manager.try_get_component(internal_id, EquipmentComponent)
+        payload = self._build_dice_pool_cache(character, equipment)
+        self._apply_dice_pool_cache(ecs_manager, internal_id, entity_id, payload)
+
+    def _ensure_dice_pool_event_handlers(self) -> None:
+        """Subscribe to events that require refreshing cached dice pools."""
+
+        if self._dice_pool_events_registered:
+            return
+
+        event_bus = getattr(self.game_state, "event_bus", None)
+        if event_bus is None or not hasattr(event_bus, "subscribe"):
+            return
+
+        def _handler(**payload: Any) -> None:
+            entity_id = payload.get("entity_id") or payload.get("target_id")
+            if entity_id:
+                self.refresh_entity_dice_pools(entity_id)
+
+        for event_name in self._DICE_POOL_REFRESH_EVENTS:
+            try:
+                event_bus.subscribe(event_name, _handler)
+            except Exception:
+                continue
+
+        self._dice_pool_events_registered = True
+
+    def _apply_dice_pool_cache(
+        self,
+        ecs_manager: Any,
+        internal_id: int,
+        entity_id: str,
+        payload: Tuple[Dict[str, int], Dict[str, int], Dict[str, int]],
+    ) -> None:
+        weapon_pools, defense_pools, utility_pools = payload
+        cache_component = ecs_manager.try_get_component(internal_id, AttackPoolCacheComponent)
+        if isinstance(cache_component, AttackPoolCacheComponent):
+            cache_component.update(
+                weapon_pools=weapon_pools,
+                defense_pools=defense_pools,
+                utility_pools=utility_pools,
+            )
+        else:
+            cache_component = AttackPoolCacheComponent(
+                weapon_pools,
+                defense_pools,
+                utility_pools,
+            )
+            ecs_manager.add_component(internal_id, cache_component)
+
+        if hasattr(self.game_state, "entities"):
+            legacy_components = self.game_state.entities.get(entity_id)
+            if legacy_components is not None:
+                legacy_components["attack_pool_cache"] = cache_component
+
+    def _build_dice_pool_cache(
+        self,
+        character: Character,
+        equipment: Optional[EquipmentComponent],
+    ) -> Tuple[Dict[str, int], Dict[str, int], Dict[str, int]]:
+        weapon_pools: Dict[str, int] = {}
+        if equipment is not None and getattr(equipment, "weapons", None):
+            for weapon_type, weapon in equipment.weapons.items():
+                if weapon is None:
+                    continue
+                attr_path, skill_path = weapon.attack_traits
+                attr = self._get_nested_trait(character.traits, attr_path)
+                skill = self._get_nested_trait(character.traits, skill_path)
+                weapon_pools[weapon_type] = max(0, attr + skill)
+
+        defense_pools = {
+            name: self._sum_trait_paths(character, paths)
+            for name, paths in self._DEFENSE_POOL_SPECS.items()
+        }
+        utility_pools = {
+            name: self._sum_trait_paths(character, paths)
+            for name, paths in self._UTILITY_POOL_SPECS.items()
+        }
+        return weapon_pools, defense_pools, utility_pools
+
+    def _sum_trait_paths(self, character: Character, trait_paths: Tuple[str, ...]) -> int:
+        traits = getattr(character, "traits", None)
+        total = 0
+        for path in trait_paths:
+            total += self._get_nested_trait(traits, path)
+        return max(0, total)
 
     # --- Modern arcade demo helpers ---
 
@@ -439,17 +634,37 @@ class PreparationManager:
             print("Warning: No action_system set in preparation_manager")
             return
 
-        for entity_id, components in self.game_state.entities.items():
-            if "character_ref" not in components or not components["character_ref"].character:
-                continue
+        self._ensure_dice_pool_event_handlers()
+        self.refresh_all_dice_pools()
 
-            char = components["character_ref"].character
+        ecs_manager = getattr(self.game_state, "ecs_manager", None)
+        if ecs_manager is not None:
+            entity_iterable = []
+            for _, (entity_id_comp, char_ref, equipment) in ecs_manager.get_components(
+                EntityIdComponent,
+                CharacterRefComponent,
+                EquipmentComponent,
+            ):
+                character = getattr(char_ref, "character", None)
+                if character is None:
+                    continue
+                entity_iterable.append((entity_id_comp.entity_id, character, equipment))
+        else:
+            entity_iterable = []
+            for entity_id, components in getattr(self.game_state, "entities", {}).items():
+                char_ref = components.get("character_ref")
+                character = getattr(char_ref, "character", None) if char_ref else None
+                if character is None:
+                    continue
+                equipment = components.get("equipment")
+                entity_iterable.append((entity_id, character, equipment))
+
+        for entity_id, char, equipment in entity_iterable:
             config_module = f"entities.default_entities.configs.{char.__class__.__name__.lower()}_config"
             try:
                 config = importlib.import_module(config_module)
 
                 # Set base equipment
-                equipment = components.get("equipment")
                 # if equipment and hasattr(config, "BASE_EQUIPMENT"):
                 #    equipment.armor = config.BASE_EQUIPMENT.get("armor")
                 #    equipment.weapons = config.BASE_EQUIPMENT.get("weapons", {})
