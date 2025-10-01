@@ -2,15 +2,16 @@
 
 from __future__ import annotations
 
-from typing import Iterator, Optional, Tuple, TYPE_CHECKING, Union
+from typing import Dict, Iterator, Optional, Set, Tuple, TYPE_CHECKING, Union
 
 import arcade
 
 from core.game_state import GameState
+from ecs.components.character_ref import CharacterRefComponent
+from ecs.components.position import PositionComponent
 
 if TYPE_CHECKING:  # pragma: no cover - imported for typing only
-    from ecs.components.position import PositionComponent
-    from ecs.ecs_manager import CharacterTeamSnapshot, ECSManager
+    from ecs.ecs_manager import ECSManager
 
 
 class _LegacyPosition:
@@ -84,11 +85,11 @@ class ArcadeRenderer:
 
         cell = terrain.cell_size
         for _, position, team_id in self._iter_render_snapshots():
-            width_cells = max(getattr(position, "width", 1) or 1, 1)
-            height_cells = max(getattr(position, "height", 1) or 1, 1)
+            width_cells = self._dimension_with_fallback(position, "width")
+            height_cells = self._dimension_with_fallback(position, "height")
 
-            center_x = (getattr(position, "x", 0) + width_cells / 2) * cell
-            center_y = (getattr(position, "y", 0) + height_cells / 2) * cell
+            center_x = (self._position_coord(position, "x") + width_cells / 2) * cell
+            center_y = (self._position_coord(position, "y") + height_cells / 2) * cell
             width_px = width_cells * cell * 0.7
             height_px = height_cells * cell * 0.7
 
@@ -104,8 +105,6 @@ class ArcadeRenderer:
         if self._ecs_manager:
             internal_id = self._ecs_manager.resolve_entity(entity_id)
             if internal_id is not None:
-                from ecs.components.character_ref import CharacterRefComponent  # local import
-
                 char_ref = self._ecs_manager.try_get_component(
                     internal_id, CharacterRefComponent
                 )
@@ -126,25 +125,27 @@ class ArcadeRenderer:
         if terrain is None:
             return
 
+        yielded: Set[str] = set()
+        team_cache: Dict[str, Optional[str]] = {}
+
         if self._ecs_manager is not None:
-            snapshots: Iterator["CharacterTeamSnapshot"] = (
-                self._ecs_manager.iter_character_team_snapshots(include_position=True)
-            )
-            for snapshot in snapshots:
-                position = snapshot.position
+            for entity_id, position in self._ecs_manager.iter_with_id(PositionComponent):
                 if position is None:
                     continue
-                team_id = snapshot.team_id or self._resolve_entity_team(snapshot.entity_id)
-                yield snapshot.entity_id, position, team_id
-            return
+                if entity_id not in team_cache:
+                    team_cache[entity_id] = self._resolve_entity_team(entity_id)
+                yielded.add(entity_id)
+                yield entity_id, position, team_cache[entity_id]
 
         for entity_id in self._game_state.entities:
+            if entity_id in yielded:
+                continue
             pos = terrain.get_entity_position(entity_id)
             if not pos:
                 continue
-            yield entity_id, _LegacyPosition(pos[0], pos[1]), self._resolve_entity_team(
-                entity_id
-            )
+            if entity_id not in team_cache:
+                team_cache[entity_id] = self._resolve_entity_team(entity_id)
+            yield entity_id, _LegacyPosition(pos[0], pos[1]), team_cache[entity_id]
 
     def _team_color(self, team_id: Optional[str]) -> arcade.Color:
         if team_id == "coterie":
@@ -152,3 +153,27 @@ class ArcadeRenderer:
         if team_id == "rivals":
             return arcade.color.RED
         return arcade.color.LIGHT_GRAY
+
+    @staticmethod
+    def _dimension_with_fallback(
+        position: Union["PositionComponent", _LegacyPosition], attr_name: str
+    ) -> int:
+        raw_value = getattr(position, attr_name, 1)
+        if raw_value in (None, 0):
+            return 1
+        try:
+            return max(int(raw_value), 1)
+        except (TypeError, ValueError):
+            return 1
+
+    @staticmethod
+    def _position_coord(
+        position: Union["PositionComponent", _LegacyPosition], attr_name: str
+    ) -> float:
+        raw_value = getattr(position, attr_name, 0)
+        if raw_value is None:
+            return 0.0
+        try:
+            return float(raw_value)
+        except (TypeError, ValueError):
+            return 0.0
