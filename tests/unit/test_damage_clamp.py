@@ -54,11 +54,18 @@ class TestDamageClamp(unittest.TestCase):
         self.assertEqual(adj0, 0)
         # Remove the strong negative (find suffix)
         tracker = self.cond.get_tracker(self.att_id)
-        neg_name = [
-            n
-            for n, cond in (tracker.conditions.items() if tracker else [])
-            if n.startswith('DamageOutMod') and cond.data.get('delta') == -7
-        ][0]
+        neg_name = next(
+            (
+                n
+                for n, cond in (tracker.conditions.items() if tracker else [])
+                if n.startswith('DamageOutMod') and cond.data.get('delta') == -7
+            ),
+            None,
+        )
+        self.assertIsNotNone(
+            neg_name,
+            "Could not find the negative DamageOutMod condition with delta -7",
+        )
         self.cond.remove_condition(self.att_id, neg_name)
         adj1 = self.cond.adjust_damage(self.att_id, self.def_id, base, severity='unknown', category='fire')
         self.assertEqual(adj1, base + 2)

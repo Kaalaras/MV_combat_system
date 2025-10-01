@@ -77,11 +77,18 @@ class TestStackableExpiry(unittest.TestCase):
         self.assertEqual(self.char.max_health, base_max)  # back to +2 -2 = 0
         # Manually remove the negative modifier (suffix unknown; find it)
         tracker = self.cond.get_tracker(self.eid)
-        neg_name = [
-            n
-            for n, cond in (tracker.conditions.items() if tracker else [])
-            if n.startswith('MaxHealthMod') and cond.data.get('delta') == -2
-        ][0]
+        neg_name = next(
+            (
+                n
+                for n, cond in (tracker.conditions.items() if tracker else [])
+                if n.startswith('MaxHealthMod') and cond.data.get('delta') == -2
+            ),
+            None,
+        )
+        self.assertIsNotNone(
+            neg_name,
+            "No MaxHealthMod condition with delta -2 found",
+        )
         self.cond.remove_condition(self.eid, neg_name)
         self.assertEqual(self.char.max_health, base_max + 2)
         # Advance until +2 expires
