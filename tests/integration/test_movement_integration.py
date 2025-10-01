@@ -4,12 +4,14 @@ from core.game_state import GameState
 from core.terrain_manager import Terrain
 from core.movement_system import MovementSystem
 from ecs.components.position import PositionComponent
+from ecs.ecs_manager import ECSManager
 
 class TestMovementIntegration(unittest.TestCase):
     def setUp(self):
-        self.game_state = GameState()
+        self.ecs_manager = ECSManager()
+        self.game_state = GameState(self.ecs_manager)
         self.terrain = Terrain(width=10, height=10, game_state=self.game_state)
-        self.movement_system = MovementSystem(self.game_state)
+        self.movement_system = MovementSystem(self.game_state, self.ecs_manager)
         self.game_state.set_terrain(self.terrain)
 
     def test_move_1x1_entity_success(self):

@@ -186,7 +186,7 @@ def _deprecated_initialize_game(entity_specs, grid_size, max_rounds=200, map_dir
     prep_manager.prepare()
 
     # --- System Initialization ---
-    movement = MovementSystem(game_state)
+    movement = MovementSystem(game_state, ecs_manager, event_bus=event_bus)
     game_state.movement = movement
     action_system = ActionSystem(game_state, event_bus)
     game_state.action_system = action_system
@@ -336,7 +336,7 @@ def initialize_game(*, entity_specs: List[EntitySpec], grid_size: int, max_round
             ch.set_alliance(other_id, "ally" if ch.team == och.team else "enemy")
     game_state.update_teams()
     prep_manager.prepare()
-    movement = MovementSystem(game_state); game_state.movement = movement
+    movement = MovementSystem(game_state, ecs_manager, event_bus=event_bus); game_state.movement = movement
     action_system = ActionSystem(game_state, event_bus); game_state.action_system = action_system
     facing_system = FacingSystem(game_state, event_bus); game_state.facing_system = facing_system
     los_manager = LineOfSightManager(game_state, terrain, event_bus)

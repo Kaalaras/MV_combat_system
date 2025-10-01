@@ -1,14 +1,14 @@
 import unittest
 from math import ceil
 from core.game_state import GameState
+from core.event_bus import EventBus
 from core.movement_system import MovementSystem
 from ecs.systems.action_system import ActionSystem
 from ecs.actions.movement_actions import StandardMoveAction, SprintAction
+from ecs.components.position import PositionComponent
+from ecs.components.character_ref import CharacterRefComponent
+from ecs.ecs_manager import ECSManager
 from entities.character import Character
-
-class Position:
-    def __init__(self, x, y, width=1, height=1):
-        self.x = x; self.y = y; self.width = width; self.height = height
 
 class SimpleTerrain:
     def __init__(self, w=30, h=30):
@@ -32,18 +32,20 @@ class SimpleTerrain:
 
 class TestSprintResidual(unittest.TestCase):
     def setUp(self):
-        self.gs = GameState()
+        self.bus = EventBus()
+        self.ecs = ECSManager(self.bus)
+        self.gs = GameState(self.ecs)
         self.gs.terrain = SimpleTerrain()
-        self.gs.event_bus = type('EB', (), {'subs':{}, 'subscribe':lambda s,ev,cb: s.subs.setdefault(ev,[]).append(cb), 'publish': lambda s,ev,**kw: [cb(**kw) for cb in s.subs.get(ev,[])]})()
-        self.gs.movement = MovementSystem(self.gs)
+        self.gs.set_event_bus(self.bus)
+        self.gs.movement = MovementSystem(self.gs, self.ecs, event_bus=self.bus)
         self.action_system = ActionSystem(self.gs, self.gs.event_bus)
         self.gs.action_system = self.action_system
         # build character with dex 4 => sprint = ceil(4*1.5+10)=ceil(16)=16
         traits = {"Attributes":{"Physical":{"Dexterity":4}}}
         char = Character(name='Runner', traits=traits, base_traits=traits)
         self.entity_id = 'E'
-        pos = Position(5,5)
-        self.gs.add_entity(self.entity_id, {"position":pos, "character_ref": type('CR', (), {'character':char})()})
+        pos = PositionComponent(5,5)
+        self.gs.add_entity(self.entity_id, {"position":pos, "character_ref": CharacterRefComponent(char)})
         self.gs.terrain.grid[(5,5)] = self.entity_id
         # register movement actions
         std = StandardMoveAction(self.gs.movement)

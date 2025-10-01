@@ -7,6 +7,7 @@ from ecs.actions.movement_actions import JumpAction
 from ecs.systems.action_system import ActionSystem
 from ecs.components.position import PositionComponent
 from ecs.components.character_ref import CharacterRefComponent
+from ecs.ecs_manager import ECSManager
 from entities.character import Character
 from utils.condition_utils import NIGHT_VISION_PARTIAL, NIGHT_VISION_TOTAL
 from core.los_manager import LineOfSightManager
@@ -18,10 +19,12 @@ class DummyCover:
 
 class TestTerrainEffectsExtended(unittest.TestCase):
     def setUp(self):
-        self.gs = GameState()
-        self.eb = EventBus(); self.gs.set_event_bus(self.eb)
+        self.eb = EventBus()
+        self.ecs = ECSManager(self.eb)
+        self.gs = GameState(self.ecs)
+        self.gs.set_event_bus(self.eb)
         self.terrain = Terrain(10,10, game_state=self.gs); self.gs.set_terrain(self.terrain)
-        self.move_sys = MovementSystem(self.gs); self.gs.movement = self.move_sys
+        self.move_sys = MovementSystem(self.gs, self.ecs, event_bus=self.eb); self.gs.movement = self.move_sys
         self.action_sys = ActionSystem(self.gs, self.eb); self.gs.action_system = self.action_sys
         self.terrain_effect_sys = TerrainEffectSystem(self.gs, self.terrain, self.eb); self.gs.set_terrain_effect_system(self.terrain_effect_sys)
         self.events = []

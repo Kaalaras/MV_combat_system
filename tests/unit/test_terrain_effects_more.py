@@ -15,21 +15,24 @@ from core.terrain_manager import (
 from core.terrain_effect_system import TerrainEffectSystem
 from ecs.components.position import PositionComponent
 from ecs.components.character_ref import CharacterRefComponent
+from ecs.ecs_manager import ECSManager
 from entities.character import Character
 from ecs.actions.movement_actions import JumpAction
 from core.movement_system import MovementSystem
 
 class TerrainEffectsMoreTest(unittest.TestCase):
     def setUp(self):
-        self.gs = GameState()
-        self.eb = EventBus(); self.gs.set_event_bus(self.eb)
+        self.eb = EventBus()
+        self.ecs = ECSManager(self.eb)
+        self.gs = GameState(self.ecs)
+        self.gs.set_event_bus(self.eb)
         self.terrain = Terrain(12,12, game_state=self.gs); self.gs.set_terrain(self.terrain)
         self.tes = TerrainEffectSystem(self.gs, self.terrain, self.eb)
         self.events = []
         self.current_events = []
         self.eb.subscribe(EVT_TERRAIN_EFFECT_TRIGGER, lambda **kw: self.events.append(kw))
         self.eb.subscribe(EVT_TERRAIN_CURRENT_MOVED, lambda **kw: self.current_events.append(kw))
-        self.move_sys = MovementSystem(self.gs); self.gs.movement = self.move_sys
+        self.move_sys = MovementSystem(self.gs, self.ecs, event_bus=self.eb); self.gs.movement = self.move_sys
 
     def add_entity(self, eid, x,y, w=1,h=1, strength=2, athletics=2):
         traits={'Attributes':{'Physical':{'Strength':strength,'Dexterity':1,'Stamina':1}},'Abilities':{'Talents':{'Athletics':athletics}}}

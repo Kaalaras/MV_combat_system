@@ -400,6 +400,6 @@ class JumpAction(Action):
         if not terrain.move_entity(entity_id, fx,fy):
             pos.x,pos.y = old
             return False
-        if hasattr(game_state,'add_movement_steps'):
-            game_state.add_movement_steps(entity_id, abs(fx-sx)+abs(fy-sy))
+        if hasattr(self.movement_system, 'register_movement_usage'):
+            self.movement_system.register_movement_usage(entity_id, abs(fx-sx)+abs(fy-sy))
         return True

@@ -1,13 +1,22 @@
 import unittest
 from unittest.mock import MagicMock
+
+from core.event_bus import EventBus
+from core.game_state import GameState
 from core.movement_system import MovementSystem
 from ecs.components.position import PositionComponent
+from ecs.ecs_manager import ECSManager
 
 class TestMovementSystem(unittest.TestCase):
     def setUp(self):
-        self.game_state = MagicMock()
-        self.movement_system = MovementSystem(self.game_state)
-        self.terrain = self.game_state.terrain
+        self.event_bus = EventBus()
+        self.ecs_manager = ECSManager(self.event_bus)
+        self.game_state = GameState(self.ecs_manager)
+        self.game_state.set_event_bus(self.event_bus)
+        self.terrain = MagicMock()
+        self.game_state.terrain = self.terrain
+        self.movement_system = MovementSystem(self.game_state, self.ecs_manager, event_bus=self.event_bus)
+        self.terrain.get_movement_cost = MagicMock(return_value=1)
 
     def test_get_reachable_tiles_1x1_entity(self):
         # Entity is at (0,0), wants to move, max_distance=2
@@ -15,11 +24,15 @@ class TestMovementSystem(unittest.TestCase):
         entity_data = {
             "position": PositionComponent(x=0, y=0, width=1, height=1)
         }
-        self.game_state.get_entity.return_value = entity_data
+        self.game_state.add_entity(entity_id, entity_data)
 
         # Mock terrain: (1,0) is a wall, (0,1) is occupied
-        self.terrain.is_walkable.side_effect = lambda x, y, w, h: (x, y) != (1, 0)
-        self.terrain.is_occupied.side_effect = lambda x, y, w, h, entity_id_to_ignore: (x, y) == (0, 1)
+        self.terrain.is_walkable.side_effect = lambda x, y, w=1, h=1: (x, y) != (1, 0)
+
+        def occupied(x, y, w=1, h=1, entity_id_to_ignore=None, **_):
+            return (x, y) == (0, 1)
+
+        self.terrain.is_occupied.side_effect = occupied
 
         # With max_distance = 1
         reachable = self.movement_system.get_reachable_tiles(entity_id, max_distance=1)
@@ -38,10 +51,10 @@ class TestMovementSystem(unittest.TestCase):
         entity_data = {
             "position": PositionComponent(x=0, y=0, width=2, height=2)
         }
-        self.game_state.get_entity.return_value = entity_data
+        self.game_state.add_entity(entity_id, entity_data)
 
         # A wall at (2,1) should block a 2x2 entity at (1,0) because its footprint (1,0 -> 3,2) would overlap the wall.
-        self.terrain.is_walkable.side_effect = lambda x, y, w, h: not (x <= 2 < x + w and y <= 1 < y + h)
+        self.terrain.is_walkable.side_effect = lambda x, y, w=1, h=1: not (x <= 2 < x + w and y <= 1 < y + h)
         self.terrain.is_occupied.return_value = False # No other entities
 
         reachable = self.movement_system.get_reachable_tiles(entity_id, max_distance=1)
@@ -53,8 +66,8 @@ class TestMovementSystem(unittest.TestCase):
     def test_move_success(self):
         entity_id = "player"
         entity_data = {"position": PositionComponent(x=0, y=0)}
-        self.game_state.get_entity.return_value = entity_data
-        self.terrain._get_entity_size.return_value = (1, 1)
+        self.game_state.add_entity(entity_id, entity_data)
+        self.terrain._get_entity_size = MagicMock(return_value=(1, 1))
         self.terrain.is_valid_position.return_value = True
         self.terrain.is_occupied.return_value = False
         self.terrain.is_walkable.return_value = True
@@ -70,8 +83,8 @@ class TestMovementSystem(unittest.TestCase):
     def test_move_fail_occupied(self):
         entity_id = "player"
         entity_data = {"position": PositionComponent(x=0, y=0)}
-        self.game_state.get_entity.return_value = entity_data
-        self.terrain._get_entity_size.return_value = (1, 1)
+        self.game_state.add_entity(entity_id, entity_data)
+        self.terrain._get_entity_size = MagicMock(return_value=(1, 1))
         self.terrain.is_valid_position.return_value = True
         self.terrain.is_occupied.return_value = True  # Destination is occupied
         self.terrain.is_walkable.return_value = True
@@ -87,8 +100,8 @@ class TestMovementSystem(unittest.TestCase):
     def test_move_fail_invalid_position(self):
         entity_id = "player"
         entity_data = {"position": PositionComponent(x=0, y=0)}
-        self.game_state.get_entity.return_value = entity_data
-        self.terrain._get_entity_size.return_value = (1, 1)
+        self.game_state.add_entity(entity_id, entity_data)
+        self.terrain._get_entity_size = MagicMock(return_value=(1, 1))
         self.terrain.is_valid_position.return_value = False # Invalid destination
         self.terrain.is_occupied.return_value = False
         self.terrain.is_walkable.return_value = True
@@ -101,8 +114,8 @@ class TestMovementSystem(unittest.TestCase):
     def test_move_fail_not_walkable(self):
         entity_id = "player"
         entity_data = {"position": PositionComponent(x=0, y=0)}
-        self.game_state.get_entity.return_value = entity_data
-        self.terrain._get_entity_size.return_value = (1, 1)
+        self.game_state.add_entity(entity_id, entity_data)
+        self.terrain._get_entity_size = MagicMock(return_value=(1, 1))
         self.terrain.is_valid_position.return_value = True
         self.terrain.is_occupied.return_value = False
         self.terrain.is_walkable.return_value = False # Wall
