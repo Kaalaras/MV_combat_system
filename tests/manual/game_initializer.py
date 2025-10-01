@@ -22,6 +22,7 @@ from ecs.components.health import HealthComponent
 from ecs.components.willpower import WillpowerComponent
 from ecs.components.velocity import VelocityComponent
 from ecs.components.facing import FacingComponent
+from ecs.components.team import TeamComponent
 from core.game_state import GameState
 from core.preparation_manager import PreparationManager
 from core.game_system import GameSystem
@@ -96,7 +97,8 @@ def _create_entity_components(character: Character, spec: EntitySpec) -> Dict[st
         "character_ref": char_ref,
         "velocity": velocity,
         "position": position,
-        "facing": facing
+        "facing": facing,
+        "team": TeamComponent(spec.team),
     }
 
 
@@ -122,12 +124,10 @@ def _deprecated_initialize_game(entity_specs, grid_size, max_rounds=200, map_dir
     Returns:
         A dictionary containing all the initialized game objects needed to run the game.
     """
-    game_state = GameState()
     event_bus = EventBus()
-    game_state.set_event_bus(event_bus)
-
     ecs_manager = ECSManager(event_bus)
-    game_state.set_ecs_manager(ecs_manager)
+    game_state = GameState(ecs_manager=ecs_manager)
+    game_state.set_event_bus(event_bus)
 
     prep_manager = PreparationManager(game_state)
     terrain = Terrain(width=grid_size, height=grid_size, game_state=game_state)
@@ -303,10 +303,10 @@ def initialize_game(*, entity_specs: List[EntitySpec], grid_size: int, max_round
         map_dir: directory for battle maps
     Returns: dict with all systems (superset for compatibility)
     """
-    game_state = GameState()
-    event_bus = EventBus(); game_state.set_event_bus(event_bus)
+    event_bus = EventBus()
     ecs_manager = ECSManager(event_bus)
-    game_state.set_ecs_manager(ecs_manager)
+    game_state = GameState(ecs_manager=ecs_manager)
+    game_state.set_event_bus(event_bus)
     prep_manager = PreparationManager(game_state)
     terrain = Terrain(width=grid_size, height=grid_size, game_state=game_state); game_state.set_terrain(terrain)
     # Terrain effects system (currents, hazards)

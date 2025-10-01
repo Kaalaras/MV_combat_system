@@ -18,6 +18,7 @@ from ecs.components.inventory import InventoryComponent
 from ecs.components.position import PositionComponent
 from ecs.components.velocity import VelocityComponent
 from ecs.components.willpower import WillpowerComponent
+from ecs.components.team import TeamComponent
 from ecs.systems.action_system import Action, ActionType
 from entities.character import Character
 
@@ -457,6 +458,7 @@ class PreparationManager:
             "velocity": velocity,
             "position": position_comp,
             "facing": facing,
+            "team": TeamComponent(team),
         }
 
         assigned_id = entity_id or f"entity_{len(self.game_state.entities) + 1}"

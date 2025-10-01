@@ -2,18 +2,39 @@
 
 from __future__ import annotations
 
-from typing import Optional
+from typing import Dict, Iterator, Optional, Tuple, TYPE_CHECKING
 
 import arcade
 
 from core.game_state import GameState
+from ecs.components.character_ref import CharacterRefComponent
+from ecs.components.position import PositionComponent
+from ecs.components.team import TeamComponent
+
+if TYPE_CHECKING:  # pragma: no cover - imported for typing only
+    from core.terrain_manager import Terrain
+    from ecs.ecs_manager import ECSManager
 
 
 class ArcadeRenderer:
     """Responsible for drawing the combat demo using :mod:`arcade`."""
 
-    def __init__(self, game_state: GameState):
+    def __init__(
+        self,
+        game_state: GameState,
+        *,
+        ecs_manager: Optional["ECSManager"] = None,
+    ) -> None:
         self._game_state = game_state
+        if ecs_manager is not None:
+            self._ecs_manager = ecs_manager
+        elif hasattr(game_state, "ecs_manager"):
+            self._ecs_manager = game_state.ecs_manager  # type: ignore[attr-defined]
+        else:
+            self._ecs_manager = None
+
+        if self._ecs_manager is None:
+            raise ValueError("ArcadeRenderer requires an ECS manager instance.")
 
     def draw(self) -> None:
         """Render the current terrain, walls, and entities."""
@@ -57,29 +78,143 @@ class ArcadeRenderer:
 
     def _draw_entities(self) -> None:
         terrain = self._game_state.terrain
-        for entity_id in self._game_state.entities:
-            pos = terrain.get_entity_position(entity_id)
-            if not pos:
-                continue
+        if terrain is None:
+            return
 
-            team = self._resolve_entity_team(entity_id)
-            if team == "coterie":
-                color = arcade.color.BLUE
-            elif team == "rivals":
-                color = arcade.color.RED
-            else:
-                color = arcade.color.LIGHT_GRAY
+        cell = terrain.cell_size
+        for _, position, team_id in self._iter_render_snapshots():
+            width_cells = self._dimension_with_fallback(position, "width")
+            height_cells = self._dimension_with_fallback(position, "height")
+
+            center_x = (self._position_coord(position, "x") + width_cells / 2) * cell
+            center_y = (self._position_coord(position, "y") + height_cells / 2) * cell
+            width_px = width_cells * cell * 0.7
+            height_px = height_cells * cell * 0.7
 
             arcade.draw_rectangle_filled(
-                (pos[0] + 0.5) * terrain.cell_size,
-                (pos[1] + 0.5) * terrain.cell_size,
-                terrain.cell_size * 0.7,
-                terrain.cell_size * 0.7,
-                color,
+                center_x,
+                center_y,
+                width_px,
+                height_px,
+                self._team_color(team_id),
             )
 
     def _resolve_entity_team(self, entity_id: str) -> Optional[str]:
-        components = self._game_state.entities.get(entity_id, {})
-        char_ref = components.get("character_ref")
+        internal_id = self._ecs_manager.resolve_entity(entity_id)
+        if internal_id is None:
+            return None
+
+        team_component = self._ecs_manager.try_get_component(internal_id, TeamComponent)
+        team_id = getattr(team_component, "team_id", None) if team_component else None
+        if team_id is not None:
+            return str(team_id)
+
+        char_ref = self._ecs_manager.try_get_component(internal_id, CharacterRefComponent)
         character = getattr(char_ref, "character", None) if char_ref else None
-        return getattr(character, "team", None) if character else None
+        team = getattr(character, "team", None) if character else None
+        return None if team is None else str(team)
+
+    def _iter_render_snapshots(
+        self,
+    ) -> Iterator[Tuple[str, "PositionComponent", Optional[str]]]:
+        terrain = self._game_state.terrain
+        if terrain is None:
+            return iter(())
+
+        return self._iter_render_snapshots_for_terrain(terrain)
+
+    def _iter_render_snapshots_for_terrain(
+        self,
+        terrain: "Terrain",
+    ) -> Iterator[Tuple[str, "PositionComponent", Optional[str]]]:
+        team_cache: Dict[str, Optional[str]] = {}
+
+        for entity_id, position in self._ecs_manager.iter_with_id(PositionComponent):
+            if position is None:
+                continue
+            team_id = self._get_cached_team_id(entity_id, team_cache)
+            yield entity_id, position, team_id
+
+    def _team_color(self, team_id: Optional[str]) -> arcade.Color:
+        if team_id == "coterie":
+            return arcade.color.BLUE
+        if team_id == "rivals":
+            return arcade.color.RED
+        return arcade.color.LIGHT_GRAY
+
+    def _get_cached_team_id(
+        self, entity_id: str, team_cache: Dict[str, Optional[str]]
+    ) -> Optional[str]:
+        if entity_id in team_cache:
+            return team_cache[entity_id]
+
+        team_id = self._resolve_entity_team(entity_id)
+        team_cache[entity_id] = team_id
+        return team_id
+
+    @staticmethod
+    def _dimension_with_fallback(
+        position: "PositionComponent", attr_name: str
+    ) -> int:
+        raw_value = getattr(position, attr_name, 1)
+        return ArcadeRenderer._coerce_positive_int(raw_value, default=1)
+
+    @staticmethod
+    def _position_coord(
+        position: "PositionComponent", attr_name: str
+    ) -> float:
+        raw_value = getattr(position, attr_name, 0)
+        return ArcadeRenderer._coerce_float(raw_value)
+
+    @staticmethod
+    def _coerce_positive_int(raw_value: object, *, default: int = 1) -> int:
+        if raw_value is None:
+            return default
+        if isinstance(raw_value, bool):
+            value = int(raw_value)
+        elif isinstance(raw_value, (int, float)):
+            value = int(raw_value)
+        elif isinstance(raw_value, str):
+            stripped = raw_value.strip()
+            if not stripped:
+                return default
+            first_char = stripped[0]
+            if first_char in {"+", "-"}:
+                digits = stripped[1:]
+            else:
+                digits = stripped
+            if digits.isdigit():
+                value = int(stripped)
+            else:
+                return default
+        else:
+            return default
+
+        if value <= 0:
+            return default
+        return value
+
+    @staticmethod
+    def _coerce_float(raw_value: object) -> float:
+        if raw_value is None:
+            return 0.0
+        if isinstance(raw_value, bool):
+            return float(int(raw_value))
+        if isinstance(raw_value, (int, float)):
+            return float(raw_value)
+        if isinstance(raw_value, str):
+            stripped = raw_value.strip()
+            if not stripped:
+                return 0.0
+            sign = ""
+            normalized = stripped
+            if normalized[0] in {"+", "-"}:
+                sign = normalized[0]
+                normalized = normalized[1:]
+            if not normalized:
+                return 0.0
+            normalized_digits = normalized.replace(".", "", 1)
+            if normalized_digits.isdigit():
+                return float(f"{sign}{normalized}")
+            return 0.0
+        return 0.0
