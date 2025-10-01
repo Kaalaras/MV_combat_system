@@ -76,7 +76,7 @@ class MovementSystem:
         manager_candidate = ecs_manager or getattr(game_state, "ecs_manager", None)
         if manager_candidate is None or not hasattr(manager_candidate, "iter_with_id"):
             raise ValueError(
-                "MovementSystem requires an ECSManager. Provide ecs_manager or assign game_state.ecs_manager."
+                "MovementSystem requires an ECSManager. Provide ecs_manager explicitly as a parameter."
             )
 
         self.game_state = game_state
