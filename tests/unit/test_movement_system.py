@@ -15,7 +15,7 @@ class TestMovementSystem(unittest.TestCase):
         self.game_state.set_event_bus(self.event_bus)
         self.terrain = MagicMock()
         self.game_state.terrain = self.terrain
-        self.movement_system = MovementSystem(self.game_state, self.ecs_manager, event_bus=self.event_bus)
+        self.movement_system = MovementSystem(self.game_state, self.ecs_manager)
         self.terrain.get_movement_cost = MagicMock(return_value=1)
 
     def test_get_reachable_tiles_1x1_entity(self):
@@ -73,7 +73,6 @@ class TestMovementSystem(unittest.TestCase):
         entity_id = "player"
         entity_data = {"position": PositionComponent(x=0, y=0)}
         self.game_state.add_entity(entity_id, entity_data)
-        self.terrain._get_entity_size = MagicMock(return_value=(1, 1))
         self.terrain.is_valid_position.return_value = True
         self.terrain.is_occupied.return_value = False
         self.terrain.is_walkable.return_value = True
@@ -90,7 +89,6 @@ class TestMovementSystem(unittest.TestCase):
         entity_id = "player"
         entity_data = {"position": PositionComponent(x=0, y=0)}
         self.game_state.add_entity(entity_id, entity_data)
-        self.terrain._get_entity_size = MagicMock(return_value=(1, 1))
         self.terrain.is_valid_position.return_value = True
         self.terrain.is_occupied.return_value = True  # Destination is occupied
         self.terrain.is_walkable.return_value = True
@@ -107,7 +105,6 @@ class TestMovementSystem(unittest.TestCase):
         entity_id = "player"
         entity_data = {"position": PositionComponent(x=0, y=0)}
         self.game_state.add_entity(entity_id, entity_data)
-        self.terrain._get_entity_size = MagicMock(return_value=(1, 1))
         self.terrain.is_valid_position.return_value = False # Invalid destination
         self.terrain.is_occupied.return_value = False
         self.terrain.is_walkable.return_value = True
@@ -121,7 +118,6 @@ class TestMovementSystem(unittest.TestCase):
         entity_id = "player"
         entity_data = {"position": PositionComponent(x=0, y=0)}
         self.game_state.add_entity(entity_id, entity_data)
-        self.terrain._get_entity_size = MagicMock(return_value=(1, 1))
         self.terrain.is_valid_position.return_value = True
         self.terrain.is_occupied.return_value = False
         self.terrain.is_walkable.return_value = False # Wall

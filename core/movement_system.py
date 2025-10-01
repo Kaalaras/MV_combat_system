@@ -507,7 +507,7 @@ class MovementSystem:
         for (x,y) in path[1:]:
             pre_adjacent = self._collect_adjacent_opportunity_sources(entity_id) if provoke_aoo else []
             if pre_adjacent and provoke_aoo:
-                bus = self.event_bus or getattr(self.game_state, 'event_bus', None) if self.game_state else self.event_bus
+                bus = self.event_bus or (getattr(self.game_state, 'event_bus', None) if self.game_state else None)
                 if bus:
                     next_position = PositionComponent(x, y, width=getattr(pos_comp, 'width', 1), height=getattr(pos_comp, 'height', 1))
                     for attacker_id in pre_adjacent:
