@@ -294,9 +294,11 @@ class ConditionSystem:
         self._pool_modifier_registry[WEAKENED_PHYSICAL] = weakened_physical
         self._pool_modifier_registry[WEAKENED_MENTAL_SOCIAL] = weakened_mental_social
         # Generic pool modifier patterns: names: PoolMod.Attack / Defense / Physical / Mental / Social
-        def generic_pool_mod(name, char, base_pool, used_traits, active, entity_id=None):
+        def generic_pool_mod(name, char, base_pool, used_traits, active, entity_id):
             if entity_id is None:
-                return 0
+                raise ValueError(
+                    f"generic_pool_mod: entity_id is required for PoolMod.* modifiers (name={name})"
+                )
             cond = self._get_condition(entity_id, name)
             delta = cond.data.get('delta', 0) if cond is not None else 0
             if name.endswith('Attack') and 'CONTEXT_ATTACK' in used_traits:
@@ -480,6 +482,22 @@ class ConditionSystem:
         used_traits: Set[str],
         entity_id: Optional[str] = None,
     ) -> int:
+        """
+        Apply all relevant pool modifiers to a base dice pool.
+
+        Args:
+            character: The actor whose pool is being modified.
+            base_pool: The starting pool value before modifiers.
+            used_traits: Traits contributing to the pool calculation.
+            entity_id: The ECS entity identifier for the character. Required for
+                generic PoolMod.* conditions so their per-entity deltas can be
+                resolved. When provided, active states are sourced from the
+                condition tracker; otherwise they are taken from the
+                character's ``states`` attribute.
+
+        Returns:
+            The modified pool value, floored at zero.
+        """
         if base_pool <= 0:
             return 0
         active: Set[str] = set()
