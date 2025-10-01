@@ -4,8 +4,9 @@ from unittest.mock import MagicMock
 from core.event_bus import EventBus
 from core.game_state import GameState
 from core.movement_system import MovementSystem
-from ecs.components.position import PositionComponent
 from ecs.ecs_manager import ECSManager
+from ecs.components.position import PositionComponent
+from tests.helpers.ecs import add_entity_with_position
 
 class TestMovementSystem(unittest.TestCase):
     def setUp(self):
@@ -19,24 +20,30 @@ class TestMovementSystem(unittest.TestCase):
         self.game_state.terrain = self.terrain
         self.movement_system = MovementSystem(self.game_state, self.ecs_manager)
         self.terrain.get_movement_cost = MagicMock(return_value=1)
+        self.terrain.is_occupied.return_value = False
+        self.terrain.is_valid_position.return_value = True
+        self.terrain.is_walkable.return_value = True
+        self.terrain.move_entity.return_value = True
 
     def test_get_reachable_tiles_1x1_entity(self):
         # Entity is at (0,0), wants to move, max_distance=2
         entity_id = "player"
-        entity_data = {
-            "position": PositionComponent(x=0, y=0, width=1, height=1)
-        }
-        self.game_state.add_entity(entity_id, entity_data)
+        add_entity_with_position(
+            self.game_state,
+            entity_id,
+            position=PositionComponent(x=0, y=0, width=1, height=1),
+        )
+        # Blocker occupying (0,1) via ECS footprint data
+        add_entity_with_position(
+            self.game_state,
+            "blocker",
+            position=PositionComponent(x=0, y=1, width=1, height=1),
+        )
 
         # Mock terrain: (1,0) is a wall, (0,1) is occupied
         self.terrain.is_walkable.side_effect = (
             lambda x, y, entity_width=1, entity_height=1: (x, y) != (1, 0)
         )
-
-        def occupied(x, y, w=1, h=1, entity_id_to_ignore=None, **_):
-            return (x, y) == (0, 1)
-
-        self.terrain.is_occupied.side_effect = occupied
 
         # With max_distance = 1
         reachable = self.movement_system.get_reachable_tiles(entity_id, max_distance=1)
@@ -52,10 +59,11 @@ class TestMovementSystem(unittest.TestCase):
     def test_get_reachable_tiles_2x2_entity_blocked(self):
         # 2x2 Entity is at (0,0), wants to move, max_distance=1
         entity_id = "player_2x2"
-        entity_data = {
-            "position": PositionComponent(x=0, y=0, width=2, height=2)
-        }
-        self.game_state.add_entity(entity_id, entity_data)
+        add_entity_with_position(
+            self.game_state,
+            entity_id,
+            position=PositionComponent(x=0, y=0, width=2, height=2),
+        )
 
         # A wall at (2,1) should block a 2x2 entity at (1,0) because its footprint (1,0 -> 3,2) would overlap the wall.
         self.terrain.is_walkable.side_effect = (
@@ -73,8 +81,11 @@ class TestMovementSystem(unittest.TestCase):
 
     def test_move_success(self):
         entity_id = "player"
-        entity_data = {"position": PositionComponent(x=0, y=0)}
-        self.game_state.add_entity(entity_id, entity_data)
+        components = add_entity_with_position(
+            self.game_state,
+            entity_id,
+            position=PositionComponent(x=0, y=0),
+        )
         self.terrain.is_valid_position.return_value = True
         self.terrain.is_occupied.return_value = False
         self.terrain.is_walkable.return_value = True
@@ -84,13 +95,16 @@ class TestMovementSystem(unittest.TestCase):
 
         self.assertTrue(result)
         self.terrain.move_entity.assert_called_once_with(entity_id, 1, 1)
-        self.assertEqual(entity_data["position"].x, 1)
-        self.assertEqual(entity_data["position"].y, 1)
+        self.assertEqual(components["position"].x, 1)
+        self.assertEqual(components["position"].y, 1)
 
     def test_move_fail_occupied(self):
         entity_id = "player"
-        entity_data = {"position": PositionComponent(x=0, y=0)}
-        self.game_state.add_entity(entity_id, entity_data)
+        components = add_entity_with_position(
+            self.game_state,
+            entity_id,
+            position=PositionComponent(x=0, y=0),
+        )
         self.terrain.is_valid_position.return_value = True
         self.terrain.is_occupied.return_value = True  # Destination is occupied
         self.terrain.is_walkable.return_value = True
@@ -100,13 +114,16 @@ class TestMovementSystem(unittest.TestCase):
 
         self.assertFalse(result)
         self.terrain.is_occupied.assert_called_once_with(1, 1, 1, 1, entity_id_to_ignore=entity_id)
-        self.assertEqual(entity_data["position"].x, 0) # Position should not change
-        self.assertEqual(entity_data["position"].y, 0)
+        self.assertEqual(components["position"].x, 0) # Position should not change
+        self.assertEqual(components["position"].y, 0)
 
     def test_move_fail_invalid_position(self):
         entity_id = "player"
-        entity_data = {"position": PositionComponent(x=0, y=0)}
-        self.game_state.add_entity(entity_id, entity_data)
+        components = add_entity_with_position(
+            self.game_state,
+            entity_id,
+            position=PositionComponent(x=0, y=0),
+        )
         self.terrain.is_valid_position.return_value = False # Invalid destination
         self.terrain.is_occupied.return_value = False
         self.terrain.is_walkable.return_value = True
@@ -114,12 +131,15 @@ class TestMovementSystem(unittest.TestCase):
         result = self.movement_system.move(entity_id, (100, 100))
 
         self.assertFalse(result)
-        self.assertEqual(entity_data["position"].x, 0)
+        self.assertEqual(components["position"].x, 0)
 
     def test_move_fail_not_walkable(self):
         entity_id = "player"
-        entity_data = {"position": PositionComponent(x=0, y=0)}
-        self.game_state.add_entity(entity_id, entity_data)
+        components = add_entity_with_position(
+            self.game_state,
+            entity_id,
+            position=PositionComponent(x=0, y=0),
+        )
         self.terrain.is_valid_position.return_value = True
         self.terrain.is_occupied.return_value = False
         self.terrain.is_walkable.return_value = False # Wall
@@ -127,7 +147,7 @@ class TestMovementSystem(unittest.TestCase):
         result = self.movement_system.move(entity_id, (1, 0))
 
         self.assertFalse(result)
-        self.assertEqual(entity_data["position"].x, 0)
+        self.assertEqual(components["position"].x, 0)
 
 if __name__ == '__main__':
     unittest.main()

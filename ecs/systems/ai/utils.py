@@ -2,6 +2,8 @@
 from typing import List, Tuple, Dict, Set
 from random import choice
 
+from ecs.helpers.occupancy import collect_blocked_tiles
+
 def get_enemies(game_state, char_id: str) -> List[str]:
     """
     Get a list of all enemy entity IDs for the specified character.
@@ -266,12 +268,16 @@ def choose_defensive_action(available_defenses: List[str]) -> str:
     return choice(available_defenses) if available_defenses else "Dodge"
 
 def get_occupied_static(game_state) -> Set[Tuple[int, int]]:
-    """
-    Gather all statically occupied tiles: entity footprints and terrain obstacles (walls).
-    """
+    """Gather statically occupied tiles using ECS data when available."""
+
+    ecs_manager = getattr(game_state, "ecs_manager", None)
+    terrain = getattr(game_state, "terrain", None)
+    if ecs_manager is not None:
+        return collect_blocked_tiles(ecs_manager, terrain=terrain)
+
     occupied = set()
-    # Add entity occupied tiles
-    for eid, ent in game_state.entities.items():
+    entities = getattr(game_state, "entities", {}) or {}
+    for eid in entities:
         try:
             bbox = get_entity_bounding_box(game_state, eid)
         except TypeError:
@@ -279,8 +285,6 @@ def get_occupied_static(game_state) -> Set[Tuple[int, int]]:
         for x in range(bbox['x1'], bbox['x2'] + 1):
             for y in range(bbox['y1'], bbox['y2'] + 1):
                 occupied.add((x, y))
-    # Add terrain walls if available
-    terrain = getattr(game_state, 'terrain', None)
     if terrain and hasattr(terrain, 'walls'):
         for wall in terrain.walls:
             occupied.add(wall)

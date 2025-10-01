@@ -5,10 +5,11 @@ from core.event_bus import EventBus
 from core.movement_system import MovementSystem
 from ecs.systems.action_system import ActionSystem
 from ecs.actions.movement_actions import StandardMoveAction, SprintAction
+from ecs.ecs_manager import ECSManager
 from ecs.components.position import PositionComponent
 from ecs.components.character_ref import CharacterRefComponent
-from ecs.ecs_manager import ECSManager
 from entities.character import Character
+from tests.helpers.ecs import add_entity_with_position, get_movement_usage_distance
 
 class SimpleTerrain:
     def __init__(self, w=30, h=30):
@@ -45,7 +46,12 @@ class TestSprintResidual(unittest.TestCase):
         char = Character(name='Runner', traits=traits, base_traits=traits)
         self.entity_id = 'E'
         pos = PositionComponent(5,5)
-        self.gs.add_entity(self.entity_id, {"position":pos, "character_ref": CharacterRefComponent(char)})
+        add_entity_with_position(
+            self.gs,
+            self.entity_id,
+            position=pos,
+            extra_components={"character_ref": CharacterRefComponent(char)},
+        )
         self.gs.terrain.grid[(5,5)] = self.entity_id
         # register movement actions
         std = StandardMoveAction(self.gs.movement)
@@ -59,7 +65,7 @@ class TestSprintResidual(unittest.TestCase):
         # Perform standard move of 5 tiles (within 7 limit)
         target1 = (5,10)  # distance 5
         self.gs.event_bus.publish('action_requested', entity_id=self.entity_id, action_name='Standard Move', target_tile=target1)
-        self.assertEqual(self.gs.get_movement_used(self.entity_id), 5)
+        self.assertEqual(get_movement_usage_distance(self.ecs, self.entity_id), 5)
 
         # Verify position after standard move
         pos = self.gs.get_entity(self.entity_id)['position']
@@ -78,7 +84,7 @@ class TestSprintResidual(unittest.TestCase):
         pos = self.gs.get_entity(self.entity_id)['position']
         # If sprint still fails, the issue might be with action system setup
         # Let's just verify movement was attempted but may have failed due to system constraints
-        total_used = self.gs.get_movement_used(self.entity_id)
+        total_used = get_movement_usage_distance(self.ecs, self.entity_id)
         self.assertGreaterEqual(total_used, 5)  # At least the standard move succeeded
 
 if __name__ == '__main__':
