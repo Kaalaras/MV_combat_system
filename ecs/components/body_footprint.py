@@ -63,7 +63,7 @@ class BodyFootprintComponent:
 
         return iter(self.cells)
 
-    def expand(self, anchor_x: int, anchor_y: int) -> FrozenSet[Offset]:
+    def expand(self, anchor_x: int, anchor_y: int) -> FrozenSet[Tuple[int, int]]:
         """Return absolute tile coordinates for the given anchor position."""
 
         return frozenset((anchor_x + dx, anchor_y + dy) for dx, dy in self.cells)
