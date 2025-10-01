@@ -35,7 +35,11 @@ class BodyFootprintComponent:
 
     @classmethod
     def from_size(cls, width: int, height: int) -> "BodyFootprintComponent":
-        """Construct a rectangular footprint covering ``width`` x ``height`` cells."""
+        """Construct a rectangular footprint anchored at ``(0, 0)``.
+
+        The resulting offsets cover a rectangle spanning ``width`` by ``height`` tiles,
+        extending from ``(0, 0)`` through ``(width - 1, height - 1)``.
+        """
 
         if width <= 0 or height <= 0:
             raise ValueError("Body footprint dimensions must be positive integers")

@@ -468,9 +468,11 @@ class MovementSystem:
         # Perform move and update terrain occupancy
         if hasattr(terrain, 'move_entity'):
             move_result = terrain.move_entity(entity_id, dest_x, dest_y)
-            if move_result is False:
+            if move_result is not True:
                 return False
-        pos_comp.x, pos_comp.y = dest_x, dest_y
+            pos_comp.x, pos_comp.y = dest_x, dest_y
+        else:
+            pos_comp.x, pos_comp.y = dest_x, dest_y
         self._record_movement_usage(entity_id, distance)
         bump_blocker = getattr(self.game_state, 'bump_blocker_version', None)
         if callable(bump_blocker):

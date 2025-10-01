@@ -15,8 +15,14 @@ def _expand_footprint(
     position: PositionComponent,
     footprint: Optional[BodyFootprintComponent],
 ) -> Set[GridCoord]:
-    anchor_x = int(getattr(position, "x", 0))
-    anchor_y = int(getattr(position, "y", 0))
+    if not hasattr(position, "x") or not hasattr(position, "y"):
+        raise AttributeError(
+            "PositionComponent is missing required 'x' or 'y' attribute: "
+            f"{position!r}"
+        )
+
+    anchor_x = int(position.x)
+    anchor_y = int(position.y)
     if footprint is not None:
         offsets = list(footprint.iter_offsets())
         if offsets:
