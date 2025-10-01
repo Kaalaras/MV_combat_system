@@ -33,7 +33,7 @@ Example:
     # Process all systems
     ecs_manager.process(dt=0.016)
 """
-from typing import Any, Dict, Iterator, List, Optional, Tuple, Type
+from typing import TYPE_CHECKING, Any, Dict, Iterator, List, Optional, Tuple, Type
 
 try:  # pragma: no cover - import guard for environments without esper
     import esper  # type: ignore
@@ -41,6 +41,10 @@ except ImportError:  # pragma: no cover - fallback for missing dependency
     esper = None
 
 from ecs.components.entity_id import EntityIdComponent
+
+if TYPE_CHECKING:  # pragma: no cover - import hints only
+    from ecs.components.character_ref import CharacterRefComponent
+    from ecs.components.position import PositionComponent
 
 
 ProcessorType = getattr(esper, "Processor", Any)
@@ -342,6 +346,32 @@ class ECSManager:
             )
         except KeyError:
             return None
+
+    def iter_character_snapshots(
+        self,
+        include_position: bool = True,
+    ) -> Iterator[Tuple[str, "CharacterRefComponent", Optional["PositionComponent"]]]:
+        """Yield character-focused component tuples keyed by string entity id.
+
+        Args:
+            include_position: When ``True`` (default), attempt to include
+                :class:`~ecs.components.position.PositionComponent` data for
+                each entity. Entities lacking a position component are still
+                yielded with ``None`` in the third slot so callers can decide
+                how to handle them.
+        """
+
+        from ecs.components.character_ref import CharacterRefComponent as _CharacterRefComponent
+        from ecs.components.position import PositionComponent as _PositionComponent
+
+        for entity_id, char_ref in self.iter_with_id(_CharacterRefComponent):
+            position_component: Optional[_PositionComponent]
+            position_component = None
+            if include_position:
+                internal_id = self.resolve_entity(entity_id)
+                if internal_id is not None:
+                    position_component = self.try_get_component(internal_id, _PositionComponent)
+            yield entity_id, char_ref, position_component
 
     # Internal helpers ---------------------------------------------------
     def _register_entity_identity(self, internal_id: int, component: Any) -> None:

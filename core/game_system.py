@@ -1,4 +1,4 @@
-from typing import Dict, Optional, Any, List
+from typing import Dict, Optional, Any, List, Tuple
 from core.visualization.battle_map import draw_battle_map
 import os
 
@@ -273,20 +273,24 @@ class GameSystem:
             if self.action_system:
                 self.action_system.decrement_cooldowns()
 
+            character_snapshot: Dict[str, Tuple[CharacterRefComponent, Optional[PositionComponent]]] = {
+                entity_id: (char_ref, position)
+                for entity_id, char_ref, position in self.ecs_manager.iter_character_snapshots()
+            }
+
             for entity_id in self.turn_order_system.get_turn_order():
                 self._current_turn_entity_id = entity_id
                 self._turn_ended_flag = False
 
-                char_ref = self.ecs_manager.get_component_for_entity(entity_id, CharacterRefComponent)
-                if char_ref is None:
+                snapshot = character_snapshot.get(entity_id)
+                if not snapshot:
                     raise RuntimeError(
                         "Error during turn processing in the game loop: "
                         f"Turn participant entity_id={entity_id} is missing CharacterRefComponent. "
                         "This may indicate that the entity was not properly initialized, "
                         "was removed from the ECS, or there is a bug in the component management system."
                     )
-                position_comp = self.ecs_manager.get_component_for_entity(entity_id, PositionComponent)
-
+                char_ref, position_comp = snapshot
                 char = char_ref.character
                 if char.is_dead:
                     continue
@@ -298,8 +302,6 @@ class GameSystem:
                     self.action_system.reset_counters(entity_id)
                 if self.event_bus:
                     self.event_bus.publish("movement_reset_requested", entity_id=entity_id, position=position_comp)
-                elif hasattr(self.game_state, 'reset_movement_usage'):
-                    self.game_state.reset_movement_usage(entity_id)
 
                 # Handle AI-controlled vs player-controlled entities differently
                 if char.is_ai_controlled:
