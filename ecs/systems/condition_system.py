@@ -228,14 +228,17 @@ class ConditionSystem:
         return store.get(name)
 
     def _get_active_states(self, entity_id: str, character: Optional[Any] = None) -> Set[str]:
+        states: Set[str] = set()
         tracker = self._ensure_tracker(entity_id)
         if tracker is not None:
-            return tracker.active_states()
+            states |= tracker.active_states()
+        if character is None:
+            character = self._get_character(entity_id)
         if character is not None and hasattr(character, 'states'):
-            return set(character.states)
-        if entity_id in self._conditions:
-            return set(self._conditions[entity_id].keys())
-        return set()
+            states |= set(character.states)
+        if not states and entity_id in self._conditions:
+            states |= set(self._conditions[entity_id].keys())
+        return states
 
     def _get_character(self, entity_id: str) -> Optional[Any]:
         character = None
