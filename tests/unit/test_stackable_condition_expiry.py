@@ -14,7 +14,7 @@ from ecs.components.health import HealthComponent
 from ecs.components.willpower import WillpowerComponent
 from ecs.components.initiative import InitiativeComponent
 from entities.character import Character
-from tests.unit.helpers import find_condition_by_prefix_and_delta
+from tests.unit.helpers import assert_tracker_has_condition
 
 class TestStackableExpiry(unittest.TestCase):
     def setUp(self):
@@ -77,12 +77,14 @@ class TestStackableExpiry(unittest.TestCase):
         self._advance_round(1)
         self.assertEqual(self.char.max_health, base_max)  # back to +2 -2 = 0
         # Manually remove the negative modifier (suffix unknown; find it)
-        tracker = self.cond.get_tracker(self.eid)
-        self.assertIsNotNone(tracker, "Condition tracker missing for stackable entity")
-        neg_name = find_condition_by_prefix_and_delta(tracker, 'MaxHealthMod', -2)
-        self.assertIsNotNone(
-            neg_name,
-            "No MaxHealthMod condition with delta -2 found",
+        neg_name = assert_tracker_has_condition(
+            self,
+            self.cond,
+            self.eid,
+            'MaxHealthMod',
+            -2,
+            tracker_message="Condition tracker missing for stackable entity",
+            missing_message="No MaxHealthMod condition with delta -2 found",
         )
         self.cond.remove_condition(self.eid, neg_name)
         self.assertEqual(self.char.max_health, base_max + 2)

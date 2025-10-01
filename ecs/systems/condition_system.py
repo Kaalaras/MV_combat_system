@@ -15,6 +15,7 @@ conditions internally; they live solely in Character.states and are re-evaluated
 recheck_damage_based(). The Total variant can be added as timed/permanent.
 """
 from __future__ import annotations
+import logging
 from dataclasses import dataclass, field
 from typing import Optional, Dict, Any, Set
 
@@ -43,6 +44,8 @@ from utils.condition_utils import (
 
 DYNAMIC_WEAKENED = {WEAKENED_PHYSICAL, WEAKENED_MENTAL_SOCIAL}
 STACKABLE_NAMES = {'InitiativeMod','MaxHealthMod','DamageOutMod','DamageInMod'}
+
+logger = logging.getLogger(__name__)
 
 @dataclass
 class Condition:
@@ -465,8 +468,8 @@ class ConditionSystem:
         if handler:
             try:
                 handler(conds[name], entity_id)
-            except Exception as e:
-                print(f"[ConditionSystem] Remove handler for {name} failed: {e}")
+            except Exception:
+                logger.exception("Remove handler for %s failed", name)
         self._remove_side_effects(entity_id, conds[name])
         del conds[name]
         char = self._get_character(entity_id)
@@ -546,8 +549,8 @@ class ConditionSystem:
                         used_traits,
                         active,
                     )
-                except Exception as e:
-                    print(f"[ConditionSystem] pool modifier {state} failed: {e}")
+                except Exception:
+                    logger.exception("Pool modifier %s failed", state)
                     delta = 0
                 total_delta += delta
         new_pool = base_pool + total_delta
@@ -565,8 +568,8 @@ class ConditionSystem:
             if mod:
                 try:
                     result = mod(cond, result, movement_type)
-                except Exception as e:
-                    print(f"[ConditionSystem] movement modifier {name} failed: {e}")
+                except Exception:
+                    logger.exception("Movement modifier %s failed", name)
         return max(0, result)
 
     def apply_action_slot_modifiers(self, entity_id: str, counters: Dict[Any, float]) -> Dict[Any, float]:
@@ -578,8 +581,8 @@ class ConditionSystem:
             if handler:
                 try:
                     counters = handler(cond, counters)
-                except Exception as e:
-                    print(f"[ConditionSystem] action slot modifier {name} failed: {e}")
+                except Exception:
+                    logger.exception("Action slot modifier %s failed", name)
         return counters
 
     def list_conditions(self, entity_id: str) -> list:
@@ -614,8 +617,8 @@ class ConditionSystem:
             return False
         try:
             self.event_bus.publish(evt, **payload)
-        except Exception as exc:
-            print(f"[ConditionSystem] Failed publishing {evt}: {exc}")
+        except Exception:
+            logger.exception("Failed publishing %s", evt)
             return False
         return True
 

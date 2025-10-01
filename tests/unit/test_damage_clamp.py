@@ -14,7 +14,7 @@ from ecs.components.health import HealthComponent
 from ecs.components.willpower import WillpowerComponent
 from ecs.components.initiative import InitiativeComponent
 from entities.character import Character
-from tests.unit.helpers import find_condition_by_prefix_and_delta
+from tests.unit.helpers import assert_tracker_has_condition
 
 class TestDamageClamp(unittest.TestCase):
     def setUp(self):
@@ -54,12 +54,14 @@ class TestDamageClamp(unittest.TestCase):
         adj0 = self.cond.adjust_damage(self.att_id, self.def_id, base, severity='unknown', category='fire')
         self.assertEqual(adj0, 0)
         # Remove the strong negative (find suffix)
-        tracker = self.cond.get_tracker(self.att_id)
-        self.assertIsNotNone(tracker, "Condition tracker missing for attacker entity")
-        neg_name = find_condition_by_prefix_and_delta(tracker, 'DamageOutMod', -7)
-        self.assertIsNotNone(
-            neg_name,
-            "Could not find the negative DamageOutMod condition with delta -7",
+        neg_name = assert_tracker_has_condition(
+            self,
+            self.cond,
+            self.att_id,
+            'DamageOutMod',
+            -7,
+            tracker_message="Condition tracker missing for attacker entity",
+            missing_message="Could not find the negative DamageOutMod condition with delta -7",
         )
         self.cond.remove_condition(self.att_id, neg_name)
         adj1 = self.cond.adjust_damage(self.att_id, self.def_id, base, severity='unknown', category='fire')
