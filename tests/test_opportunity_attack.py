@@ -82,7 +82,8 @@ class TestOpportunityAttack(unittest.TestCase):
         b_char.is_ai_controlled=True
         self.att_id='A'; self.mov_id='B'
         # Equipment with melee weapon for attacker
-        equip_att_component = EquipmentComponent(); equip_att_component.weapons['melee']=MeleeWeaponStub()
+        equip_att_component = EquipmentComponent()
+        equip_att_component.weapons['melee'] = MeleeWeaponStub()
         equip_mov_component = EquipmentComponent()
         self.gs.add_entity(
             self.att_id,

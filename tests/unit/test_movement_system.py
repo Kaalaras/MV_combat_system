@@ -27,7 +27,9 @@ class TestMovementSystem(unittest.TestCase):
         self.game_state.add_entity(entity_id, entity_data)
 
         # Mock terrain: (1,0) is a wall, (0,1) is occupied
-        self.terrain.is_walkable.side_effect = lambda x, y, w=1, h=1: (x, y) != (1, 0)
+        self.terrain.is_walkable.side_effect = (
+            lambda x, y, entity_width=1, entity_height=1: (x, y) != (1, 0)
+        )
 
         def occupied(x, y, w=1, h=1, entity_id_to_ignore=None, **_):
             return (x, y) == (0, 1)
@@ -54,7 +56,11 @@ class TestMovementSystem(unittest.TestCase):
         self.game_state.add_entity(entity_id, entity_data)
 
         # A wall at (2,1) should block a 2x2 entity at (1,0) because its footprint (1,0 -> 3,2) would overlap the wall.
-        self.terrain.is_walkable.side_effect = lambda x, y, w=1, h=1: not (x <= 2 < x + w and y <= 1 < y + h)
+        self.terrain.is_walkable.side_effect = (
+            lambda x, y, entity_width=1, entity_height=1: not (
+                x <= 2 < x + entity_width and y <= 1 < y + entity_height
+            )
+        )
         self.terrain.is_occupied.return_value = False # No other entities
 
         reachable = self.movement_system.get_reachable_tiles(entity_id, max_distance=1)

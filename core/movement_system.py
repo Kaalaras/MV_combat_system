@@ -154,20 +154,32 @@ class MovementSystem:
     def _record_movement_usage(self, entity_id: str, distance: int) -> None:
         if distance <= 0:
             return
-        internal_id = self.ecs_manager.resolve_entity(entity_id)
-        if internal_id is not None:
+
+        def add_to_component() -> None:
+            internal_id = self.ecs_manager.resolve_entity(entity_id)
+            if internal_id is None:
+                return
             component = self.ecs_manager.try_get_component(internal_id, MovementUsageComponent)
             if component is None:
                 component = MovementUsageComponent()
                 self.ecs_manager.add_component(internal_id, component)
             component.add(distance)
 
-        if self.event_bus:
-            self.event_bus.publish(
+        publish = getattr(self.event_bus, "publish", None) if self.event_bus else None
+        if callable(publish):
+            add_to_component()
+            publish(
                 "movement_distance_spent",
                 entity_id=entity_id,
                 distance=distance,
             )
+            return
+
+        if hasattr(self.game_state, "add_movement_steps"):
+            self.game_state.add_movement_steps(entity_id, distance)
+            return
+
+        add_to_component()
 
     def register_movement_usage(self, entity_id: str, distance: int) -> None:
         """Public helper for non-movement-system callers to log travel distance."""
