@@ -173,6 +173,8 @@ class ConditionSystem:
             if internal_id is None:
                 return None
             tracker = ConditionTrackerComponent()
+            if entity_id in self._conditions:
+                tracker.conditions.update(self._conditions[entity_id])
             self.ecs_manager.add_component(internal_id, tracker)
         if tracker is not None:
             self._conditions[entity_id] = tracker.conditions
@@ -473,7 +475,10 @@ class ConditionSystem:
             return base_pool
         total_delta = 0
         for state in active:
-            func = self._pool_modifier_registry.get(state)
+            base_state = state.split('#')[0]
+            func = self._pool_modifier_registry.get(state) or self._pool_modifier_registry.get(
+                base_state
+            )
             if func:
                 try:
                     delta = func(
