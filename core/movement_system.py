@@ -420,8 +420,6 @@ class MovementSystem:
         if self.game_state and not self.game_state.get_entity(entity_id):
             return False
         pre_adjacent = self._collect_adjacent_opportunity_sources(entity_id) if provoke_aoo else []
-        has_char_ref = self._get_component(entity_id, CharacterRefComponent) is not None
-        has_cover = self._get_component(entity_id, CoverComponent) is not None
         width = getattr(pos_comp,'width',1); height = getattr(pos_comp,'height',1)
         cur_x, cur_y = pos_comp.x, pos_comp.y
         dest_x, dest_y = dest
@@ -474,11 +472,12 @@ class MovementSystem:
                 return False
         pos_comp.x, pos_comp.y = dest_x, dest_y
         self._record_movement_usage(entity_id, distance)
-        if (
-            hasattr(self.game_state, 'bump_blocker_version')
-            and (has_char_ref or has_cover)
-        ):
-            self.game_state.bump_blocker_version()
+        bump_blocker = getattr(self.game_state, 'bump_blocker_version', None)
+        if callable(bump_blocker):
+            has_char_ref = self._get_component(entity_id, CharacterRefComponent) is not None
+            has_cover = self._get_component(entity_id, CoverComponent) is not None
+            if has_char_ref or has_cover:
+                bump_blocker()
         if void_tile and hasattr(self.game_state, 'kill_entity'):
             self.game_state.kill_entity(entity_id, cause='void')
         return True
@@ -525,8 +524,6 @@ class MovementSystem:
             total_cost += step_cost
             if max_steps is not None and total_cost>max_steps:
                 return False
-        has_char_ref = self._get_component(entity_id, CharacterRefComponent) is not None
-        has_cover = self._get_component(entity_id, CoverComponent) is not None
         entity_width = getattr(pos_comp, 'width', 1)
         entity_height = getattr(pos_comp, 'height', 1)
         for (x,y) in path[1:]:
@@ -549,11 +546,12 @@ class MovementSystem:
             pos_comp.x, pos_comp.y = x, y
             step_distance = terrain.get_movement_cost(x,y) if hasattr(terrain,'get_movement_cost') else 1
             self._record_movement_usage(entity_id, step_distance)
-            if (
-                hasattr(self.game_state, 'bump_blocker_version')
-                and (has_char_ref or has_cover)
-            ):
-                self.game_state.bump_blocker_version()
+            bump_blocker = getattr(self.game_state, 'bump_blocker_version', None)
+            if callable(bump_blocker):
+                has_char_ref = self._get_component(entity_id, CharacterRefComponent) is not None
+                has_cover = self._get_component(entity_id, CoverComponent) is not None
+                if has_char_ref or has_cover:
+                    bump_blocker()
         if void_tile and hasattr(self.game_state,'kill_entity'):
             self.game_state.kill_entity(entity_id, cause='void')
         return True

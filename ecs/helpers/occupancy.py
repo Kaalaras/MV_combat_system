@@ -60,6 +60,23 @@ def build_entity_tile_index(ecs_manager: ECSManager) -> Dict[str, Set[GridCoord]
     return {entity_id: tiles for entity_id, tiles in iter_entity_tiles(ecs_manager)}
 
 
+def _resolve_terrain(ecs_manager: ECSManager, explicit: Optional[Any]) -> Optional[Any]:
+    """Resolve a terrain reference from the ECS manager or an explicit override."""
+
+    if explicit is not None:
+        return explicit
+
+    terrain = getattr(ecs_manager, "terrain", None)
+    if terrain is not None:
+        return terrain
+
+    game_state = getattr(ecs_manager, "game_state", None)
+    if game_state is not None:
+        return getattr(game_state, "terrain", None)
+
+    return None
+
+
 def collect_blocked_tiles(
     ecs_manager: ECSManager,
     *,
@@ -77,13 +94,8 @@ def collect_blocked_tiles(
         blocked.update(tiles)
 
     if include_walls:
-        if terrain is None:
-            terrain = getattr(ecs_manager, "terrain", None)
-            if terrain is None:
-                game_state = getattr(ecs_manager, "game_state", None)
-                if game_state is not None:
-                    terrain = getattr(game_state, "terrain", None)
-        walls = getattr(terrain, "walls", None)
+        terrain_obj = _resolve_terrain(ecs_manager, terrain)
+        walls = getattr(terrain_obj, "walls", None)
         if isinstance(walls, (set, list, tuple)):
             blocked.update({(int(x), int(y)) for x, y in walls})
 
