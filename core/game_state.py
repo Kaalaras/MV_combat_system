@@ -4,6 +4,7 @@ from typing import Dict, List, Any, Optional
 
 from ecs.components.entity_id import EntityIdComponent
 from ecs.components.initiative import InitiativeComponent
+from ecs.components.movement_usage import MovementUsageComponent
 from ecs.components.team import TeamComponent
 
 
@@ -33,7 +34,7 @@ class GameState:
     ```python
     from ecs.ecs_manager import ECSManager
 
-    # Create game state (optionally provide an ECS manager for mirroring)
+    # Create game state and ECS manager
     ecs_manager = ECSManager()
     game_state = GameState(ecs_manager=ecs_manager)
 
@@ -44,7 +45,7 @@ class GameState:
     event_bus = EventBus()
     game_state.set_event_bus(event_bus)
 
-    movement_system = MovementSystem()
+    movement_system = MovementSystem(game_state, ecs_manager, event_bus=event_bus)
     game_state.set_movement_system(movement_system)
 
     # Add an entity
@@ -67,7 +68,7 @@ class GameState:
         """
         self.entities: Dict[str, Dict[str, Any]] = {}  # entity_id -> component dict
         self.terrain: Any = None  # Replace Any with actual Terrain type
-        self.event_bus: Optional[Any] = None  # Optional: reference to EventBus, replace Any
+        self._event_bus: Optional[Any] = None  # Optional: reference to EventBus, replace Any
         self.teams: Dict[str, List[str]] = {}
         self.movement: Optional[Any] = None  # Optional: reference to MovementSystem, replace Any
         self.movement_turn_usage: Dict[str, Dict[str, Any]] = {}  # {'distance':int}
@@ -285,28 +286,35 @@ class GameState:
         """
         previous_bus = self._movement_subscription_bus if self._movement_event_registered else None
         if previous_bus and previous_bus is not event_bus and hasattr(previous_bus, "unsubscribe"):
-            try:
-                previous_bus.unsubscribe(
-                    "movement_reset_requested",
-                    self._handle_movement_reset_requested,
-                )
-            except (AttributeError, KeyError, ValueError) as exc:  # pragma: no cover - defensive cleanup
-                logger.warning(
-                    "Failed to unsubscribe movement reset handler from previous bus: %s",
-                    exc,
-                )
+            for event_name, handler in (
+                ("movement_reset_requested", self._handle_movement_reset_requested),
+                ("movement_distance_spent", self._handle_movement_distance_spent),
+            ):
+                try:
+                    previous_bus.unsubscribe(event_name, handler)
+                except (AttributeError, KeyError, ValueError) as exc:  # pragma: no cover - defensive cleanup
+                    logger.warning(
+                        "Failed to unsubscribe %s handler from previous bus: %s",
+                        event_name,
+                        exc,
+                    )
         if previous_bus and previous_bus is not event_bus:
             self._movement_event_registered = False
             self._movement_subscription_bus = None
 
-        self.event_bus = event_bus
+        self._event_bus = event_bus
 
-        if self.event_bus and not self._movement_event_registered:
-            self.event_bus.subscribe(
+        subscribe = getattr(self._event_bus, "subscribe", None)
+        if callable(subscribe) and not self._movement_event_registered:
+            subscribe(
                 "movement_reset_requested",
                 self._handle_movement_reset_requested,
             )
-            self._movement_subscription_bus = self.event_bus
+            subscribe(
+                "movement_distance_spent",
+                self._handle_movement_distance_spent,
+            )
+            self._movement_subscription_bus = self._event_bus
             self._movement_event_registered = True
 
     def set_movement_system(self, movement_system: Any) -> None:
@@ -331,6 +339,14 @@ class GameState:
             ```
         """
         self.movement = movement_system
+
+    @property
+    def event_bus(self) -> Optional[Any]:
+        return self._event_bus
+
+    @event_bus.setter
+    def event_bus(self, event_bus: Optional[Any]) -> None:
+        self.set_event_bus(event_bus)
 
     def set_ecs_manager(self, ecs_manager: Any) -> None:
         """Attach an ``ecs_manager`` and mirror existing entities into the ECS world."""
@@ -433,14 +449,44 @@ class GameState:
 
         self.reset_movement_usage(entity_id)
 
+    def _handle_movement_distance_spent(self, entity_id: str, distance: int, **_: Any) -> None:
+        """Event callback updating cached movement usage totals."""
+
+        if distance <= 0:
+            return
+        if entity_id not in self.movement_turn_usage:
+            self.movement_turn_usage[entity_id] = {"distance": 0}
+        self.movement_turn_usage[entity_id]["distance"] += distance
+
     def reset_movement_usage(self, entity_id: str):
         """Reset per-turn movement tracking for an entity (called at turn start)."""
         self.movement_turn_usage[entity_id] = {"distance": 0}
+        if self.ecs_manager:
+            internal_id = self._ecs_entities.get(entity_id)
+            if internal_id is None and self.ecs_manager:
+                internal_id = self.ecs_manager.resolve_entity(entity_id)
+            if internal_id is not None:
+                component = self.ecs_manager.try_get_component(internal_id, MovementUsageComponent)
+                if component is None:
+                    component = MovementUsageComponent()
+                    self.ecs_manager.add_component(internal_id, component)
+                else:
+                    component.reset()
 
     def add_movement_steps(self, entity_id: str, steps: int):
         if entity_id not in self.movement_turn_usage:
             self.reset_movement_usage(entity_id)
         self.movement_turn_usage[entity_id]["distance"] += steps
+        if self.ecs_manager and steps:
+            internal_id = self._ecs_entities.get(entity_id)
+            if internal_id is None:
+                internal_id = self.ecs_manager.resolve_entity(entity_id)
+            if internal_id is not None:
+                component = self.ecs_manager.try_get_component(internal_id, MovementUsageComponent)
+                if component is None:
+                    component = MovementUsageComponent()
+                    self.ecs_manager.add_component(internal_id, component)
+                component.add(steps)
 
     def get_movement_used(self, entity_id: str) -> int:
         return self.movement_turn_usage.get(entity_id, {}).get("distance", 0)

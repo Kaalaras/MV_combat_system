@@ -164,7 +164,7 @@ def initialize_game(
     prep_manager.prepare()
 
     # --- System Initialization ---
-    movement = MovementSystem(game_state)
+    movement = MovementSystem(game_state, ecs_manager, event_bus=event_bus)
     game_state.movement = movement
     action_system = ActionSystem(game_state, event_bus)
     game_state.action_system = action_system

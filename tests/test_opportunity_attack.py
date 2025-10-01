@@ -1,14 +1,14 @@
 import unittest
-from MV_combat_system.core.game_state import GameState
-from MV_combat_system.core.movement_system import MovementSystem
-from MV_combat_system.ecs.actions.movement_actions import StandardMoveAction
-from MV_combat_system.ecs.systems.action_system import ActionSystem, ActionType
-from MV_combat_system.entities.character import Character
-from MV_combat_system.ecs.systems.opportunity_attack_system import OpportunityAttackSystem
-
-class Position:
-    def __init__(self,x,y,width=1,height=1):
-        self.x=x; self.y=y; self.width=width; self.height=height
+from core.game_state import GameState
+from core.movement_system import MovementSystem
+from ecs.actions.movement_actions import StandardMoveAction
+from ecs.systems.action_system import ActionSystem, ActionType
+from entities.character import Character
+from ecs.systems.opportunity_attack_system import OpportunityAttackSystem
+from ecs.ecs_manager import ECSManager
+from ecs.components.position import PositionComponent
+from ecs.components.character_ref import CharacterRefComponent
+from ecs.components.equipment import EquipmentComponent
 
 class Terrain:
     def __init__(self,w=20,h=20):
@@ -31,6 +31,10 @@ class DummyBus:
         self.events=[]
     def subscribe(self,name,cb):
         self.subs.setdefault(name,[]).append(cb)
+    def unsubscribe(self, name, cb):
+        callbacks = self.subs.get(name, [])
+        if cb in callbacks:
+            callbacks.remove(cb)
     def publish(self,name,**kw):
         self.events.append((name,kw))
         for cb in self.subs.get(name,[]):
@@ -62,11 +66,12 @@ class RangedWeaponStub(MeleeWeaponStub):
 
 class TestOpportunityAttack(unittest.TestCase):
     def setUp(self):
-        self.gs=GameState()
-        self.gs.terrain=Terrain()
         self.bus=DummyBus()
+        self.ecs=ECSManager(self.bus)
+        self.gs=GameState(self.ecs)
+        self.gs.terrain=Terrain()
         self.gs.event_bus=self.bus
-        self.gs.movement=MovementSystem(self.gs)
+        self.gs.movement=MovementSystem(self.gs, self.ecs, event_bus=self.bus)
         self.action_system=ActionSystem(self.gs,self.bus)
         self.gs.action_system=self.action_system
         # Traits include Brawl so melee dice pool >0
@@ -77,10 +82,25 @@ class TestOpportunityAttack(unittest.TestCase):
         b_char.is_ai_controlled=True
         self.att_id='A'; self.mov_id='B'
         # Equipment with melee weapon for attacker
-        equip_att = EquipmentStub(); equip_att.weapons['main']=MeleeWeaponStub()
-        equip_mov = EquipmentStub()  # mover weaponless (doesn't matter)
-        self.gs.add_entity(self.att_id,{"position":Position(5,5),"character_ref":type('CR',(),{'character':a_char})(),"equipment":equip_att})
-        self.gs.add_entity(self.mov_id,{"position":Position(5,6),"character_ref":type('CR',(),{'character':b_char})(),"equipment":equip_mov})
+        equip_att_component = EquipmentComponent()
+        equip_att_component.weapons['TestSword'] = MeleeWeaponStub()
+        equip_mov_component = EquipmentComponent()
+        self.gs.add_entity(
+            self.att_id,
+            {
+                "position": PositionComponent(5,5),
+                "character_ref": CharacterRefComponent(a_char),
+                "equipment": equip_att_component,
+            },
+        )
+        self.gs.add_entity(
+            self.mov_id,
+            {
+                "position": PositionComponent(5,6),
+                "character_ref": CharacterRefComponent(b_char),
+                "equipment": equip_mov_component,
+            },
+        )
         self.gs.terrain.grid[(5,5)]=self.att_id
         self.gs.terrain.grid[(5,6)]=self.mov_id
         move_act=StandardMoveAction(self.gs.movement)

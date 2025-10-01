@@ -10,14 +10,16 @@ The ECSManager serves as the primary interface for interacting with the ECS worl
 convenience methods for common operations like entity creation/deletion and component management.
 
 Example:
+    from core.game_state import GameState
     # Create an event bus
     event_bus = EventBus()
 
-    # Initialize the ECS manager
+    # Initialize the ECS manager and supporting systems
     ecs_manager = ECSManager(event_bus)
+    game_state = GameState(ecs_manager)
 
     # Add a processor system
-    movement_system = MovementSystem()
+    movement_system = MovementSystem(game_state, ecs_manager, event_bus=event_bus)
     ecs_manager.add_processor(movement_system, priority=1)
 
     # Create an entity with components
@@ -190,7 +192,7 @@ class ECSManager:
             priority (int): Processing order priority (Default: 0)
 
         Example:
-            > movement_system = MovementSystem()
+            > movement_system = MovementSystem(game_state, self, event_bus=self.event_bus)
             > ecs_manager.add_processor(movement_system, priority=2)
         """
         if hasattr(self.world, "add_processor"):

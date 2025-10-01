@@ -1,7 +1,15 @@
-from typing import List, Tuple, Dict, Any, Set
-from ecs.systems.ai.utils import get_occupied_static
-from itertools import product
+from __future__ import annotations
+
+from typing import Any, Dict, Iterator, List, Optional, Tuple, Type, Set, cast
 import heapq
+from itertools import product
+
+from ecs.components.character_ref import CharacterRefComponent
+from ecs.components.equipment import EquipmentComponent
+from ecs.components.movement_usage import MovementUsageComponent
+from ecs.components.position import PositionComponent
+from ecs.ecs_manager import ECSManager
+from ecs.systems.ai.utils import get_occupied_static
 from core.terrain_manager import EFFECT_IMPASSABLE_VOID
 
 
@@ -20,8 +28,15 @@ class MovementSystem:
 
     Example usage:
     ```python
-    # Initialize movement system with game state
-    movement_system = MovementSystem(game_state)
+    from core.event_bus import EventBus
+    from ecs.ecs_manager import ECSManager
+
+    event_bus = EventBus()
+    ecs_manager = ECSManager(event_bus)
+    game_state.ecs_manager = ecs_manager
+
+    # Initialize movement system with ECS context
+    movement_system = MovementSystem(game_state, ecs_manager, event_bus=event_bus)
 
     # Find tiles reachable by player
     reachable_tiles = movement_system.get_reachable_tiles("player1", max_distance=7)
@@ -35,7 +50,13 @@ class MovementSystem:
     ```
     """
 
-    def __init__(self, game_state: Any) -> None:
+    def __init__(
+        self,
+        game_state: Any,
+        ecs_manager: Optional[ECSManager] = None,
+        *,
+        event_bus: Any | None = None,
+    ) -> None:
         """
         Initializes the MovementSystem with a reference to the game state.
 
@@ -44,11 +65,126 @@ class MovementSystem:
 
         Example:
             ```python
-            # Create movement system
-            movement_system = MovementSystem(game_state)
+            event_bus = EventBus()
+            ecs_manager = ECSManager(event_bus)
+            movement_system = MovementSystem(game_state, ecs_manager, event_bus=event_bus)
             ```
         """
+        if game_state is None:
+            raise ValueError("MovementSystem requires a GameState instance.")
+
+        manager_candidate = ecs_manager or getattr(game_state, "ecs_manager", None)
+        if manager_candidate is None or not hasattr(manager_candidate, "iter_with_id"):
+            raise ValueError(
+                "MovementSystem requires an ECSManager. Provide ecs_manager explicitly as a parameter."
+            )
+
         self.game_state = game_state
+        self.ecs_manager: ECSManager = cast(ECSManager, manager_candidate)
+        resolved_event_bus = event_bus or getattr(self.ecs_manager, "event_bus", None)
+        if resolved_event_bus is None:
+            resolved_event_bus = getattr(self.game_state, "event_bus", None)
+        self.event_bus = resolved_event_bus
+
+    # --- Internal component helpers ----------------------------------------------
+    def _iter_entities_with(
+        self, *component_types: Type[Any]
+    ) -> Iterator[Tuple[str, ...]]:
+        """Yield ``(entity_id, *components)`` using ECS when available."""
+
+        yield from self.ecs_manager.iter_with_id(*component_types)
+
+    def _get_component(self, entity_id: str, component_type: Type[Any]) -> Optional[Any]:
+        component_tuple = self.ecs_manager.get_components_for_entity(entity_id, component_type)
+        if component_tuple is None or not component_tuple:
+            return None
+        return component_tuple[0]
+
+    @staticmethod
+    def _bounding_box(position: Any) -> Optional[Tuple[int, int, int, int]]:
+        if position is None:
+            return None
+        if hasattr(position, "x1") and hasattr(position, "y1") and hasattr(position, "x2") and hasattr(position, "y2"):
+            return int(position.x1), int(position.y1), int(position.x2), int(position.y2)
+        x = getattr(position, "x", None)
+        y = getattr(position, "y", None)
+        if x is not None and y is not None:
+            width = int(getattr(position, "width", 1))
+            height = int(getattr(position, "height", 1))
+            return int(x), int(y), int(x) + width - 1, int(y) + height - 1
+        if isinstance(position, tuple) and len(position) >= 2:
+            return int(position[0]), int(position[1]), int(position[0]), int(position[1])
+        return None
+
+    @classmethod
+    def _are_positions_adjacent(cls, pos_a: Any, pos_b: Any) -> bool:
+        bbox_a = cls._bounding_box(pos_a)
+        bbox_b = cls._bounding_box(pos_b)
+        if not bbox_a or not bbox_b:
+            return False
+        ax1, ay1, ax2, ay2 = bbox_a
+        bx1, by1, bx2, by2 = bbox_b
+        dx = max(0, ax1 - bx2, bx1 - ax2)
+        dy = max(0, ay1 - by2, by1 - ay2)
+        return dx + dy == 1
+
+    def _get_team_id(self, entity_id: str) -> Optional[Any]:
+        char_ref = self._get_component(entity_id, CharacterRefComponent)
+        if not char_ref:
+            return None
+        character = getattr(char_ref, "character", None)
+        if not character:
+            return None
+        return getattr(character, "team", None)
+
+    @staticmethod
+    def _is_melee_capable(equipment: Any) -> bool:
+        if not equipment or not hasattr(equipment, "weapons"):
+            return False
+        weapons = getattr(equipment, "weapons", {})
+        for weapon in weapons.values():
+            if weapon is None:
+                continue
+            weapon_type = getattr(weapon, "weapon_type", None)
+            base_type = getattr(weapon_type, "value", weapon_type)
+            if base_type in ("melee", "brawl"):
+                return True
+        return False
+
+    def _record_movement_usage(self, entity_id: str, distance: int) -> None:
+        if distance <= 0:
+            return
+
+        def add_to_component() -> None:
+            internal_id = self.ecs_manager.resolve_entity(entity_id)
+            if internal_id is None:
+                return
+            component = self.ecs_manager.try_get_component(internal_id, MovementUsageComponent)
+            if component is None:
+                component = MovementUsageComponent()
+                self.ecs_manager.add_component(internal_id, component)
+            component.add(distance)
+
+        publish = getattr(self.event_bus, "publish", None) if self.event_bus else None
+        if callable(publish):
+            add_to_component()
+            publish(
+                "movement_distance_spent",
+                entity_id=entity_id,
+                distance=distance,
+            )
+            return
+
+        if hasattr(self.game_state, "add_movement_steps"):
+            self.game_state.add_movement_steps(entity_id, distance)
+            return
+
+        add_to_component()
+
+    def register_movement_usage(self, entity_id: str, distance: int) -> None:
+        """Public helper for non-movement-system callers to log travel distance."""
+
+        self._record_movement_usage(entity_id, distance)
 
     # --- Convenience wrappers for AI / other systems ---------------------------------
     def is_walkable(self, x: int, y: int, entity_width: int = 1, entity_height: int = 1) -> bool:
@@ -90,44 +226,34 @@ class MovementSystem:
 
     # --- Opportunity Attack Helpers -------------------------------------------------
     def _collect_adjacent_opportunity_sources(self, mover_id: str) -> List[str]:
-        """Return list of entity_ids that are adjacent (Manhattan distance 1) to mover and
-        eligible to perform an opportunity attack (toggle flag True).
-        """
-        mover = self.game_state.get_entity(mover_id)
-        if not mover or 'position' not in mover:
+        """Return entity ids adjacent to ``mover_id`` eligible for opportunity attacks."""
+
+        mover_position = self._get_component(mover_id, PositionComponent)
+        if mover_position is None:
             return []
-        mover_team = None
-        if 'character_ref' in mover:
-            mover_team = getattr(mover['character_ref'].character, 'team', None)
-        mx, my = mover['position'].x, mover['position'].y
+
+        mover_team = self._get_team_id(mover_id)
         sources: List[str] = []
-        for eid, ent in self.game_state.entities.items():
+        for eid, pos_comp, char_ref, equipment in self._iter_entities_with(
+            PositionComponent,
+            CharacterRefComponent,
+            EquipmentComponent,
+        ):
             if eid == mover_id:
                 continue
-            if 'position' not in ent or 'character_ref' not in ent:
+            character = getattr(char_ref, "character", None)
+            if not character or not getattr(character, "toggle_opportunity_attack", False):
                 continue
-            char_ref = ent['character_ref']
-            char = getattr(char_ref, 'character', None)
-            if not char or not getattr(char, 'toggle_opportunity_attack', False):
+            attacker_team = getattr(character, "team", None)
+            if (
+                mover_team is not None
+                and attacker_team is not None
+                and attacker_team == mover_team
+            ):
                 continue
-            # Team / hostility filter: must be different team if both teams defined
-            attacker_team = getattr(char, 'team', None)
-            if mover_team is not None and attacker_team is not None and attacker_team == mover_team:
+            if not self._is_melee_capable(equipment):
                 continue
-            # Require melee-capable weapon (melee or brawl) in equipment
-            equip = ent.get('equipment')
-            melee_capable = False
-            if equip and hasattr(equip, 'weapons'):
-                for w in getattr(equip, 'weapons', {}).values():
-                    wtype = getattr(w, 'weapon_type', None)
-                    base_type = getattr(wtype, 'value', wtype)
-                    if base_type in ('melee', 'brawl'):
-                        melee_capable = True
-                        break
-            if not melee_capable:
-                continue
-            pos = ent['position']
-            if abs(pos.x - mx) + abs(pos.y - my) == 1:  # adjacent
+            if self._are_positions_adjacent(mover_position, pos_comp):
                 sources.append(eid)
         return sources
 
@@ -138,23 +264,19 @@ class MovementSystem:
         """
         if not previous_adjacent:
             return
-        mover = self.game_state.get_entity(mover_id)
-        if not mover or 'position' not in mover:
+        mover_position = self._get_component(mover_id, PositionComponent)
+        if mover_position is None:
             return
-        mx, my = mover['position'].x, mover['position'].y
-        bus = getattr(self.game_state, 'event_bus', None)
+        bus = self.event_bus
         for attacker_id in previous_adjacent:
-            ent = self.game_state.get_entity(attacker_id)
-            if not ent or 'position' not in ent:
+            attacker_position = self._get_component(attacker_id, PositionComponent)
+            if attacker_position is None:
                 continue
-            pos = ent['position']
-            # Still adjacent? then no trigger.
-            if abs(pos.x - mx) + abs(pos.y - my) == 1:
+            if self._are_positions_adjacent(mover_position, attacker_position):
                 continue
-            # Re-check toggle (it may have changed during move effects)
-            char_ref = ent.get('character_ref')
-            char = getattr(char_ref, 'character', None) if char_ref else None
-            if not char or not getattr(char, 'toggle_opportunity_attack', False):
+            char_ref = self._get_component(attacker_id, CharacterRefComponent)
+            character = getattr(char_ref, "character", None) if char_ref else None
+            if not character or not getattr(character, "toggle_opportunity_attack", False):
                 continue
             if bus:
                 bus.publish('opportunity_attack_triggered', attacker_id=attacker_id, target_id=mover_id, origin_adjacent=True)
@@ -162,21 +284,18 @@ class MovementSystem:
 
     def get_reachable_tiles(self, entity_id: str, max_distance: int, reserved_tiles: Set[Tuple[int, int]] = None) -> List[Tuple[int, int, int]]:
         """Cost-aware reachable tiles using terrain movement cost (1/2/3)."""
-        entity = self.game_state.get_entity(entity_id)
-        if not entity or "position" not in entity:
+        pos_comp = self._get_component(entity_id, PositionComponent)
+        if pos_comp is None:
             return []
-        pos_comp = entity["position"]
         start_pos = (pos_comp.x, pos_comp.y)
         entity_width = getattr(pos_comp, 'width', 1)
         entity_height = getattr(pos_comp, 'height', 1)
         terrain = self.game_state.terrain
         reserved = reserved_tiles or set()
         static_occ = get_occupied_static(self.game_state)
-        entity = self.game_state.get_entity(entity_id)
-        pos = entity.get("position")
-        width = getattr(pos, 'width', 1)
-        height = getattr(pos, 'height', 1)
-        start_x, start_y = (pos.x, pos.y) if hasattr(pos, 'x') else pos
+        width = getattr(pos_comp, 'width', 1)
+        height = getattr(pos_comp, 'height', 1)
+        start_x, start_y = pos_comp.x, pos_comp.y
         for dx, dy in product(range(width), range(height)):
             static_occ.discard((start_x + dx, start_y + dy))
         blocked = reserved.union(static_occ)
@@ -212,10 +331,9 @@ class MovementSystem:
 
     def find_path(self, entity_id: str, dest: Tuple[int,int], max_distance: int | None = None) -> List[Tuple[int,int]]:
         """Cost-aware shortest path (movement cost)."""
-        entity = self.game_state.get_entity(entity_id)
-        if not entity or 'position' not in entity:
+        pos_comp = self._get_component(entity_id, PositionComponent)
+        if pos_comp is None:
             return []
-        pos_comp = entity['position']
         start = (pos_comp.x, pos_comp.y)
         if start == dest:
             return [start]
@@ -277,11 +395,11 @@ class MovementSystem:
         """
         if pathfind:
             return self.path_move(entity_id, dest, max_steps=max_steps, provoke_aoo=provoke_aoo)
-        entity = self.game_state.get_entity(entity_id)
-        if not entity or 'position' not in entity:
+        entity = self.game_state.get_entity(entity_id) if self.game_state else None
+        pos_comp = self._get_component(entity_id, PositionComponent)
+        if not entity or pos_comp is None:
             return False
         pre_adjacent = self._collect_adjacent_opportunity_sources(entity_id) if provoke_aoo else []
-        pos_comp = entity['position']
         width = getattr(pos_comp,'width',1); height = getattr(pos_comp,'height',1)
         cur_x, cur_y = pos_comp.x, pos_comp.y
         dest_x, dest_y = dest
@@ -320,17 +438,17 @@ class MovementSystem:
             return False
         # Fire AoO events BEFORE moving: any pre-adjacent attacker for which destination is NOT adjacent
         if pre_adjacent and provoke_aoo:
-            bus = getattr(self.game_state, 'event_bus', None)
+            bus = self.event_bus
             if bus:
                 for attacker_id in pre_adjacent:
-                    att = self.game_state.get_entity(attacker_id)
-                    if not att or 'position' not in att:
+                    attacker_pos = self._get_component(attacker_id, PositionComponent)
+                    if attacker_pos is None:
                         continue
-                    ap = att['position']
                     # If attacker will still be adjacent to destination, no opportunity attack
-                    if abs(ap.x - dest_x) + abs(ap.y - dest_y) == 1:
+                    hypothetical_position = PositionComponent(dest_x, dest_y, width=width, height=height)
+                    if self._are_positions_adjacent(attacker_pos, hypothetical_position):
                         continue
-                    char_ref = att.get('character_ref')
+                    char_ref = self._get_component(attacker_id, CharacterRefComponent)
                     char = getattr(char_ref, 'character', None) if char_ref else None
                     if not char or not getattr(char, 'toggle_opportunity_attack', False):
                         continue
@@ -340,8 +458,7 @@ class MovementSystem:
         if hasattr(terrain, 'move_entity'):
             if not terrain.move_entity(entity_id, dest_x, dest_y):
                 return False
-        if hasattr(self.game_state, 'add_movement_steps'):
-            self.game_state.add_movement_steps(entity_id, distance)
+        self._record_movement_usage(entity_id, distance)
         if hasattr(self.game_state, 'bump_blocker_version') and (('character_ref' in entity) or ('cover' in entity)):
             self.game_state.bump_blocker_version()
         if void_tile and hasattr(self.game_state, 'kill_entity'):
@@ -353,10 +470,10 @@ class MovementSystem:
         Enhanced: triggers opportunity attacks stepwise upon leaving adjacency of any enemy
         that had adjacency at the beginning of a step.
         """
-        entity = self.game_state.get_entity(entity_id)
-        if not entity or 'position' not in entity:
+        entity = self.game_state.get_entity(entity_id) if self.game_state else None
+        pos_comp = self._get_component(entity_id, PositionComponent)
+        if not entity or pos_comp is None:
             return False
-        pos_comp = entity['position']
         start = (pos_comp.x, pos_comp.y)
         if start == dest:
             return True
@@ -389,26 +506,26 @@ class MovementSystem:
                 return False
         for (x,y) in path[1:]:
             pre_adjacent = self._collect_adjacent_opportunity_sources(entity_id) if provoke_aoo else []
-            # publish AoO triggers for those losing adjacency relative to next step
             if pre_adjacent and provoke_aoo:
-                bus = getattr(self.game_state, 'event_bus', None)
+                bus = self.event_bus or (getattr(self.game_state, 'event_bus', None) if self.game_state else None)
                 if bus:
+                    next_position = PositionComponent(x, y, width=getattr(pos_comp, 'width', 1), height=getattr(pos_comp, 'height', 1))
                     for attacker_id in pre_adjacent:
-                        att = self.game_state.get_entity(attacker_id)
-                        if not att or 'position' not in att:
+                        attacker_pos = self._get_component(attacker_id, PositionComponent)
+                        if attacker_pos is None:
                             continue
-                        ap = att['position']
-                        if abs(ap.x - x) + abs(ap.y - y) == 1:
+                        if self._are_positions_adjacent(attacker_pos, next_position):
                             continue
-                        char_ref = att.get('character_ref'); char = getattr(char_ref,'character', None) if char_ref else None
-                        if not char or not getattr(char,'toggle_opportunity_attack', False):
+                        char_ref = self._get_component(attacker_id, CharacterRefComponent)
+                        char = getattr(char_ref, 'character', None) if char_ref else None
+                        if not char or not getattr(char, 'toggle_opportunity_attack', False):
                             continue
                         bus.publish('opportunity_attack_triggered', attacker_id=attacker_id, target_id=entity_id, origin_adjacent=True)
             if not terrain.move_entity(entity_id, x, y):
                 return False
             pos_comp.x, pos_comp.y = x, y
-            if hasattr(self.game_state, 'add_movement_steps'):
-                self.game_state.add_movement_steps(entity_id, terrain.get_movement_cost(x,y) if hasattr(terrain,'get_movement_cost') else 1)
+            step_distance = terrain.get_movement_cost(x,y) if hasattr(terrain,'get_movement_cost') else 1
+            self._record_movement_usage(entity_id, step_distance)
             if hasattr(self.game_state, 'bump_blocker_version') and (('character_ref' in entity) or ('cover' in entity)):
                 self.game_state.bump_blocker_version()
         if void_tile and hasattr(self.game_state,'kill_entity'):

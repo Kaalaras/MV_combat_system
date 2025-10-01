@@ -12,9 +12,8 @@ from ecs.actions.attack_actions import AttackAction
 from entities.weapon import Weapon, WeaponType
 from entities.character import Character
 from ecs.components.position import PositionComponent
-
-class CharRef:
-    def __init__(self, c): self.character=c
+from ecs.components.character_ref import CharacterRefComponent
+from ecs.ecs_manager import ECSManager
 
 def make_char(name, dex=3, firearms=3):
     return Character(name=name, traits={
@@ -30,10 +29,12 @@ def make_weapon(rng=6, melee=False):
 
 @pytest.fixture
 def setup_env():
-    gs = GameState()
-    bus = EventBus(); gs.set_event_bus(bus)
+    bus = EventBus()
+    ecs = ECSManager(bus)
+    gs = GameState(ecs)
+    gs.set_event_bus(bus)
     terrain = Terrain(20,20, game_state=gs); gs.set_terrain(terrain)
-    movement = MovementSystem(gs); gs.set_movement_system(movement)
+    movement = MovementSystem(gs, ecs, event_bus=bus); gs.set_movement_system(movement)
     los = LineOfSightManager(gs, terrain, bus, los_granularity=2); gs.los_manager=los
     cover_sys = CoverSystem(gs); gs.set_cover_system(cover_sys)
     cond = ConditionSystem(gs); gs.set_condition_system(cond)
@@ -42,7 +43,7 @@ def setup_env():
 # Helper to add character
 def add_char(gs, eid, x, y):
     c = make_char(eid)
-    gs.add_entity(eid, {'position': PositionComponent(x,y,1,1), 'character_ref': CharRef(c)})
+    gs.add_entity(eid, {'position': PositionComponent(x,y,1,1), 'character_ref': CharacterRefComponent(c)})
     gs.terrain.add_entity(eid, x, y)
     return c
 

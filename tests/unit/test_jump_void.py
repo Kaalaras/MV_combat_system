@@ -6,14 +6,17 @@ from core.movement_system import MovementSystem
 from ecs.actions.movement_actions import JumpAction
 from ecs.components.position import PositionComponent
 from ecs.components.character_ref import CharacterRefComponent
+from ecs.ecs_manager import ECSManager
 from entities.character import Character
 
 class TestJumpVoidLethal(unittest.TestCase):
     def setUp(self):
-        self.gs = GameState()
-        self.eb = EventBus(); self.gs.set_event_bus(self.eb)
+        self.eb = EventBus()
+        self.ecs = ECSManager(self.eb)
+        self.gs = GameState(self.ecs)
+        self.gs.set_event_bus(self.eb)
         self.terrain = Terrain(5,5, game_state=self.gs); self.gs.set_terrain(self.terrain)
-        self.move_sys = MovementSystem(self.gs); self.gs.movement = self.move_sys
+        self.move_sys = MovementSystem(self.gs, self.ecs, event_bus=self.eb); self.gs.movement = self.move_sys
         self.events = []
         self.eb.subscribe('entity_died', lambda **kw: self.events.append(kw))
     def _add_entity(self, eid:str, x:int, y:int, strength:int=2, athletics:int=2):

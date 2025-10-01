@@ -10,11 +10,9 @@ from ecs.actions.attack_actions import AttackAction
 from entities.weapon import Weapon, WeaponType
 from entities.character import Character
 from ecs.components.position import PositionComponent
+from ecs.components.character_ref import CharacterRefComponent
+from ecs.ecs_manager import ECSManager
 from utils.condition_utils import INVISIBLE, SEE_INVISIBLE
-
-class CharacterRef:
-    def __init__(self, character):
-        self.character = character
 
 class FixedDice:
     def __init__(self, successes):
@@ -28,12 +26,13 @@ class NoDefenseAttack(AttackAction):
 
 @pytest.fixture
 def gs_full():
-    gs = GameState()
     bus = EventBus()
+    ecs = ECSManager(bus)
+    gs = GameState(ecs)
     gs.set_event_bus(bus)
     terrain = Terrain(12,12, game_state=gs)
     gs.set_terrain(terrain)
-    movement = MovementSystem(gs)
+    movement = MovementSystem(gs, ecs, event_bus=bus)
     gs.set_movement_system(movement)
     los = LineOfSightManager(gs, terrain, bus, los_granularity=2)
     gs.los_manager = los
@@ -50,7 +49,7 @@ def add_char(gs, eid, x, y, dex=3, firearms=3, team='A'):
         'Disciplines': {}
     }
     c = Character(name=eid, traits=traits)
-    gs.add_entity(eid, {'position': PositionComponent(x,y,1,1), 'character_ref': CharacterRef(c)})
+    gs.add_entity(eid, {'position': PositionComponent(x,y,1,1), 'character_ref': CharacterRefComponent(c)})
     gs.terrain.add_entity(eid, x, y)
     return c
 

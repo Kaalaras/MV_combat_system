@@ -11,10 +11,8 @@ from ecs.actions.attack_actions import AttackAction
 from entities.weapon import Weapon, WeaponType
 from entities.character import Character
 from ecs.components.position import PositionComponent
-
-class CharacterRef:
-    def __init__(self, character):
-        self.character = character
+from ecs.components.character_ref import CharacterRefComponent
+from ecs.ecs_manager import ECSManager
 
 class FixedDice:
     def __init__(self, success_sequence):
@@ -25,12 +23,13 @@ class FixedDice:
 
 @pytest.fixture
 def base_game():
-    gs = GameState()
     bus = EventBus()
+    ecs = ECSManager(bus)
+    gs = GameState(ecs)
     gs.set_event_bus(bus)
     terrain = Terrain(10,10, game_state=gs)
     gs.set_terrain(terrain)
-    movement = MovementSystem(gs)
+    movement = MovementSystem(gs, ecs, event_bus=bus)
     gs.set_movement_system(movement)
     los = LineOfSightManager(gs, terrain, bus, los_granularity=2)
     gs.los_manager = los
@@ -47,7 +46,7 @@ def add_character(gs, entity_id, x, y, team='A'):
     char = Character(name=entity_id, traits=traits, team=team)
     gs.add_entity(entity_id, {
         'position': PositionComponent(x,y,1,1),
-        'character_ref': CharacterRef(char),
+        'character_ref': CharacterRefComponent(char),
     })
     gs.terrain.add_entity(entity_id, x, y)
 
