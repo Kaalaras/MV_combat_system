@@ -14,15 +14,24 @@ The system supports:
 - Delaying turns within the initiative order
 
 Example:
-    # Create a game state
-    game_state = GameState()
+    # Create an event bus and ECS manager
+    event_bus = EventBus()
+    ecs_manager = ECSManager(event_bus)
 
-    # Initialize characters in the game state
-    game_state.add_entity("player1", {"character_ref": PlayerCharacter(...)})
-    game_state.add_entity("enemy1", {"character_ref": EnemyCharacter(...)})
+    # Initialize characters in the ECS
+    ecs_manager.create_entity(
+        EntityIdComponent("player1"),
+        CharacterRefComponent(PlayerCharacter(...)),
+        InitiativeComponent(),
+    )
+    ecs_manager.create_entity(
+        EntityIdComponent("enemy1"),
+        CharacterRefComponent(EnemyCharacter(...)),
+        InitiativeComponent(),
+    )
 
     # Initialize the turn order system
-    turn_system = TurnOrderSystem(game_state, ecs_manager)
+    turn_system = TurnOrderSystem(ecs_manager, event_bus)
 
     # Get the current active entity
     active_entity_id = turn_system.current_entity()
@@ -40,6 +49,8 @@ import random
 from typing import List, Dict, Any, Tuple, Optional
 
 from ecs.components.character_ref import CharacterRefComponent
+from ecs.components.entity_id import EntityIdComponent
+from ecs.components.initiative import InitiativeComponent
 
 
 class TurnOrderSystem:
@@ -50,25 +61,24 @@ class TurnOrderSystem:
     and provides methods for progressing through turns and rounds.
 
     Attributes:
-        game_state: The central game state containing all entities
         turn_order (List[str]): Ordered list of entity IDs representing the initiative order
         turn_index (int): Current index in the turn order
         round_number (int): Current round number (starts at 1)
         tie_breakers (Dict[str, int]): Random numbers used to break initiative ties
     """
 
-    def __init__(self, game_state: Any, ecs_manager: Any):
+    def __init__(self, ecs_manager: Any, event_bus: Optional[Any] = None):
         """
         Initialize the TurnOrderSystem.
 
         Args:
-            game_state: The central game state containing all entities
             ecs_manager: The ECS manager required for turn order operations
+            event_bus: Shared event bus used for round/turn lifecycle notifications
         """
         if ecs_manager is None:
             raise ValueError("TurnOrderSystem requires an ECS manager during initialization.")
-        self.game_state = game_state
         self.ecs_manager = ecs_manager
+        self.event_bus = event_bus or getattr(ecs_manager, "event_bus", None)
         self.turn_order: List[str] = []
         self.turn_index: int = 0
         self.round_number: int = 0
@@ -93,7 +103,11 @@ class TurnOrderSystem:
             self.tie_breakers[entity_id] = random.randint(0, int(1e9))
         return self.tie_breakers[entity_id]
 
-    def calculate_initiative(self, char_ref: CharacterRefComponent) -> int:
+    def calculate_initiative(
+        self,
+        char_ref: CharacterRefComponent,
+        initiative_component: InitiativeComponent,
+    ) -> int:
         """
         Calculate an initiative value for an entity based on its traits.
 
@@ -102,6 +116,7 @@ class TurnOrderSystem:
 
         Args:
             char_ref: The character reference component providing trait access
+            initiative_component: Initiative tuning component for flat modifiers or overrides
 
         Returns:
             int: The calculated initiative value
@@ -111,7 +126,9 @@ class TurnOrderSystem:
             > turn_system.calculate_initiative(entity)
             7
         """
-        character = char_ref.character
+        character = getattr(char_ref, "character", None)
+        if character is None:
+            raise ValueError("CharacterRefComponent is missing 'character' reference.")
         if not hasattr(character, "traits"):
             raise ValueError(
                 "Character {} is missing required 'traits' attribute.".format(
@@ -121,7 +138,9 @@ class TurnOrderSystem:
         traits = character.traits
         virtues = traits.get("Virtues", {})
         attributes = traits.get("Attributes", {}).get("Mental", {})
-        return max(virtues.get("Self-Control", 0), virtues.get("Instinct", 0)) + attributes.get("Wits", 0)
+        base_value = max(virtues.get("Self-Control", 0), virtues.get("Instinct", 0)) + attributes.get("Wits", 0)
+        character_modifier = getattr(character, "initiative_mod", 0)
+        return initiative_component.resolve(base_value, character_modifier)
 
     def start_new_round(self) -> None:
         """
@@ -142,27 +161,34 @@ class TurnOrderSystem:
         if not self.ecs_manager:
             raise RuntimeError("TurnOrderSystem requires an ECS manager before starting a round.")
 
-        live_entities: List[Tuple[str, CharacterRefComponent]] = [
-            (entity_id, char_ref)
-            for entity_id, char_ref in self.ecs_manager.iter_with_id(CharacterRefComponent)
-            if not getattr(char_ref.character, "is_dead", False)
-        ]
+        live_entities: List[Tuple[str, CharacterRefComponent, InitiativeComponent]] = []
+        for _, (entity_id_comp, char_ref, initiative_component) in self.ecs_manager.get_components(
+            EntityIdComponent,
+            CharacterRefComponent,
+            InitiativeComponent,
+        ):
+            character = getattr(char_ref, "character", None)
+            if character is None or getattr(character, "is_dead", False):
+                continue
+            if not initiative_component.enabled:
+                continue
+            live_entities.append((entity_id_comp.entity_id, char_ref, initiative_component))
 
         live_entities.sort(
             key=lambda item: (
-                self.calculate_initiative(item[1]),
+                self.calculate_initiative(item[1], item[2]),
                 self.get_or_create_tie_breaker(item[0])
             ),
             reverse=True,
         )
-        self.turn_order = [entity_id for entity_id, _ in live_entities]
+        self.turn_order = [entity_id for entity_id, _, _ in live_entities]
         self.turn_index = 0
         # Publish round started event
-        if getattr(self.game_state, 'event_bus', None):
-            self.game_state.event_bus.publish('round_started', round_number=self.round_number, turn_order=list(self.turn_order))
+        if self.event_bus:
+            self.event_bus.publish('round_started', round_number=self.round_number, turn_order=list(self.turn_order))
         # Also publish first turn started if exists
-        if self.turn_order and getattr(self.game_state, 'event_bus', None):
-            self.game_state.event_bus.publish('turn_started', round_number=self.round_number, entity_id=self.turn_order[0])
+        if self.turn_order and self.event_bus:
+            self.event_bus.publish('turn_started', round_number=self.round_number, entity_id=self.turn_order[0])
 
     def get_turn_order(self) -> List[str]:
         """
@@ -237,13 +263,13 @@ class TurnOrderSystem:
             2
         """
         current_entity_id = self.current_entity()
-        if getattr(self.game_state, 'event_bus', None) and current_entity_id is not None:
-            self.game_state.event_bus.publish('turn_ended', round_number=self.round_number, entity_id=current_entity_id)
+        if self.event_bus and current_entity_id is not None:
+            self.event_bus.publish('turn_ended', round_number=self.round_number, entity_id=current_entity_id)
         self.turn_index += 1
         if self.turn_index >= len(self.turn_order):
             self.start_new_round()
         # Publish new turn started
         new_entity = self.current_entity()
-        if getattr(self.game_state, 'event_bus', None) and new_entity is not None:
-            self.game_state.event_bus.publish('turn_started', round_number=self.round_number, entity_id=new_entity)
+        if self.event_bus and new_entity is not None:
+            self.event_bus.publish('turn_started', round_number=self.round_number, entity_id=new_entity)
         return new_entity

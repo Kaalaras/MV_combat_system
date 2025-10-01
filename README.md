@@ -11,6 +11,8 @@ Modernized Python combat / condition engine with support for:
 ```bash
 # Run fast unit test suite (avoid tests.manual or long-running aggregation)
 python -m pytest tests/unit -q
+# Run the full automated test suite (integration + unit)
+pytest
 ```
 Note (Windows / DataSpell): avoid using shell command chaining with `&&` inside the IDE terminal.
 
