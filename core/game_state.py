@@ -4,6 +4,7 @@ from typing import Dict, List, Any, Optional
 
 from ecs.components.entity_id import EntityIdComponent
 from ecs.components.initiative import InitiativeComponent
+from ecs.components.team import TeamComponent
 
 
 # (Assuming EventBus and MovementSystem types are imported or defined elsewhere)
@@ -383,6 +384,16 @@ class GameState:
         Returns:
             None
         """
+        if self.ecs_manager:
+            teams: Dict[str, List[str]] = {}
+            for entity_id, team_component in self.ecs_manager.iter_with_id(TeamComponent):
+                team_id = getattr(team_component, "team_id", None)
+                if team_id in (None, ""):
+                    continue
+                teams.setdefault(str(team_id), []).append(entity_id)
+            self.teams = teams
+            return
+
         teams: Dict[str, List[str]] = {}
         for eid, comps in self.entities.items():
             cref = comps.get("character_ref")

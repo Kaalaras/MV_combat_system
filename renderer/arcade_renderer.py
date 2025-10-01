@@ -2,29 +2,18 @@
 
 from __future__ import annotations
 
-from typing import Dict, Iterator, Optional, Set, Tuple, TYPE_CHECKING, Union
+from typing import Dict, Iterator, Optional, Tuple, TYPE_CHECKING
 
 import arcade
 
 from core.game_state import GameState
 from ecs.components.character_ref import CharacterRefComponent
 from ecs.components.position import PositionComponent
+from ecs.components.team import TeamComponent
 
 if TYPE_CHECKING:  # pragma: no cover - imported for typing only
     from core.terrain_manager import Terrain
     from ecs.ecs_manager import ECSManager
-
-
-class _LegacyPosition:
-    """Lightweight shim providing ``PositionComponent``-like attributes."""
-
-    __slots__ = ("x", "y", "width", "height")
-
-    def __init__(self, x: int, y: int, width: int = 1, height: int = 1) -> None:
-        self.x = x
-        self.y = y
-        self.width = width
-        self.height = height
 
 
 class ArcadeRenderer:
@@ -38,6 +27,8 @@ class ArcadeRenderer:
     ) -> None:
         self._game_state = game_state
         self._ecs_manager = ecs_manager or getattr(game_state, "ecs_manager", None)
+        if self._ecs_manager is None:
+            raise ValueError("ArcadeRenderer requires an ECS manager instance.")
 
     def draw(self) -> None:
         """Render the current terrain, walls, and entities."""
@@ -103,25 +94,23 @@ class ArcadeRenderer:
             )
 
     def _resolve_entity_team(self, entity_id: str) -> Optional[str]:
-        if self._ecs_manager:
-            internal_id = self._ecs_manager.resolve_entity(entity_id)
-            if internal_id is not None:
-                char_ref = self._ecs_manager.try_get_component(
-                    internal_id, CharacterRefComponent
-                )
-                character = getattr(char_ref, "character", None) if char_ref else None
-                team = getattr(character, "team", None) if character else None
-                if team is not None:
-                    return str(team)
+        internal_id = self._ecs_manager.resolve_entity(entity_id)
+        if internal_id is None:
+            return None
 
-        components = self._game_state.entities.get(entity_id, {})
-        char_ref = components.get("character_ref")
+        team_component = self._ecs_manager.try_get_component(internal_id, TeamComponent)
+        team_id = getattr(team_component, "team_id", None) if team_component else None
+        if team_id is not None:
+            return str(team_id)
+
+        char_ref = self._ecs_manager.try_get_component(internal_id, CharacterRefComponent)
         character = getattr(char_ref, "character", None) if char_ref else None
-        return getattr(character, "team", None) if character else None
+        team = getattr(character, "team", None) if character else None
+        return None if team is None else str(team)
 
     def _iter_render_snapshots(
         self,
-    ) -> Iterator[Tuple[str, Union["PositionComponent", _LegacyPosition], Optional[str]]]:
+    ) -> Iterator[Tuple[str, "PositionComponent", Optional[str]]]:
         terrain = self._game_state.terrain
         if terrain is None:
             return iter(())
@@ -131,26 +120,14 @@ class ArcadeRenderer:
     def _iter_render_snapshots_for_terrain(
         self,
         terrain: "Terrain",
-    ) -> Iterator[Tuple[str, Union["PositionComponent", _LegacyPosition], Optional[str]]]:
-        yielded: Set[str] = set()
+    ) -> Iterator[Tuple[str, "PositionComponent", Optional[str]]]:
         team_cache: Dict[str, Optional[str]] = {}
 
-        if self._ecs_manager is not None:
-            for entity_id, position in self._ecs_manager.iter_with_id(PositionComponent):
-                if position is None:
-                    continue
-                team_id = self._get_cached_team_id(entity_id, team_cache)
-                yielded.add(entity_id)
-                yield entity_id, position, team_id
-
-        for entity_id in self._game_state.entities:
-            if entity_id in yielded:
-                continue
-            pos = terrain.get_entity_position(entity_id)
-            if not pos:
+        for entity_id, position in self._ecs_manager.iter_with_id(PositionComponent):
+            if position is None:
                 continue
             team_id = self._get_cached_team_id(entity_id, team_cache)
-            yield entity_id, _LegacyPosition(pos[0], pos[1]), team_id
+            yield entity_id, position, team_id
 
     def _team_color(self, team_id: Optional[str]) -> arcade.Color:
         if team_id == "coterie":
@@ -170,7 +147,7 @@ class ArcadeRenderer:
 
     @staticmethod
     def _dimension_with_fallback(
-        position: Union["PositionComponent", _LegacyPosition], attr_name: str
+        position: "PositionComponent", attr_name: str
     ) -> int:
         raw_value = getattr(position, attr_name, 1)
         if raw_value in (None, 0):
@@ -182,7 +159,7 @@ class ArcadeRenderer:
 
     @staticmethod
     def _position_coord(
-        position: Union["PositionComponent", _LegacyPosition], attr_name: str
+        position: "PositionComponent", attr_name: str
     ) -> float:
         raw_value = getattr(position, attr_name, 0)
         if raw_value is None:

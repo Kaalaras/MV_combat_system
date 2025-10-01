@@ -22,6 +22,7 @@ from ecs.components.health import HealthComponent
 from ecs.components.willpower import WillpowerComponent
 from ecs.components.velocity import VelocityComponent
 from ecs.components.facing import FacingComponent
+from ecs.components.team import TeamComponent
 from core.game_state import GameState
 from core.preparation_manager import PreparationManager
 from core.game_system import GameSystem
@@ -95,7 +96,8 @@ def _create_entity_components(character: Character, spec: EntitySpec) -> Dict[st
         "character_ref": char_ref,
         "velocity": velocity,
         "position": position,
-        "facing": facing
+        "facing": facing,
+        "team": TeamComponent(spec.team),
     }
 
 

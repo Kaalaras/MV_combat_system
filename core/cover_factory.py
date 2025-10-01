@@ -4,6 +4,7 @@ from typing import Optional
 from ecs.components.position import PositionComponent
 from ecs.components.cover import CoverComponent
 from ecs.components.structure import StructureComponent
+from ecs.components.team import TeamComponent
 import itertools
 
 # Simple incremental id generator for unnamed covers
@@ -32,7 +33,8 @@ def spawn_cover(game_state, cover_type: str, x: int, y: int, cover_id: Optional[
         'cover': cover_comp,
         'structure': structure,
         # Conditions list to reflect 'decor' immobilized, armored, etc.
-        'conditions': set(['decor'])
+        'conditions': set(['decor']),
+        'team': TeamComponent(None),
     }
     game_state.add_entity(cover_id, components)
     # Occupy terrain tile (blocks movement & LoS rays like other entities)
