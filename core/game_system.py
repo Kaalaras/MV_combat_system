@@ -305,9 +305,10 @@ class GameSystem:
                         "This may indicate that the entity was not properly initialized, "
                         "was removed from the ECS, or there is a bug in the component management system."
                     )
-                char = snapshot.character
-                if not char or getattr(char, "is_dead", False):
+                if not snapshot.is_alive:
                     continue
+
+                char = snapshot.character
 
                 print(f"\n-- {char.name}'s turn (ID: {entity_id}) --")
                 if self.event_bus:
@@ -364,8 +365,10 @@ class GameSystem:
 
             # Draw the battle map if enabled
             if self.enable_map_drawing and self.map_dir:
-                teamA_ids = list(team_state.get("A").member_ids) if team_state.get("A") else []
-                teamB_ids = list(team_state.get("B").member_ids) if team_state.get("B") else []
+                team_a = team_state.get("A")
+                team_b = team_state.get("B")
+                teamA_ids = list(team_a.member_ids) if team_a else []
+                teamB_ids = list(team_b.member_ids) if team_b else []
                 draw_battle_map(
                     self.game_state,
                     self.game_state.terrain,

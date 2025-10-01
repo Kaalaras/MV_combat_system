@@ -33,10 +33,9 @@ Example:
     # Process all systems
     ecs_manager.process(dt=0.016)
 """
+from collections import defaultdict
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Dict, Iterable, Iterator, List, Optional, Tuple, Type
-
-from collections import defaultdict
 
 try:  # pragma: no cover - import guard for environments without esper
     import esper  # type: ignore
