@@ -489,6 +489,14 @@ class GameState:
                 component.add(steps)
 
     def get_movement_used(self, entity_id: str) -> int:
+        if self.ecs_manager:
+            internal_id = self._ecs_entities.get(entity_id)
+            if internal_id is None:
+                internal_id = self.ecs_manager.resolve_entity(entity_id)
+            if internal_id is not None:
+                component = self.ecs_manager.try_get_component(internal_id, MovementUsageComponent)
+                if component is not None:
+                    return int(getattr(component, "distance", 0))
         return self.movement_turn_usage.get(entity_id, {}).get("distance", 0)
 
     # Version bump helpers for LOS / cover caching

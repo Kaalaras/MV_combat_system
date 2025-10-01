@@ -5,11 +5,12 @@ import heapq
 from itertools import product
 
 from ecs.components.character_ref import CharacterRefComponent
+from ecs.components.cover import CoverComponent
 from ecs.components.equipment import EquipmentComponent
 from ecs.components.movement_usage import MovementUsageComponent
 from ecs.components.position import PositionComponent
 from ecs.ecs_manager import ECSManager
-from ecs.systems.ai.utils import get_occupied_static
+from ecs.helpers.occupancy import collect_blocked_tiles
 from core.terrain_manager import EFFECT_IMPASSABLE_VOID
 
 
@@ -257,7 +258,12 @@ class MovementSystem:
                 sources.append(eid)
         return sources
 
-    def _trigger_opportunity_attacks(self, mover_id: str, previous_adjacent: List[str]):
+    def _trigger_opportunity_attacks(
+        self,
+        mover_id: str,
+        previous_adjacent: List[str],
+        future_position: PositionComponent | None = None,
+    ) -> None:
         """Given list of entities that were adjacent before movement, trigger AoO for each
         that is no longer adjacent after movement. Publishes 'opportunity_attack_triggered'.
         Only basic event emission; actual attack resolution (if any) handled elsewhere.
@@ -272,14 +278,22 @@ class MovementSystem:
             attacker_position = self._get_component(attacker_id, PositionComponent)
             if attacker_position is None:
                 continue
-            if self._are_positions_adjacent(mover_position, attacker_position):
+            if future_position is not None:
+                if self._are_positions_adjacent(future_position, attacker_position):
+                    continue
+            elif self._are_positions_adjacent(mover_position, attacker_position):
                 continue
             char_ref = self._get_component(attacker_id, CharacterRefComponent)
             character = getattr(char_ref, "character", None) if char_ref else None
             if not character or not getattr(character, "toggle_opportunity_attack", False):
                 continue
             if bus:
-                bus.publish('opportunity_attack_triggered', attacker_id=attacker_id, target_id=mover_id, origin_adjacent=True)
+                bus.publish(
+                    'opportunity_attack_triggered',
+                    attacker_id=attacker_id,
+                    target_id=mover_id,
+                    origin_adjacent=True,
+                )
     # ---------------------------------------------------------------------------------
 
     def get_reachable_tiles(self, entity_id: str, max_distance: int, reserved_tiles: Set[Tuple[int, int]] = None) -> List[Tuple[int, int, int]]:
@@ -290,14 +304,15 @@ class MovementSystem:
         start_pos = (pos_comp.x, pos_comp.y)
         entity_width = getattr(pos_comp, 'width', 1)
         entity_height = getattr(pos_comp, 'height', 1)
-        terrain = self.game_state.terrain
+        terrain = getattr(self.game_state, "terrain", None)
+        if terrain is None:
+            return []
         reserved = reserved_tiles or set()
-        static_occ = get_occupied_static(self.game_state)
-        width = getattr(pos_comp, 'width', 1)
-        height = getattr(pos_comp, 'height', 1)
-        start_x, start_y = pos_comp.x, pos_comp.y
-        for dx, dy in product(range(width), range(height)):
-            static_occ.discard((start_x + dx, start_y + dy))
+        static_occ = collect_blocked_tiles(
+            self.ecs_manager,
+            ignore_entities={entity_id},
+            terrain=terrain,
+        )
         blocked = reserved.union(static_occ)
         # Dijkstra
         heap: List[Tuple[int, Tuple[int,int]]] = [(0, start_pos)]
@@ -337,12 +352,16 @@ class MovementSystem:
         start = (pos_comp.x, pos_comp.y)
         if start == dest:
             return [start]
-        terrain = self.game_state.terrain
+        terrain = getattr(self.game_state, "terrain", None)
+        if terrain is None:
+            return []
         entity_width = getattr(pos_comp,'width',1)
         entity_height = getattr(pos_comp,'height',1)
-        static_occ = get_occupied_static(self.game_state)
-        for dx,dy in product(range(entity_width), range(entity_height)):
-            static_occ.discard((start[0]+dx, start[1]+dy))
+        static_occ = collect_blocked_tiles(
+            self.ecs_manager,
+            ignore_entities={entity_id},
+            terrain=terrain,
+        )
         heap: List[Tuple[int,Tuple[int,int]]] = [(0,start)]
         best: Dict[Tuple[int,int], int] = {start:0}
         parent: Dict[Tuple[int,int], Tuple[int,int]] = {}
@@ -395,9 +414,10 @@ class MovementSystem:
         """
         if pathfind:
             return self.path_move(entity_id, dest, max_steps=max_steps, provoke_aoo=provoke_aoo)
-        entity = self.game_state.get_entity(entity_id) if self.game_state else None
         pos_comp = self._get_component(entity_id, PositionComponent)
-        if not entity or pos_comp is None:
+        if pos_comp is None:
+            return False
+        if self.game_state and not self.game_state.get_entity(entity_id):
             return False
         pre_adjacent = self._collect_adjacent_opportunity_sources(entity_id) if provoke_aoo else []
         width = getattr(pos_comp,'width',1); height = getattr(pos_comp,'height',1)
@@ -406,7 +426,9 @@ class MovementSystem:
         distance = abs(dest_x - cur_x) + abs(dest_y - cur_y)
         if max_steps is not None and distance > max_steps:
             return False
-        terrain = self.game_state.terrain
+        terrain = getattr(self.game_state, 'terrain', None)
+        if terrain is None:
+            return False
         void_tile = False
         if hasattr(terrain, 'has_effect'):
             hf = getattr(terrain, 'has_effect')
@@ -436,31 +458,28 @@ class MovementSystem:
             return True
         if not terrain.is_walkable(dest_x, dest_y, width, height) and not void_tile:
             return False
-        # Fire AoO events BEFORE moving: any pre-adjacent attacker for which destination is NOT adjacent
-        if pre_adjacent and provoke_aoo:
-            bus = self.event_bus
-            if bus:
-                for attacker_id in pre_adjacent:
-                    attacker_pos = self._get_component(attacker_id, PositionComponent)
-                    if attacker_pos is None:
-                        continue
-                    # If attacker will still be adjacent to destination, no opportunity attack
-                    hypothetical_position = PositionComponent(dest_x, dest_y, width=width, height=height)
-                    if self._are_positions_adjacent(attacker_pos, hypothetical_position):
-                        continue
-                    char_ref = self._get_component(attacker_id, CharacterRefComponent)
-                    char = getattr(char_ref, 'character', None) if char_ref else None
-                    if not char or not getattr(char, 'toggle_opportunity_attack', False):
-                        continue
-                    bus.publish('opportunity_attack_triggered', attacker_id=attacker_id, target_id=entity_id, origin_adjacent=True)
-        # Perform move AFTER AoO resolution
-        pos_comp.x, pos_comp.y = dest_x, dest_y
+        future_position = PositionComponent(dest_x, dest_y, width=width, height=height)
+        if provoke_aoo:
+            self._trigger_opportunity_attacks(
+                entity_id,
+                pre_adjacent,
+                future_position=future_position,
+            )
+        # Perform move and update terrain occupancy
         if hasattr(terrain, 'move_entity'):
-            if not terrain.move_entity(entity_id, dest_x, dest_y):
+            move_result = terrain.move_entity(entity_id, dest_x, dest_y)
+            if move_result is not True:
                 return False
+            pos_comp.x, pos_comp.y = dest_x, dest_y
+        else:
+            pos_comp.x, pos_comp.y = dest_x, dest_y
         self._record_movement_usage(entity_id, distance)
-        if hasattr(self.game_state, 'bump_blocker_version') and (('character_ref' in entity) or ('cover' in entity)):
-            self.game_state.bump_blocker_version()
+        bump_blocker = getattr(self.game_state, 'bump_blocker_version', None)
+        if callable(bump_blocker):
+            has_char_ref = self._get_component(entity_id, CharacterRefComponent) is not None
+            has_cover = self._get_component(entity_id, CoverComponent) is not None
+            if has_char_ref or has_cover:
+                bump_blocker()
         if void_tile and hasattr(self.game_state, 'kill_entity'):
             self.game_state.kill_entity(entity_id, cause='void')
         return True
@@ -470,9 +489,10 @@ class MovementSystem:
         Enhanced: triggers opportunity attacks stepwise upon leaving adjacency of any enemy
         that had adjacency at the beginning of a step.
         """
-        entity = self.game_state.get_entity(entity_id) if self.game_state else None
         pos_comp = self._get_component(entity_id, PositionComponent)
-        if not entity or pos_comp is None:
+        if pos_comp is None:
+            return False
+        if self.game_state and not self.game_state.get_entity(entity_id):
             return False
         start = (pos_comp.x, pos_comp.y)
         if start == dest:
@@ -480,7 +500,9 @@ class MovementSystem:
         path = self.find_path(entity_id, dest, max_distance=max_steps if max_steps is not None else None)
         if not path:
             return False
-        terrain = self.game_state.terrain
+        terrain = getattr(self.game_state, 'terrain', None)
+        if terrain is None:
+            return False
         if hasattr(terrain,'forbid_landing'):
             fl = getattr(terrain,'forbid_landing')
             if callable(fl):
@@ -504,30 +526,34 @@ class MovementSystem:
             total_cost += step_cost
             if max_steps is not None and total_cost>max_steps:
                 return False
+        entity_width = getattr(pos_comp, 'width', 1)
+        entity_height = getattr(pos_comp, 'height', 1)
         for (x,y) in path[1:]:
             pre_adjacent = self._collect_adjacent_opportunity_sources(entity_id) if provoke_aoo else []
-            if pre_adjacent and provoke_aoo:
-                bus = self.event_bus or (getattr(self.game_state, 'event_bus', None) if self.game_state else None)
-                if bus:
-                    next_position = PositionComponent(x, y, width=getattr(pos_comp, 'width', 1), height=getattr(pos_comp, 'height', 1))
-                    for attacker_id in pre_adjacent:
-                        attacker_pos = self._get_component(attacker_id, PositionComponent)
-                        if attacker_pos is None:
-                            continue
-                        if self._are_positions_adjacent(attacker_pos, next_position):
-                            continue
-                        char_ref = self._get_component(attacker_id, CharacterRefComponent)
-                        char = getattr(char_ref, 'character', None) if char_ref else None
-                        if not char or not getattr(char, 'toggle_opportunity_attack', False):
-                            continue
-                        bus.publish('opportunity_attack_triggered', attacker_id=attacker_id, target_id=entity_id, origin_adjacent=True)
-            if not terrain.move_entity(entity_id, x, y):
-                return False
+            future_position = PositionComponent(
+                x,
+                y,
+                width=entity_width,
+                height=entity_height,
+            )
+            if provoke_aoo:
+                self._trigger_opportunity_attacks(
+                    entity_id,
+                    pre_adjacent,
+                    future_position=future_position,
+                )
+            if hasattr(terrain, 'move_entity'):
+                if not terrain.move_entity(entity_id, x, y):
+                    return False
             pos_comp.x, pos_comp.y = x, y
             step_distance = terrain.get_movement_cost(x,y) if hasattr(terrain,'get_movement_cost') else 1
             self._record_movement_usage(entity_id, step_distance)
-            if hasattr(self.game_state, 'bump_blocker_version') and (('character_ref' in entity) or ('cover' in entity)):
-                self.game_state.bump_blocker_version()
+            bump_blocker = getattr(self.game_state, 'bump_blocker_version', None)
+            if callable(bump_blocker):
+                has_char_ref = self._get_component(entity_id, CharacterRefComponent) is not None
+                has_cover = self._get_component(entity_id, CoverComponent) is not None
+                if has_char_ref or has_cover:
+                    bump_blocker()
         if void_tile and hasattr(self.game_state,'kill_entity'):
             self.game_state.kill_entity(entity_id, cause='void')
         return True
