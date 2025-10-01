@@ -9,7 +9,7 @@ import os
 import datetime
 from math import ceil
 
-from entities.default_entities.characters import DefautHuman, Character
+from entities.default_entities.characters import DefaultHuman, Character
 from entities.default_entities.armors import Clothes
 from entities.default_entities.weapons import Fists, LightPistol, Club
 from core.terrain_manager import Terrain
@@ -139,7 +139,7 @@ def _deprecated_initialize_game(entity_specs, grid_size, max_rounds=200, map_dir
     # --- Entity Creation ---
     all_ids = []
     for idx, spec in enumerate(entity_specs):
-        char = DefautHuman()
+        char = DefaultHuman()
         char.set_team(spec.team)
         char.is_ai_controlled = True
         char.ai_script = "basic"
@@ -312,7 +312,7 @@ def initialize_game(*, entity_specs: List[EntitySpec], grid_size: int, max_round
     game_state.set_terrain_effect_system(terrain_effect_system)
     all_ids = []
     for idx, spec in enumerate(entity_specs):
-        char = DefautHuman(); char.set_team(spec.team); char.is_ai_controlled = True; char.ai_script = "basic"; char.hunger = 0
+        char = DefaultHuman(); char.set_team(spec.team); char.is_ai_controlled = True; char.ai_script = "basic"; char.hunger = 0
         entity_id = f"{spec.team}_{idx}"
         components = _create_entity_components(char, spec)
         game_state.add_entity(entity_id, components)

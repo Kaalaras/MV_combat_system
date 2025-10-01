@@ -9,7 +9,7 @@ import os
 import datetime
 from math import ceil
 
-from entities.default_entities.characters import DefautHuman, Character
+from entities.default_entities.characters import DefaultHuman, Character
 from entities.default_entities.armors import Clothes
 from entities.default_entities.weapons import Fists, LightPistol, Club
 from core.terrain_manager import Terrain
@@ -121,7 +121,7 @@ def initialize_game(
     # --- Entity Creation ---
     all_ids = []
     for idx, spec in enumerate(entity_specs):
-        char = DefautHuman()
+        char = DefaultHuman()
         char.set_team(spec.team)
         char.is_ai_controlled = True
         char.ai_script = "basic"
