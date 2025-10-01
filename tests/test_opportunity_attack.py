@@ -9,6 +9,7 @@ from ecs.ecs_manager import ECSManager
 from ecs.components.position import PositionComponent
 from ecs.components.character_ref import CharacterRefComponent
 from ecs.components.equipment import EquipmentComponent
+from tests.helpers.ecs import add_entity_with_position
 
 class Terrain:
     def __init__(self,w=20,h=20):
@@ -85,18 +86,20 @@ class TestOpportunityAttack(unittest.TestCase):
         equip_att_component = EquipmentComponent()
         equip_att_component.weapons['TestSword'] = MeleeWeaponStub()
         equip_mov_component = EquipmentComponent()
-        self.gs.add_entity(
+        add_entity_with_position(
+            self.gs,
             self.att_id,
-            {
-                "position": PositionComponent(5,5),
+            position=PositionComponent(5, 5),
+            extra_components={
                 "character_ref": CharacterRefComponent(a_char),
                 "equipment": equip_att_component,
             },
         )
-        self.gs.add_entity(
+        add_entity_with_position(
+            self.gs,
             self.mov_id,
-            {
-                "position": PositionComponent(5,6),
+            position=PositionComponent(5, 6),
+            extra_components={
                 "character_ref": CharacterRefComponent(b_char),
                 "equipment": equip_mov_component,
             },

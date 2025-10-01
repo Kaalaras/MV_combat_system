@@ -4,8 +4,9 @@ from core.event_bus import EventBus
 from core.game_state import GameState
 from core.terrain_manager import Terrain
 from core.movement_system import MovementSystem
-from ecs.components.position import PositionComponent
 from ecs.ecs_manager import ECSManager
+from ecs.components.position import PositionComponent
+from tests.helpers.ecs import add_entity_with_position
 
 class TestMovementIntegration(unittest.TestCase):
     def setUp(self):
@@ -23,21 +24,27 @@ class TestMovementIntegration(unittest.TestCase):
 
     def test_move_1x1_entity_success(self):
         entity_id = "player"
-        entity_data = {"position": PositionComponent(x=0, y=0)}
-        self.game_state.add_entity(entity_id, entity_data)
-        self.terrain.add_entity(entity_id, 0, 0)
+        components = add_entity_with_position(
+            self.game_state,
+            entity_id,
+            position=PositionComponent(x=0, y=0),
+            terrain=self.terrain,
+        )
 
         result = self.movement_system.move(entity_id, (1, 1))
 
         self.assertTrue(result)
         self.assertEqual(self.terrain.get_entity_position(entity_id), (1, 1))
-        self.assertEqual(entity_data["position"].x, 1)
+        self.assertEqual(components["position"].x, 1)
 
     def test_move_2x2_entity_fail_wall(self):
         entity_id = "golem"
-        entity_data = {"position": PositionComponent(x=0, y=0, width=2, height=2)}
-        self.game_state.add_entity(entity_id, entity_data)
-        self.terrain.add_entity(entity_id, 0, 0)
+        add_entity_with_position(
+            self.game_state,
+            entity_id,
+            position=PositionComponent(x=0, y=0, width=2, height=2),
+            terrain=self.terrain,
+        )
         self.terrain.add_wall(1, 1) # Wall that blocks the 2x2 footprint
 
         result = self.movement_system.move(entity_id, (0, 0))
@@ -50,15 +57,21 @@ class TestMovementIntegration(unittest.TestCase):
     def test_get_reachable_tiles_with_entities_and_walls(self):
         # Player at (0,0)
         player_id = "player"
-        player_data = {"position": PositionComponent(x=0, y=0)}
-        self.game_state.add_entity(player_id, player_data)
-        self.terrain.add_entity(player_id, 0, 0)
+        add_entity_with_position(
+            self.game_state,
+            player_id,
+            position=PositionComponent(x=0, y=0),
+            terrain=self.terrain,
+        )
 
         # Enemy at (2,0)
         enemy_id = "enemy"
-        enemy_data = {"position": PositionComponent(x=2, y=0)}
-        self.game_state.add_entity(enemy_id, enemy_data)
-        self.terrain.add_entity(enemy_id, 2, 0)
+        add_entity_with_position(
+            self.game_state,
+            enemy_id,
+            position=PositionComponent(x=2, y=0),
+            terrain=self.terrain,
+        )
 
         # Wall at (1,1)
         self.terrain.add_wall(1, 1)
