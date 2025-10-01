@@ -22,7 +22,7 @@ Example:
     game_state.add_entity("enemy1", {"character_ref": EnemyCharacter(...)})
 
     # Initialize the turn order system
-    turn_system = TurnOrderSystem(game_state)
+    turn_system = TurnOrderSystem(game_state, ecs_manager)
 
     # Get the current active entity
     active_entity_id = turn_system.current_entity()
@@ -37,7 +37,9 @@ Example:
     turn_system.delay_current_entity()
 """
 import random
-from typing import List, Dict, Optional, Any
+from typing import List, Dict, Any, Tuple, Optional
+
+from ecs.components.character_ref import CharacterRefComponent
 
 
 class TurnOrderSystem:
@@ -55,14 +57,18 @@ class TurnOrderSystem:
         tie_breakers (Dict[str, int]): Random numbers used to break initiative ties
     """
 
-    def __init__(self, game_state: Any):
+    def __init__(self, game_state: Any, ecs_manager: Any):
         """
         Initialize the TurnOrderSystem.
 
         Args:
             game_state: The central game state containing all entities
+            ecs_manager: The ECS manager required for turn order operations
         """
+        if ecs_manager is None:
+            raise ValueError("TurnOrderSystem requires an ECS manager during initialization.")
         self.game_state = game_state
+        self.ecs_manager = ecs_manager
         self.turn_order: List[str] = []
         self.turn_index: int = 0
         self.round_number: int = 0
@@ -87,7 +93,7 @@ class TurnOrderSystem:
             self.tie_breakers[entity_id] = random.randint(0, int(1e9))
         return self.tie_breakers[entity_id]
 
-    def calculate_initiative(self, entity: Dict[str, Any]) -> int:
+    def calculate_initiative(self, char_ref: CharacterRefComponent) -> int:
         """
         Calculate an initiative value for an entity based on its traits.
 
@@ -95,7 +101,7 @@ class TurnOrderSystem:
         plus the Wits attribute.
 
         Args:
-            entity (Dict[str, Any]): The entity object containing character traits
+            char_ref: The character reference component providing trait access
 
         Returns:
             int: The calculated initiative value
@@ -105,7 +111,14 @@ class TurnOrderSystem:
             > turn_system.calculate_initiative(entity)
             7
         """
-        traits = entity["character_ref"].character.traits
+        character = char_ref.character
+        if not hasattr(character, "traits"):
+            raise ValueError(
+                "Character {} is missing required 'traits' attribute.".format(
+                    getattr(character, "name", "<unnamed character>")
+                )
+            )
+        traits = character.traits
         virtues = traits.get("Virtues", {})
         attributes = traits.get("Attributes", {}).get("Mental", {})
         return max(virtues.get("Self-Control", 0), virtues.get("Instinct", 0)) + attributes.get("Wits", 0)
@@ -125,18 +138,24 @@ class TurnOrderSystem:
         """
         self.round_number += 1
         self.reserved_tiles.clear()
-        self.turn_order = [
-            eid for eid, ent in self.game_state.entities.items()
-            if "character_ref" in ent and not ent["character_ref"].character.is_dead
+
+        if not self.ecs_manager:
+            raise RuntimeError("TurnOrderSystem requires an ECS manager before starting a round.")
+
+        live_entities: List[Tuple[str, CharacterRefComponent]] = [
+            (entity_id, char_ref)
+            for entity_id, char_ref in self.ecs_manager.iter_with_id(CharacterRefComponent)
+            if not getattr(char_ref.character, "is_dead", False)
         ]
-        # Sort by initiative desc, tie-breaker desc
-        self.turn_order.sort(
-            key=lambda eid: (
-                self.calculate_initiative(self.game_state.get_entity(eid)),
-                self.get_or_create_tie_breaker(eid)
+
+        live_entities.sort(
+            key=lambda item: (
+                self.calculate_initiative(item[1]),
+                self.get_or_create_tie_breaker(item[0])
             ),
-            reverse=True
+            reverse=True,
         )
+        self.turn_order = [entity_id for entity_id, _ in live_entities]
         self.turn_index = 0
         # Publish round started event
         if getattr(self.game_state, 'event_bus', None):

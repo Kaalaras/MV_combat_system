@@ -1,10 +1,16 @@
 # core/game_state.py
+import logging
 from typing import Dict, List, Any, Optional
+
+from ecs.components.entity_id import EntityIdComponent
 
 
 # (Assuming EventBus and MovementSystem types are imported or defined elsewhere)
 # from core.event_bus import EventBus # Example
 # from core.movement_system import MovementSystem # Example
+
+logger = logging.getLogger(__name__)
+
 
 class GameState:
     """
@@ -23,8 +29,11 @@ class GameState:
     Example usage:
 
     ```python
-    # Create game state
-    game_state = GameState()
+    from ecs.ecs_manager import ECSManager
+
+    # Create game state (optionally provide an ECS manager for mirroring)
+    ecs_manager = ECSManager()
+    game_state = GameState(ecs_manager=ecs_manager)
 
     # Initialize systems and set references
     terrain = TerrainGrid(100, 100)
@@ -50,7 +59,7 @@ class GameState:
     ```
     """
 
-    def __init__(self):
+    def __init__(self, ecs_manager: Optional[Any] = None):
         """
         Initialize an empty game state with no entities or system references.
         """
@@ -66,6 +75,10 @@ class GameState:
         self.terrain_version = 0  # increments on wall add/remove
         self.blocker_version = 0  # increments on blocking entity move / cover changes
         self.vision_system: Optional[Any] = None  # Optional: VisionSystem auto-wired on set_terrain
+        self.ecs_manager: Optional[Any] = ecs_manager
+        self._ecs_entities: Dict[str, int] = {}
+        self._movement_event_registered = False
+        self._movement_subscription_bus: Optional[Any] = None
         # Add other global state or system references as needed
         # e.g., self.action_system_ref for quick access if needed by some non-ECS logic
 
@@ -99,6 +112,21 @@ class GameState:
 
         # Add the entity and its components to the dictionary
         self.entities[entity_id] = components
+
+        if self.ecs_manager:
+            try:
+                internal_id = self._mirror_entity(entity_id, components)
+                self._ecs_entities[entity_id] = internal_id
+            except (TypeError, ValueError) as exc:
+                # Ensure partial failures do not leave stale references
+                self.entities.pop(entity_id, None)
+                self._cleanup_partial_ecs_entity(entity_id)
+                logger.error(
+                    "Failed to create ECS entity for %s: %s",
+                    entity_id,
+                    exc,
+                )
+                raise
 
     def get_entity(self, entity_id: str) -> Optional[Dict[str, Any]]:
         """
@@ -141,6 +169,18 @@ class GameState:
         """
         if entity_id in self.entities:
             del self.entities[entity_id]
+        internal_id = self._ecs_entities.pop(entity_id, None)
+        if self.ecs_manager and internal_id is not None:
+            try:
+                self.ecs_manager.delete_entity(internal_id)
+            except KeyError as exc:
+                logger.warning(
+                    "Failed to delete ECS entity %s for %s: %s",
+                    internal_id,
+                    entity_id,
+                    exc,
+                )
+                raise
         # If the entity had a mapped position in a terrain grid, update that too if needed
 
     def get_component(self, entity_id: str, component_name: str) -> Optional[Any]:
@@ -237,7 +277,31 @@ class GameState:
             # game_systems.combat.handle_combat(entity1, entity2, game_state.event_bus)
             ```
         """
+        previous_bus = self._movement_subscription_bus if self._movement_event_registered else None
+        if previous_bus and previous_bus is not event_bus and hasattr(previous_bus, "unsubscribe"):
+            try:
+                previous_bus.unsubscribe(
+                    "movement_reset_requested",
+                    self._handle_movement_reset_requested,
+                )
+            except (AttributeError, KeyError, ValueError) as exc:  # pragma: no cover - defensive cleanup
+                logger.warning(
+                    "Failed to unsubscribe movement reset handler from previous bus: %s",
+                    exc,
+                )
+        if previous_bus and previous_bus is not event_bus:
+            self._movement_event_registered = False
+            self._movement_subscription_bus = None
+
         self.event_bus = event_bus
+
+        if self.event_bus and not self._movement_event_registered:
+            self.event_bus.subscribe(
+                "movement_reset_requested",
+                self._handle_movement_reset_requested,
+            )
+            self._movement_subscription_bus = self.event_bus
+            self._movement_event_registered = True
 
     def set_movement_system(self, movement_system: Any) -> None:
         """
@@ -261,6 +325,27 @@ class GameState:
             ```
         """
         self.movement = movement_system
+
+    def set_ecs_manager(self, ecs_manager: Any) -> None:
+        """Attach an ``ecs_manager`` and mirror existing entities into the ECS world."""
+
+        if ecs_manager is self.ecs_manager:
+            return
+        self.ecs_manager = ecs_manager
+        self._ecs_entities.clear()
+        if not self.ecs_manager:
+            return
+        for entity_id, components in self.entities.items():
+            try:
+                internal_id = self._mirror_entity(entity_id, components)
+            except (TypeError, ValueError) as exc:
+                logger.warning(
+                    "Failed to mirror entity %s into ECS: %s",
+                    entity_id,
+                    exc,
+                )
+                continue
+            self._ecs_entities[entity_id] = internal_id
 
     def set_condition_system(self, condition_system: Any) -> None:
         """
@@ -327,6 +412,11 @@ class GameState:
         return 1, 1  # Default size if entity doesn't exist or has no position
 
     # Movement tracking --------------------------------------------------
+    def _handle_movement_reset_requested(self, entity_id: str, **_: Any) -> None:
+        """Event callback to reset an entity's tracked movement usage."""
+
+        self.reset_movement_usage(entity_id)
+
     def reset_movement_usage(self, entity_id: str):
         """Reset per-turn movement tracking for an entity (called at turn start)."""
         self.movement_turn_usage[entity_id] = {"distance": 0}
@@ -345,6 +435,56 @@ class GameState:
 
     def bump_blocker_version(self):
         self.blocker_version += 1
+
+    # Internal helpers ---------------------------------------------------
+    def _mirror_entity(self, entity_id: str, components: Dict[str, Any]) -> int:
+        """Create an ECS entity mirroring ``entity_id`` and return its internal id."""
+
+        if not self.ecs_manager:
+            raise ValueError("ECS manager is not configured on GameState.")
+
+        ecs_components = [self._build_identity_component(entity_id, components)]
+        ecs_components.extend(components.values())
+        return self.ecs_manager.create_entity(*ecs_components)
+
+    def _cleanup_partial_ecs_entity(self, entity_id: str) -> None:
+        """Attempt to delete any ECS entity created for ``entity_id`` during a failed mirror."""
+
+        if not self.ecs_manager:
+            return
+
+        internal_id = self._ecs_entities.pop(entity_id, None)
+        if internal_id is None:
+            internal_id = self.ecs_manager.resolve_entity(entity_id)
+
+        if internal_id is None:
+            return
+
+        try:
+            self.ecs_manager.delete_entity(internal_id)
+        except (AttributeError, KeyError) as cleanup_exc:  # pragma: no cover - defensive logging
+            logger.error(
+                "Failed to clean up orphaned ECS entity for %s (internal id %s): %s",
+                entity_id,
+                internal_id,
+                cleanup_exc,
+            )
+        except Exception as unexpected_exc:  # pragma: no cover - truly unexpected
+            logger.exception(
+                "Unexpected error during cleanup of ECS entity for %s (internal id %s):",
+                entity_id,
+                internal_id,
+            )
+
+    def _build_identity_component(self, entity_id: str, components: Dict[str, Any]) -> EntityIdComponent:
+        """Construct an :class:`EntityIdComponent` linked to ``BaseObject`` ids when present."""
+
+        base_object_id: Optional[int] = None
+        char_ref = components.get("character_ref")
+        if char_ref is not None:
+            character = getattr(char_ref, "character", None)
+            base_object_id = getattr(character, "id", None)
+        return EntityIdComponent(entity_id, base_object_id)
 
     # Optional helpers to apply lethal/cleanup logic
     def kill_entity(self, entity_id: str, killer_id: Optional[str] = None, cause: str = 'unknown') -> bool:
