@@ -26,7 +26,13 @@ class ArcadeRenderer:
         ecs_manager: Optional["ECSManager"] = None,
     ) -> None:
         self._game_state = game_state
-        self._ecs_manager = ecs_manager or getattr(game_state, "ecs_manager", None)
+        if ecs_manager is not None:
+            self._ecs_manager = ecs_manager
+        elif hasattr(game_state, "ecs_manager"):
+            self._ecs_manager = game_state.ecs_manager  # type: ignore[attr-defined]
+        else:
+            self._ecs_manager = None
+
         if self._ecs_manager is None:
             raise ValueError("ArcadeRenderer requires an ECS manager instance.")
 
@@ -139,10 +145,11 @@ class ArcadeRenderer:
     def _get_cached_team_id(
         self, entity_id: str, team_cache: Dict[str, Optional[str]]
     ) -> Optional[str]:
-        team_id = team_cache.get(entity_id)
-        if entity_id not in team_cache:
-            team_id = self._resolve_entity_team(entity_id)
-            team_cache[entity_id] = team_id
+        if entity_id in team_cache:
+            return team_cache[entity_id]
+
+        team_id = self._resolve_entity_team(entity_id)
+        team_cache[entity_id] = team_id
         return team_id
 
     @staticmethod
