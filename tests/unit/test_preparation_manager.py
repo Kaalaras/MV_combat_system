@@ -14,7 +14,7 @@ from ecs.systems.action_system import ActionSystem
 from ecs.components.attack_pool_cache import AttackPoolCacheComponent
 from ecs.components.character_ref import CharacterRefComponent
 from ecs.components.equipment import EquipmentComponent
-from entities.default_entities.characters import DefautHuman
+from entities.default_entities.characters import DefaultHuman
 from entities.default_entities.weapons import Fists
 
 
@@ -26,7 +26,7 @@ class PreparationManagerTests(unittest.TestCase):
         self.action_system = ActionSystem(self.game_state)
         self.prep_manager.action_system = self.action_system
 
-        self.character = DefautHuman()
+        self.character = DefaultHuman()
         self.character_ref = CharacterRefComponent(self.character)
         self.equipment = EquipmentComponent()
         melee_weapon = Fists()

@@ -1,6 +1,6 @@
 from entities.character import Character
 
-class DefautHuman(Character):
+class DefaultHuman(Character):
     """Default human character with no special abilities or traits."""
     def __init__(self) -> None:
         super().__init__(

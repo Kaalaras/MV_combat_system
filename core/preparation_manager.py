@@ -170,23 +170,11 @@ class PreparationManager:
                 if character is None:
                     continue
                 equipment = components.get("equipment")
-                attack_pools, defense_pools, utility_pools = self._build_dice_pool_cache(
+                payload = self._build_dice_pool_cache(
                     character,
                     equipment,
                 )
-                cache_component = components.get("attack_pool_cache")
-                if isinstance(cache_component, AttackPoolCacheComponent):
-                    cache_component.update(
-                        weapon_pools=attack_pools,
-                        defense_pools=defense_pools,
-                        utility_pools=utility_pools,
-                    )
-                else:
-                    components["attack_pool_cache"] = AttackPoolCacheComponent(
-                        attack_pools,
-                        defense_pools,
-                        utility_pools,
-                    )
+                self._apply_legacy_dice_pool_cache(components, payload)
 
     def refresh_entity_dice_pools(self, entity_id: str) -> None:
         """Rebuild cached dice pools for a specific entity."""
@@ -201,23 +189,11 @@ class PreparationManager:
             if character is None:
                 return
             equipment = components.get("equipment")
-            attack_pools, defense_pools, utility_pools = self._build_dice_pool_cache(
+            payload = self._build_dice_pool_cache(
                 character,
                 equipment,
             )
-            cache_component = components.get("attack_pool_cache")
-            if isinstance(cache_component, AttackPoolCacheComponent):
-                cache_component.update(
-                    weapon_pools=attack_pools,
-                    defense_pools=defense_pools,
-                    utility_pools=utility_pools,
-                )
-            else:
-                components["attack_pool_cache"] = AttackPoolCacheComponent(
-                    attack_pools,
-                    defense_pools,
-                    utility_pools,
-                )
+            self._apply_legacy_dice_pool_cache(components, payload)
             return
 
         internal_id = ecs_manager.resolve_entity(entity_id)
@@ -233,6 +209,26 @@ class PreparationManager:
         equipment = ecs_manager.try_get_component(internal_id, EquipmentComponent)
         payload = self._build_dice_pool_cache(character, equipment)
         self._apply_dice_pool_cache(ecs_manager, internal_id, entity_id, payload)
+
+    def _apply_legacy_dice_pool_cache(
+        self,
+        components: Dict[str, Any],
+        payload: Tuple[Dict[str, int], Dict[str, int], Dict[str, int]],
+    ) -> None:
+        weapon_pools, defense_pools, utility_pools = payload
+        cache_component = components.get("attack_pool_cache")
+        if isinstance(cache_component, AttackPoolCacheComponent):
+            cache_component.update(
+                weapon_pools=weapon_pools,
+                defense_pools=defense_pools,
+                utility_pools=utility_pools,
+            )
+        else:
+            components["attack_pool_cache"] = AttackPoolCacheComponent(
+                weapon_pools,
+                defense_pools,
+                utility_pools,
+            )
 
     def _ensure_dice_pool_event_handlers(self) -> None:
         """Subscribe to events that require refreshing cached dice pools."""

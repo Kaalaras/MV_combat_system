@@ -1,4 +1,4 @@
-from typing import Dict, Iterable, Optional
+from typing import Dict, Optional
 
 
 class AttackPoolCacheComponent:
@@ -62,8 +62,7 @@ def _assign(target: Dict[str, int], source: Dict[str, int], overwrite_missing: b
     """Mutate ``target`` so it mirrors ``source`` with minimal churn."""
 
     if overwrite_missing:
-        stale_keys: Iterable[str] = tuple(k for k in target.keys() if k not in source)
-        for key in stale_keys:
+        for key in (k for k in target.keys() if k not in source):
             target.pop(key, None)
 
     for key, value in source.items():
