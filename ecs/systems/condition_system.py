@@ -195,6 +195,18 @@ class ConditionSystem:
             return None
         return store.get(name)
 
+    def _find_any_condition(self, name: str) -> Optional[Condition]:
+        for conds in self._conditions.values():
+            cond = conds.get(name)
+            if cond is not None:
+                return cond
+        if self.ecs_manager:
+            for _, tracker in self.ecs_manager.iter_with_id(ConditionTrackerComponent):
+                cond = tracker.conditions.get(name)
+                if cond is not None:
+                    return cond
+        return None
+
     def _get_active_states(self, entity_id: str, character: Optional[Any] = None) -> Set[str]:
         tracker = self._ensure_tracker(entity_id)
         if tracker is not None:
@@ -263,6 +275,10 @@ class ConditionSystem:
             delta = 0
             if entity_id is not None:
                 cond = self._get_condition(entity_id, name)
+                if cond is not None:
+                    delta = cond.data.get('delta', 0)
+            else:
+                cond = self._find_any_condition(name)
                 if cond is not None:
                     delta = cond.data.get('delta', 0)
             if name.endswith('Attack') and 'CONTEXT_ATTACK' in used_traits:
@@ -529,6 +545,11 @@ class ConditionSystem:
                 tracker.dynamic_states.add(a)
             for r in removed:
                 tracker.dynamic_states.discard(r)
+        if char:
+            for a in added:
+                char.states.add(a)
+            for r in removed:
+                char.states.discard(r)
         for a in added:
             self._publish('condition_added', entity_id=entity_id, condition=a, rounds=None, source='dynamic')
         for r in removed:
@@ -540,8 +561,16 @@ class ConditionSystem:
 
     def _on_round_started(self, **evt):
         expired = []
+        processed: Set[str] = set()
+        for entity_id, conds in list(self._conditions.items()):
+            for name, cond in list(conds.items()):
+                if cond.tick():
+                    expired.append((entity_id, name))
+            processed.add(entity_id)
         if self.ecs_manager:
             for entity_id, tracker in self.ecs_manager.iter_with_id(ConditionTrackerComponent):
+                if entity_id in processed:
+                    continue
                 for name, cond in list(tracker.conditions.items()):
                     if cond.tick():
                         expired.append((entity_id, name))
