@@ -6,6 +6,7 @@ if PACKAGE_ROOT not in sys.path:
 
 from core.game_state import GameState
 from core.event_bus import EventBus
+from ecs.ecs_manager import ECSManager
 from ecs.systems.condition_system import ConditionSystem
 from ecs.actions.attack_actions import AttackAction
 from ecs.actions.discipline_actions import BloodPulsationAction
@@ -39,9 +40,11 @@ class _TestAttackAction(AttackAction):
 
 class TestIntegrationCombatAndConditions(unittest.TestCase):
     def setUp(self):
-        self.gs = GameState()
-        self.gs.set_event_bus(EventBus())
-        self.gs.set_condition_system(ConditionSystem(self.gs))
+        self.event_bus = EventBus()
+        self.ecs_manager = ECSManager(self.event_bus)
+        self.gs = GameState(self.ecs_manager)
+        self.gs.set_event_bus(self.event_bus)
+        self.gs.set_condition_system(ConditionSystem(self.ecs_manager, self.event_bus, game_state=self.gs))
         self.gs.movement = MovementStub()
         self.gs.los_manager = LOSStub()
 

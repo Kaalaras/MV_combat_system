@@ -37,7 +37,7 @@ def setup_env():
     movement = MovementSystem(gs, ecs, event_bus=bus); gs.set_movement_system(movement)
     los = LineOfSightManager(gs, terrain, bus, los_granularity=2); gs.los_manager=los
     cover_sys = CoverSystem(gs); gs.set_cover_system(cover_sys)
-    cond = ConditionSystem(gs); gs.set_condition_system(cond)
+    cond = ConditionSystem(ecs, bus, game_state=gs); gs.set_condition_system(cond)
     return gs
 
 # Helper to add character

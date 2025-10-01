@@ -6,6 +6,7 @@ if PACKAGE_ROOT not in sys.path:
 
 from core.event_bus import EventBus
 from core.game_state import GameState
+from ecs.ecs_manager import ECSManager
 from ecs.systems.condition_system import ConditionSystem
 from entities.character import Character
 
@@ -15,9 +16,11 @@ class DummyCharRef:
 
 class TestDamageModExpiry(unittest.TestCase):
     def setUp(self):
-        self.gs = GameState()
-        self.gs.set_event_bus(EventBus())
-        self.cond = ConditionSystem(self.gs)
+        self.event_bus = EventBus()
+        self.ecs_manager = ECSManager(self.event_bus)
+        self.gs = GameState(self.ecs_manager)
+        self.gs.set_event_bus(self.event_bus)
+        self.cond = ConditionSystem(self.ecs_manager, self.event_bus, game_state=self.gs)
         self.gs.set_condition_system(self.cond)
         traits_att = {'Attributes': {'Physical': {'Strength':3,'Dexterity':2,'Stamina':2}}, 'Virtues': {'Courage':1}}
         traits_def = {'Attributes': {'Physical': {'Strength':2,'Dexterity':2,'Stamina':2}}, 'Virtues': {'Courage':1}}
