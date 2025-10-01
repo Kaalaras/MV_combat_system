@@ -8,6 +8,7 @@ from core.preparation_manager import PreparationManager
 from entities.character import Character
 from entities.default_entities.weapons import Sword, LightPistol
 from renderer.arcade_renderer import ArcadeRenderer
+from ecs.ecs_manager import ECSManager
 from utils.logger import log_calls
 
 class Game(arcade.Window):
@@ -19,6 +20,7 @@ class Game(arcade.Window):
         self.game_state = None
         self.prep_manager = None
         self.event_bus = None
+        self.ecs_manager: Optional[ECSManager] = None
         self.cell_size = 64
         self.renderer: Optional[ArcadeRenderer] = None
         
@@ -29,8 +31,9 @@ class Game(arcade.Window):
     def setup(self):
         """Set up the game and initialize the game state."""
         # Core state containers
-        self.game_state = GameState()
         self.event_bus = EventBus()
+        self.ecs_manager = ECSManager(self.event_bus)
+        self.game_state = GameState(ecs_manager=self.ecs_manager)
         self.game_state.set_event_bus(self.event_bus)
         self.prep_manager = PreparationManager(self.game_state)
 
@@ -78,7 +81,7 @@ class Game(arcade.Window):
         self.prep_manager.prepare()
 
         # Build renderer after the world has been initialized
-        self.renderer = ArcadeRenderer(self.game_state)
+        self.renderer = ArcadeRenderer(self.game_state, ecs_manager=self.ecs_manager)
 
         # Resize the window to match the terrain
         self.set_size(terrain.width * self.cell_size, terrain.height * self.cell_size)

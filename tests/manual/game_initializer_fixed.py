@@ -108,11 +108,10 @@ def initialize_game(
     """
     Initializes a complete game instance based on a list of entity specifications.
     """
-    game_state = GameState()
     event_bus = EventBus()
-    game_state.set_event_bus(event_bus)
     ecs_manager = ECSManager(event_bus)
-    game_state.set_ecs_manager(ecs_manager)
+    game_state = GameState(ecs_manager=ecs_manager)
+    game_state.set_event_bus(event_bus)
 
     prep_manager = PreparationManager(game_state)
     terrain = Terrain(width=grid_size, height=grid_size, game_state=game_state)
