@@ -157,21 +157,59 @@ class ArcadeRenderer:
         position: "PositionComponent", attr_name: str
     ) -> int:
         raw_value = getattr(position, attr_name, 1)
-        if raw_value in (None, 0):
-            return 1
-        try:
-            return max(int(raw_value), 1)
-        except (TypeError, ValueError):
-            return 1
+        return ArcadeRenderer._coerce_positive_int(raw_value, default=1)
 
     @staticmethod
     def _position_coord(
         position: "PositionComponent", attr_name: str
     ) -> float:
         raw_value = getattr(position, attr_name, 0)
+        return ArcadeRenderer._coerce_float(raw_value)
+
+    @staticmethod
+    def _coerce_positive_int(raw_value: object, *, default: int = 1) -> int:
+        if raw_value in (None, 0):
+            return default
+        if isinstance(raw_value, bool):
+            value = int(raw_value)
+        elif isinstance(raw_value, (int, float)):
+            value = int(raw_value)
+        elif isinstance(raw_value, str):
+            stripped = raw_value.strip()
+            if not stripped:
+                return default
+            if stripped[0] in {"+", "-"}:
+                digits = stripped[1:]
+            else:
+                digits = stripped
+            if digits.isdigit():
+                value = int(stripped)
+            else:
+                return default
+        else:
+            return default
+
+        if value <= 0:
+            return default
+        return value
+
+    @staticmethod
+    def _coerce_float(raw_value: object) -> float:
         if raw_value is None:
             return 0.0
-        try:
+        if isinstance(raw_value, bool):
+            return float(int(raw_value))
+        if isinstance(raw_value, (int, float)):
             return float(raw_value)
-        except (TypeError, ValueError):
+        if isinstance(raw_value, str):
+            stripped = raw_value.strip()
+            if not stripped:
+                return 0.0
+            normalized = stripped
+            if normalized[0] in {"+", "-"}:
+                normalized = normalized[1:]
+            normalized = normalized.replace(".", "", 1)
+            if normalized.isdigit():
+                return float(stripped)
             return 0.0
+        return 0.0
