@@ -25,10 +25,11 @@ def add_entity_with_position(
     game_state.add_entity(entity_id, components)
     terrain_ref = terrain if terrain is not None else getattr(game_state, "terrain", None)
     if terrain_ref is not None and hasattr(terrain_ref, "add_entity"):
-        try:
-            terrain_ref.add_entity(entity_id, pos_component.x, pos_component.y)
-        except Exception:
-            pass
+        result = terrain_ref.add_entity(entity_id, pos_component.x, pos_component.y)
+        if result is False:
+            raise AssertionError(
+                "Failed to add entity to terrain during test setup"
+            )
     return components
 
 

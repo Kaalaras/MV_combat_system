@@ -20,7 +20,14 @@ class BodyFootprintComponent:
     cells: FrozenSet[Offset] = field(default_factory=lambda: frozenset({(0, 0)}))
 
     def __post_init__(self) -> None:
-        object.__setattr__(self, "cells", frozenset((int(x), int(y)) for x, y in self.cells))
+        """Validate offsets without mutating the frozen dataclass."""
+
+        for offset in self.cells:
+            if len(offset) != 2:
+                raise ValueError("Each footprint offset must contain exactly two coordinates")
+            x, y = offset
+            if not isinstance(x, int) or not isinstance(y, int):
+                raise TypeError("Footprint offsets must be integer coordinates")
 
     @classmethod
     def from_size(cls, width: int, height: int) -> "BodyFootprintComponent":

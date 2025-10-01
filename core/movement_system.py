@@ -470,10 +470,7 @@ class MovementSystem:
         # Perform move and update terrain occupancy
         move_performed = False
         if hasattr(terrain, 'move_entity'):
-            try:
-                move_result = terrain.move_entity(entity_id, dest_x, dest_y)
-            except Exception:
-                move_result = False
+            move_result = terrain.move_entity(entity_id, dest_x, dest_y)
             if move_result is False:
                 return False
             move_performed = True
