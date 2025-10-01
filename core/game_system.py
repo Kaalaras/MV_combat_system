@@ -67,7 +67,8 @@ class GameSystem:
             preparation_manager: Manager for game setup and preparation phase
             event_bus: Optional event bus for communication between systems;
                        if None, will attempt to use game_state.event_bus
-            ecs_manager: Entity-Component-System manager required for game logic processing
+            ecs_manager: Entity-Component-System manager required for game logic processing.
+                Must not be None; a ValueError is raised if this dependency is missing.
             enable_map_drawing: Whether to save battle map visualizations between rounds
 
         Example:

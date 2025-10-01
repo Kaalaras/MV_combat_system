@@ -29,8 +29,11 @@ class GameState:
     Example usage:
 
     ```python
-    # Create game state
-    game_state = GameState()
+    from ecs.ecs_manager import ECSManager
+
+    # Create game state (optionally provide an ECS manager for mirroring)
+    ecs_manager = ECSManager()
+    game_state = GameState(ecs_manager=ecs_manager)
 
     # Initialize systems and set references
     terrain = TerrainGrid(100, 100)

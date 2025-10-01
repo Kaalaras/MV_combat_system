@@ -47,7 +47,7 @@ if TYPE_CHECKING:  # pragma: no cover - import hints only
     from ecs.components.position import PositionComponent
 
 
-ProcessorType = getattr(esper, "Processor", Any)
+ProcessorType = getattr(esper, "Processor", Any) if esper else Any
 
 
 class _FallbackWorld:
