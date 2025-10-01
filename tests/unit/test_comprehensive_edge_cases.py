@@ -9,15 +9,12 @@ from core.game_state import GameState
 from ecs.ecs_manager import ECSManager
 from ecs.systems.condition_system import ConditionSystem
 from ecs.actions.discipline_actions import BloodPulsationAction, BloodHealingAction
+from ecs.components.character_ref import CharacterRefComponent
 from entities.subtypes import Undead, Ghost, Vampire
 from entities.character import Character
 from entities.weapon import Weapon, WeaponType
 from utils.damage_types import DamageType, is_magic, base_type
 from ecs.actions.attack_actions import AttackAction
-
-class DummyCharRef:
-    def __init__(self, character):
-        self.character = character
 
 class DummyPosition:
     def __init__(self, x, y):
@@ -95,14 +92,14 @@ class TestComprehensiveEdgeCases(unittest.TestCase):
     def test_blood_pulsation_attribute_missing(self):
         v_traits = {'Attributes': {'Physical': {'Dexterity':2, 'Stamina':2}}, 'Virtues': {'Courage':1}}
         v = Vampire(name='NoStrength', traits=v_traits, base_traits=v_traits)
-        eid='VS'; self.gs.add_entity(eid, {'character_ref': DummyCharRef(v)})
+        eid='VS'; self.gs.add_entity(eid, {'character_ref': CharacterRefComponent(v)})
         bp = BloodPulsationAction()
         # Should return False since Strength missing
         self.assertFalse(bp.execute(eid, self.gs, attribute='Strength'))
 
     def test_blood_healing_no_damage(self):
         v = Vampire(name='HealNone', traits=self._mk_traits(), base_traits=self._mk_traits())
-        eid='VH'; self.gs.add_entity(eid, {'character_ref': DummyCharRef(v)})
+        eid='VH'; self.gs.add_entity(eid, {'character_ref': CharacterRefComponent(v)})
         heal = BloodHealingAction()
         random.randint = lambda a,b: 6  # no hunger change
         self.assertTrue(heal.execute(eid, self.gs))
@@ -112,7 +109,7 @@ class TestComprehensiveEdgeCases(unittest.TestCase):
     def test_blood_pulsation_multiple_expire_same_round(self):
         traits = self._mk_traits()
         v = Vampire(name='StackExpire', traits=traits, base_traits=traits)
-        eid='VSE'; self.gs.add_entity(eid, {'character_ref': DummyCharRef(v)})
+        eid='VSE'; self.gs.add_entity(eid, {'character_ref': CharacterRefComponent(v)})
         bp = BloodPulsationAction()
         random.randint = lambda a,b: 2
         # Raise Strength path first
@@ -128,7 +125,7 @@ class TestComprehensiveEdgeCases(unittest.TestCase):
     def test_blood_healing_willpower_pool(self):
         traits = self._mk_traits()
         v = Vampire(name='WPHeal', traits=traits, base_traits=traits)
-        eid='VWP'; self.gs.add_entity(eid, {'character_ref': DummyCharRef(v)})
+        eid='VWP'; self.gs.add_entity(eid, {'character_ref': CharacterRefComponent(v)})
         # Deal willpower damage
         v.take_damage(2, 'superficial', target='willpower')
         heal = BloodHealingAction()
@@ -140,7 +137,7 @@ class TestComprehensiveEdgeCases(unittest.TestCase):
     def test_hunger_no_event_when_roll_high(self):
         traits = self._mk_traits()
         v = Vampire(name='HungerHigh', traits=traits, base_traits=traits)
-        eid='HH'; self.gs.add_entity(eid, {'character_ref': DummyCharRef(v)})
+        eid='HH'; self.gs.add_entity(eid, {'character_ref': CharacterRefComponent(v)})
         events=[]
         self.gs.event_bus.subscribe('hunger_changed', lambda **kw: events.append(kw))
         bp = BloodPulsationAction()
@@ -152,7 +149,7 @@ class TestComprehensiveEdgeCases(unittest.TestCase):
         traits = self._mk_traits()
         v = Vampire(name='HungerCap', traits=traits, base_traits=traits)
         v.hunger = 5
-        eid='HC'; self.gs.add_entity(eid, {'character_ref': DummyCharRef(v)})
+        eid='HC'; self.gs.add_entity(eid, {'character_ref': CharacterRefComponent(v)})
         events=[]
         self.gs.event_bus.subscribe('hunger_changed', lambda **kw: events.append(kw))
         bp = BloodPulsationAction()
@@ -166,11 +163,11 @@ class TestComprehensiveEdgeCases(unittest.TestCase):
         traits_att = self._mk_traits(dex=2)
         attacker = Vampire(name='Att', traits=traits_att, base_traits=traits_att)
         attacker.hunger = 10  # deliberately higher than expected pool
-        att_id='ATT'; self.gs.add_entity(att_id, {'character_ref': DummyCharRef(attacker), 'position': DummyPosition(0,0)})
+        att_id='ATT'; self.gs.add_entity(att_id, {'character_ref': CharacterRefComponent(attacker), 'position': DummyPosition(0,0)})
         # Add minimal skill path for weapon trait resolution
         traits_def = self._mk_traits()
         defender = Character(name='Def', traits=traits_def, base_traits=traits_def)
-        def_id='DEF'; self.gs.add_entity(def_id, {'character_ref': DummyCharRef(defender), 'position': DummyPosition(0,0)})
+        def_id='DEF'; self.gs.add_entity(def_id, {'character_ref': CharacterRefComponent(defender), 'position': DummyPosition(0,0)})
         weapon = Weapon(name='Claw', damage_bonus=1, weapon_range=1, damage_type='superficial', weapon_type=WeaponType.BRAWL)
         attack = AttackAction(att_id, def_id, weapon, self.gs)
         # Force small pool by clearing skills

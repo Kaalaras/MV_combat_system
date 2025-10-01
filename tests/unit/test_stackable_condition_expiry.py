@@ -5,33 +5,42 @@ if PACKAGE_ROOT not in sys.path:
     sys.path.insert(0, PACKAGE_ROOT)
 
 from core.event_bus import EventBus
-from core.game_state import GameState
 from ecs.ecs_manager import ECSManager
 from ecs.systems.condition_system import ConditionSystem
+from ecs.components.entity_id import EntityIdComponent
+from ecs.components.character_ref import CharacterRefComponent
+from ecs.components.condition_tracker import ConditionTrackerComponent
+from ecs.components.health import HealthComponent
+from ecs.components.willpower import WillpowerComponent
+from ecs.components.initiative import InitiativeComponent
 from entities.character import Character
-
-class DummyCharRef:
-    def __init__(self, character):
-        self.character = character
+from tests.unit.helpers import assert_tracker_has_condition
 
 class TestStackableExpiry(unittest.TestCase):
     def setUp(self):
         self.event_bus = EventBus()
         self.ecs_manager = ECSManager(self.event_bus)
-        self.gs = GameState(self.ecs_manager)
-        self.gs.set_event_bus(self.event_bus)
-        self.cond = ConditionSystem(self.ecs_manager, self.event_bus, game_state=self.gs)
-        self.gs.set_condition_system(self.cond)
+        self.cond = ConditionSystem(self.ecs_manager, self.event_bus)
         traits = {
             'Attributes': {'Physical': {'Strength':3,'Dexterity':2,'Stamina':2}},
             'Virtues': {'Courage':1}
         }
         self.char = Character(name='Stacky', traits=traits, base_traits=traits)
         self.eid = 'E_STACK'
-        self.gs.add_entity(self.eid, {'character_ref': DummyCharRef(self.char)})
+        self._create_entity(self.eid, self.char)
+
+    def _create_entity(self, entity_id: str, character: Character):
+        self.ecs_manager.create_entity(
+            EntityIdComponent(entity_id),
+            CharacterRefComponent(character),
+            ConditionTrackerComponent(),
+            InitiativeComponent(),
+            HealthComponent(character.max_health),
+            WillpowerComponent(character.max_willpower),
+        )
 
     def _advance_round(self, r):
-        self.gs.event_bus.publish('round_started', round_number=r, turn_order=[self.eid])
+        self.event_bus.publish('round_started', round_number=r, turn_order=[self.eid])
 
     def test_initiative_interleaved(self):
         # Add +3 (3 rounds), -1 (2 rounds), +5 (1 round)
@@ -68,7 +77,15 @@ class TestStackableExpiry(unittest.TestCase):
         self._advance_round(1)
         self.assertEqual(self.char.max_health, base_max)  # back to +2 -2 = 0
         # Manually remove the negative modifier (suffix unknown; find it)
-        neg_name = [n for n in self.cond.list_conditions(self.eid) if n.startswith('MaxHealthMod') and self.cond._conditions[self.eid][n].data.get('delta') == -2][0]
+        neg_name = assert_tracker_has_condition(
+            self,
+            self.cond,
+            self.eid,
+            'MaxHealthMod',
+            -2,
+            tracker_message="Condition tracker missing for stackable entity",
+            missing_message="No MaxHealthMod condition with delta -2 found",
+        )
         self.cond.remove_condition(self.eid, neg_name)
         self.assertEqual(self.char.max_health, base_max + 2)
         # Advance until +2 expires

@@ -82,6 +82,8 @@ class GameState:
         self._ecs_entities: Dict[str, int] = {}
         self._movement_event_registered = False
         self._movement_subscription_bus: Optional[Any] = None
+        self._visibility_subscription_registered = False
+        self._visibility_subscription_bus: Optional[Any] = None
         # Add other global state or system references as needed
         # e.g., self.action_system_ref for quick access if needed by some non-ECS logic
 
@@ -302,20 +304,49 @@ class GameState:
             self._movement_event_registered = False
             self._movement_subscription_bus = None
 
+        visibility_previous_bus = (
+            self._visibility_subscription_bus if self._visibility_subscription_registered else None
+        )
+        if (
+            visibility_previous_bus
+            and visibility_previous_bus is not event_bus
+            and hasattr(visibility_previous_bus, "unsubscribe")
+        ):
+            try:
+                visibility_previous_bus.unsubscribe(
+                    "visibility_state_changed", self._handle_visibility_state_changed
+                )
+            except (AttributeError, KeyError, ValueError) as exc:  # pragma: no cover - defensive cleanup
+                logger.warning(
+                    "Failed to unsubscribe visibility handler from previous bus: %s",
+                    exc,
+                )
+        if visibility_previous_bus and visibility_previous_bus is not event_bus:
+            self._visibility_subscription_registered = False
+            self._visibility_subscription_bus = None
+
         self._event_bus = event_bus
 
         subscribe = getattr(self._event_bus, "subscribe", None)
-        if callable(subscribe) and not self._movement_event_registered:
-            subscribe(
-                "movement_reset_requested",
-                self._handle_movement_reset_requested,
-            )
-            subscribe(
-                "movement_distance_spent",
-                self._handle_movement_distance_spent,
-            )
-            self._movement_subscription_bus = self._event_bus
-            self._movement_event_registered = True
+        if callable(subscribe):
+            if not self._movement_event_registered:
+                subscribe(
+                    "movement_reset_requested",
+                    self._handle_movement_reset_requested,
+                )
+                subscribe(
+                    "movement_distance_spent",
+                    self._handle_movement_distance_spent,
+                )
+                self._movement_subscription_bus = self._event_bus
+                self._movement_event_registered = True
+            if not self._visibility_subscription_registered:
+                subscribe(
+                    "visibility_state_changed",
+                    self._handle_visibility_state_changed,
+                )
+                self._visibility_subscription_bus = self._event_bus
+                self._visibility_subscription_registered = True
 
     def set_movement_system(self, movement_system: Any) -> None:
         """
@@ -457,6 +488,11 @@ class GameState:
         if entity_id not in self.movement_turn_usage:
             self.movement_turn_usage[entity_id] = {"distance": 0}
         self.movement_turn_usage[entity_id]["distance"] += distance
+
+    def _handle_visibility_state_changed(self, entity_id: str, **_: Any) -> None:
+        """Event callback triggered when an entity's visibility-affecting state changes."""
+
+        self.bump_blocker_version()
 
     def reset_movement_usage(self, entity_id: str):
         """Reset per-turn movement tracking for an entity (called at turn start)."""
