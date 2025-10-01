@@ -17,8 +17,19 @@ Offset = Tuple[int, int]
 class BodyFootprintComponent:
     """Relative offsets describing the occupied tiles for an entity.
 
-    The default footprint is empty; callers that omit explicit offsets rely on
-    position dimensions to supply the occupied tiles.
+    A footprint instance stores relative ``(dx, dy)`` offsets from an entity's
+    anchor position.  By default the footprint is empty, allowing systems to
+    defer to a corresponding :class:`ecs.components.position.PositionComponent`
+    that declares ``width``/``height`` dimensions.  When explicit offsets are
+    provided, only those tiles are considered occupied, independent of the
+    position component.
+
+    Example
+    -------
+    >>> BodyFootprintComponent.from_size(2, 1).cells
+    frozenset({(0, 0), (1, 0)})
+    >>> BodyFootprintComponent(cells={(0, 0), (0, 1)}).cells
+    frozenset({(0, 0), (0, 1)})
     """
 
     cells: FrozenSet[Offset] = field(default_factory=frozenset)

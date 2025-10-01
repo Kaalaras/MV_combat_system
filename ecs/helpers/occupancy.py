@@ -36,7 +36,7 @@ def _expand_footprint(
 
     if width <= 0 or height <= 0:
         raise ValueError(
-            "PositionComponent dimensions must be positive to compute occupancy: "
+            "Occupancy dimensions must be positive to compute occupied tiles: "
             f"width={width}, height={height}"
         )
 
