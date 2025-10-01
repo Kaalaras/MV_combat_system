@@ -10,9 +10,11 @@ from ecs.ecs_manager import ECSManager
 class TestMovementSystem(unittest.TestCase):
     def setUp(self):
         self.event_bus = EventBus()
-        self.ecs_manager = ECSManager(self.event_bus)
+        self.ecs_manager = ECSManager()
         self.game_state = GameState(self.ecs_manager)
         self.game_state.set_event_bus(self.event_bus)
+        # Mirror the assigned bus onto the manager so movement queries publish correctly.
+        self.ecs_manager.event_bus = self.event_bus
         self.terrain = MagicMock()
         self.game_state.terrain = self.terrain
         self.movement_system = MovementSystem(self.game_state, self.ecs_manager)

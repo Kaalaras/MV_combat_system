@@ -1,5 +1,6 @@
 import unittest
-from unittest.mock import MagicMock
+
+from core.event_bus import EventBus
 from core.game_state import GameState
 from core.terrain_manager import Terrain
 from core.movement_system import MovementSystem
@@ -8,10 +9,16 @@ from ecs.ecs_manager import ECSManager
 
 class TestMovementIntegration(unittest.TestCase):
     def setUp(self):
-        self.ecs_manager = ECSManager()
+        self.event_bus = EventBus()
+        self.ecs_manager = ECSManager(self.event_bus)
         self.game_state = GameState(self.ecs_manager)
+        self.game_state.set_event_bus(self.event_bus)
         self.terrain = Terrain(width=10, height=10, game_state=self.game_state)
-        self.movement_system = MovementSystem(self.game_state, self.ecs_manager)
+        self.movement_system = MovementSystem(
+            self.game_state,
+            self.ecs_manager,
+            event_bus=self.event_bus,
+        )
         self.game_state.set_terrain(self.terrain)
 
     def test_move_1x1_entity_success(self):
