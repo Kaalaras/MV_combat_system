@@ -66,13 +66,48 @@ class Condition:
 class ConditionSystem:
     def __init__(
         self,
-        ecs_manager: ECSManager,
+        primary: Optional[Any] = None,
         event_bus: Optional[Any] = None,
         game_state: Optional[Any] = None,
+        ecs_manager: Optional[ECSManager] = None,
     ):
-        self.ecs_manager = ecs_manager
-        self.event_bus = event_bus or getattr(ecs_manager, "event_bus", None)
-        self.game_state = game_state
+        derived_manager: Optional[ECSManager] = ecs_manager
+        derived_state: Optional[Any] = None
+        derived_bus: Optional[Any] = event_bus
+
+        if primary is not None and (
+            isinstance(primary, ECSManager)
+            or hasattr(primary, "iter_with_id")
+        ):
+            derived_manager = primary
+            derived_state = game_state
+        else:
+            derived_state = primary
+            if derived_manager is None and hasattr(primary, "ecs_manager"):
+                derived_manager = getattr(primary, "ecs_manager")
+            if derived_manager is None and (
+                isinstance(game_state, ECSManager)
+                or hasattr(game_state, "iter_with_id")
+            ):
+                derived_manager = game_state
+                derived_state = primary
+            elif derived_manager is None and (
+                isinstance(event_bus, ECSManager)
+                or hasattr(event_bus, "iter_with_id")
+            ):
+                derived_manager = event_bus
+                derived_bus = getattr(event_bus, "event_bus", None)
+                if game_state is not None:
+                    derived_state = game_state
+            if derived_bus is None and hasattr(primary, "event_bus"):
+                derived_bus = getattr(primary, "event_bus")
+
+        if derived_bus is None and derived_manager is not None:
+            derived_bus = getattr(derived_manager, "event_bus", None)
+
+        self.ecs_manager = derived_manager
+        self.event_bus = derived_bus
+        self.game_state = derived_state
         self._conditions: Dict[str, Dict[str, Condition]] = {}
         self._pool_modifier_registry: Dict[str, Any] = {}
         self._start_turn_handlers: Dict[str, Any] = {}
@@ -422,7 +457,7 @@ class ConditionSystem:
             tracker = self._ensure_tracker(entity_id)
             if tracker:
                 tracker.dynamic_states.discard(name)
-                self._publish('condition_removed', entity_id=entity_id, condition=name, reason=reason)
+            self._publish('condition_removed', entity_id=entity_id, condition=name, reason=reason)
             return
         conds = self._get_condition_store(entity_id)
         if not conds or name not in conds:
@@ -567,18 +602,18 @@ class ConditionSystem:
     def _on_round_started(self, **evt):
         expired = []
         processed: Set[str] = set()
-        for entity_id, conds in list(self._conditions.items()):
-            for name, cond in list(conds.items()):
-                if cond.tick():
-                    expired.append((entity_id, name))
-            processed.add(entity_id)
         if self.ecs_manager:
             for entity_id, tracker in self.ecs_manager.iter_with_id(ConditionTrackerComponent):
-                if entity_id in processed:
-                    continue
+                processed.add(entity_id)
                 for name, cond in list(tracker.conditions.items()):
                     if cond.tick():
                         expired.append((entity_id, name))
+        for entity_id, conds in list(self._conditions.items()):
+            if entity_id in processed:
+                continue
+            for name, cond in list(conds.items()):
+                if cond.tick():
+                    expired.append((entity_id, name))
         for entity_id, name in expired:
             self.remove_condition(entity_id, name, reason='expired')
             self._publish('condition_expired', entity_id=entity_id, condition=name)
