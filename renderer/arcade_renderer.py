@@ -178,7 +178,8 @@ class ArcadeRenderer:
             stripped = raw_value.strip()
             if not stripped:
                 return default
-            if stripped[0] in {"+", "-"}:
+            first_char = stripped[0]
+            if first_char in {"+", "-"}:
                 digits = stripped[1:]
             else:
                 digits = stripped
@@ -206,10 +207,12 @@ class ArcadeRenderer:
             if not stripped:
                 return 0.0
             normalized = stripped
-            if normalized[0] in {"+", "-"}:
+            if normalized and normalized[0] in {"+", "-"}:
                 normalized = normalized[1:]
-            normalized = normalized.replace(".", "", 1)
-            if normalized.isdigit():
+            if not normalized:
+                return 0.0
+            normalized_digits = normalized.replace(".", "", 1)
+            if normalized_digits.isdigit():
                 return float(stripped)
             return 0.0
         return 0.0
