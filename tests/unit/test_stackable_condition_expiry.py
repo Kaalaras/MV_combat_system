@@ -77,10 +77,11 @@ class TestStackableExpiry(unittest.TestCase):
         self.assertEqual(self.char.max_health, base_max)  # back to +2 -2 = 0
         # Manually remove the negative modifier (suffix unknown; find it)
         tracker = self.cond.get_tracker(self.eid)
+        self.assertIsNotNone(tracker, "Condition tracker missing for stackable entity")
         neg_name = next(
             (
                 n
-                for n, cond in (tracker.conditions.items() if tracker else [])
+                for n, cond in tracker.conditions.items()
                 if n.startswith('MaxHealthMod') and cond.data.get('delta') == -2
             ),
             None,

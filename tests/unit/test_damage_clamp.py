@@ -54,10 +54,11 @@ class TestDamageClamp(unittest.TestCase):
         self.assertEqual(adj0, 0)
         # Remove the strong negative (find suffix)
         tracker = self.cond.get_tracker(self.att_id)
+        self.assertIsNotNone(tracker, "Condition tracker missing for attacker entity")
         neg_name = next(
             (
                 n
-                for n, cond in (tracker.conditions.items() if tracker else [])
+                for n, cond in tracker.conditions.items()
                 if n.startswith('DamageOutMod') and cond.data.get('delta') == -7
             ),
             None,
