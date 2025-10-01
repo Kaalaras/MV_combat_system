@@ -168,7 +168,7 @@ class ArcadeRenderer:
 
     @staticmethod
     def _coerce_positive_int(raw_value: object, *, default: int = 1) -> int:
-        if raw_value in (None, 0):
+        if raw_value is None:
             return default
         if isinstance(raw_value, bool):
             value = int(raw_value)
@@ -206,13 +206,15 @@ class ArcadeRenderer:
             stripped = raw_value.strip()
             if not stripped:
                 return 0.0
+            sign = ""
             normalized = stripped
-            if normalized and normalized[0] in {"+", "-"}:
+            if normalized[0] in {"+", "-"}:
+                sign = normalized[0]
                 normalized = normalized[1:]
             if not normalized:
                 return 0.0
             normalized_digits = normalized.replace(".", "", 1)
             if normalized_digits.isdigit():
-                return float(stripped)
+                return float(f"{sign}{normalized}")
             return 0.0
         return 0.0
