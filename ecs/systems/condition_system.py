@@ -66,62 +66,57 @@ class Condition:
 class ConditionSystem:
     def __init__(
         self,
-        primary: Optional[Any] = None,
+        ecs_manager: ECSManager,
         event_bus: Optional[Any] = None,
         game_state: Optional[Any] = None,
-        ecs_manager: Optional[ECSManager] = None,
     ):
-        derived_manager: Optional[ECSManager] = ecs_manager
-        derived_state: Optional[Any] = None
-        derived_bus: Optional[Any] = event_bus
+        self.ecs_manager = ecs_manager
+        resolved_game_state = game_state
+        if resolved_game_state is None and hasattr(ecs_manager, "game_state"):
+            resolved_game_state = getattr(ecs_manager, "game_state")
+        self.game_state = resolved_game_state
 
-        if primary is not None and (
-            isinstance(primary, ECSManager)
-            or hasattr(primary, "iter_with_id")
-        ):
-            derived_manager = primary
-            derived_state = game_state
-        else:
-            derived_state = primary
-            if derived_manager is None and hasattr(primary, "ecs_manager"):
-                derived_manager = getattr(primary, "ecs_manager")
-            if derived_manager is None and (
-                isinstance(game_state, ECSManager)
-                or hasattr(game_state, "iter_with_id")
-            ):
-                derived_manager = game_state
-                derived_state = primary
-            elif derived_manager is None and (
-                isinstance(event_bus, ECSManager)
-                or hasattr(event_bus, "iter_with_id")
-            ):
-                derived_manager = event_bus
-                derived_bus = getattr(event_bus, "event_bus", None)
-                if game_state is not None:
-                    derived_state = game_state
-            if derived_bus is None and hasattr(primary, "event_bus"):
-                derived_bus = getattr(primary, "event_bus")
+        resolved_bus = event_bus
+        if resolved_bus is None and hasattr(ecs_manager, "event_bus"):
+            resolved_bus = getattr(ecs_manager, "event_bus")
+        if resolved_bus is None and resolved_game_state is not None:
+            resolved_bus = getattr(resolved_game_state, "event_bus", None)
+        self.event_bus = resolved_bus
 
-        if derived_bus is None and derived_manager is not None:
-            derived_bus = getattr(derived_manager, "event_bus", None)
-
-        self.ecs_manager = derived_manager
-        self.event_bus = derived_bus
-        self.game_state = derived_state
         self._conditions: Dict[str, Dict[str, Condition]] = {}
         self._pool_modifier_registry: Dict[str, Any] = {}
         self._start_turn_handlers: Dict[str, Any] = {}
         self._movement_modifiers: Dict[str, Any] = {}
         self._action_slot_modifiers: Dict[str, Any] = {}
-        self._remove_handlers: Dict[str, Any] = {}  # handlers invoked on removal/expiry
-        # New modifier stores
-        self._damage_out_mods: Dict[str, Dict[str, int]] = {}  # entity_id -> key -> delta
+        self._remove_handlers: Dict[str, Any] = {}
+        self._damage_out_mods: Dict[str, Dict[str, int]] = {}
         self._damage_in_mods: Dict[str, Dict[str, int]] = {}
+
         self._register_default_modifiers()
         self._register_default_start_turn_handlers()
         self._register_default_movement_modifiers()
         self._register_default_action_modifiers()
         self._subscribe_events()
+
+    @classmethod
+    def from_game_state(cls, game_state: Any) -> "ConditionSystem":
+        ecs_manager = getattr(game_state, "ecs_manager", None)
+        if ecs_manager is None:
+            raise ValueError("game_state must expose an ecs_manager to build ConditionSystem")
+        event_bus = getattr(game_state, "event_bus", None)
+        if event_bus is None and hasattr(ecs_manager, "event_bus"):
+            event_bus = getattr(ecs_manager, "event_bus")
+        return cls(ecs_manager, event_bus=event_bus, game_state=game_state)
+
+    @classmethod
+    def from_ecs(
+        cls,
+        ecs_manager: ECSManager,
+        event_bus: Optional[Any] = None,
+        *,
+        game_state: Optional[Any] = None,
+    ) -> "ConditionSystem":
+        return cls(ecs_manager, event_bus=event_bus, game_state=game_state)
 
     # ------------------------------------------------------------------
     # Event wiring
@@ -232,18 +227,6 @@ class ConditionSystem:
             return None
         return store.get(name)
 
-    def _find_any_condition(self, name: str) -> Optional[Condition]:
-        for conds in self._conditions.values():
-            cond = conds.get(name)
-            if cond is not None:
-                return cond
-        if self.ecs_manager:
-            for _, tracker in self.ecs_manager.iter_with_id(ConditionTrackerComponent):
-                cond = tracker.conditions.get(name)
-                if cond is not None:
-                    return cond
-        return None
-
     def _get_active_states(self, entity_id: str, character: Optional[Any] = None) -> Set[str]:
         tracker = self._ensure_tracker(entity_id)
         if tracker is not None:
@@ -309,15 +292,10 @@ class ConditionSystem:
         self._pool_modifier_registry[WEAKENED_MENTAL_SOCIAL] = weakened_mental_social
         # Generic pool modifier patterns: names: PoolMod.Attack / Defense / Physical / Mental / Social
         def generic_pool_mod(name, char, base_pool, used_traits, active, entity_id=None):
-            delta = 0
-            if entity_id is not None:
-                cond = self._get_condition(entity_id, name)
-                if cond is not None:
-                    delta = cond.data.get('delta', 0)
-            else:
-                cond = self._find_any_condition(name)
-                if cond is not None:
-                    delta = cond.data.get('delta', 0)
+            if entity_id is None:
+                return 0
+            cond = self._get_condition(entity_id, name)
+            delta = cond.data.get('delta', 0) if cond is not None else 0
             if name.endswith('Attack') and 'CONTEXT_ATTACK' in used_traits:
                 return delta
             if name.endswith('Defense') and 'CONTEXT_DEFENSE' in used_traits:
