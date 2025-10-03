@@ -678,10 +678,25 @@ class GameState:
 
     # Internal helpers ---------------------------------------------------
     def _component_key_from_type(self, component_type: Type[Any]) -> str:
-        name = component_type.__name__
-        if name.endswith("Component"):
-            name = name[: -len("Component")]
-        key = re.sub(r"(?<!^)(?=[A-Z])", "_", name).lower()
+        """Translate a component class into its legacy dictionary key."""
+
+        if not isinstance(component_type, type):
+            raise TypeError(
+                f"Component type must be a class, got {type(component_type)!r} instead."
+            )
+
+        name = getattr(component_type, "__name__", None)
+        if not isinstance(name, str):
+            raise TypeError("Component type must define a string __name__ attribute.")
+
+        if not re.match(r"^[A-Z][a-zA-Z0-9]*Component$", name):
+            raise ValueError(
+                "Component type name must follow the 'CamelCaseComponent' convention: "
+                f"{name!r}"
+            )
+
+        base_name = name[: -len("Component")]
+        key = re.sub(r"(?<!^)(?=[A-Z])", "_", base_name).lower()
         return key
 
     def _collect_components_for_internal_id(
@@ -707,6 +722,9 @@ class GameState:
             try:
                 raw_components = components_for_entity(internal_id)
             except Exception:
+                logging.exception(
+                    "Exception occurred in components_for_entity(%r)", internal_id
+                )
                 raw_components = None
             else:
                 for item in raw_components:
