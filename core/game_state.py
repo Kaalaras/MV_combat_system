@@ -691,7 +691,7 @@ class GameState:
         if component is None:
             component = MovementUsageComponent()
             self.ecs_manager.add_component(internal_id, component)
-            component.add(distance)
+        component.add(distance)
     def _handle_visibility_state_changed(self, entity_id: str, **_: Any) -> None:
         """Event callback triggered when an entity's visibility-affecting state changes."""
 
