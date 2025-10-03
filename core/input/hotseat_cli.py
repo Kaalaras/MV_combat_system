@@ -2,10 +2,18 @@
 
 from __future__ import annotations
 
-from typing import Any, Callable, Iterable, Mapping, Optional
+from typing import Any, Callable, Iterable, Mapping, Optional, Protocol
 
 from core.actions.intent import ActionIntent, TargetSpec
 from core.events import topics
+
+
+class EventBusLike(Protocol):
+    def subscribe(self, event_type: str, handler: Callable[..., None]) -> None:
+        ...
+
+    def publish(self, event_type: str, /, **payload: Any) -> None:
+        ...
 
 
 class HotSeatCLIController:
@@ -17,7 +25,7 @@ class HotSeatCLIController:
         input_fn: Callable[[str], str] | None = None,
         output_fn: Callable[[str], None] | None = None,
     ) -> None:
-        self._event_bus: Any = None
+        self._event_bus: EventBusLike | None = None
         self._input = input_fn or input
         self._output = output_fn or print
         self._pending_actor: Optional[str] = None
@@ -25,7 +33,7 @@ class HotSeatCLIController:
     # ------------------------------------------------------------------
     # Public API expected by the InputController protocol
     # ------------------------------------------------------------------
-    def bind(self, event_bus: Any) -> None:
+    def bind(self, event_bus: EventBusLike) -> None:
         """Subscribe controller handlers to the provided event bus."""
 
         self._event_bus = event_bus
@@ -211,7 +219,7 @@ class HotSeatCLIController:
                 "Invalid coordinates. Please enter comma-separated integers (e.g., 3,4)."
             ) from exc
 
-    def _parse_radius(self, raw_value: str, default: Any) -> int:
+    def _parse_radius(self, raw_value: str, default: int | float | str | None) -> int:
         candidate = raw_value.strip()
         if not candidate:
             try:

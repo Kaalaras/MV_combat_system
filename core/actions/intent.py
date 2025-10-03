@@ -158,7 +158,7 @@ class TargetSpec:
     def _coerce_position(position: Sequence[int | float]) -> Tuple[int, ...]:
         coords: list[int] = []
         for coord in position:
-            if isinstance(coord, bool):
+            if type(coord) is bool:
                 raise TypeError("boolean values are not valid coordinates")
             if isinstance(coord, float):
                 if not coord.is_integer():
