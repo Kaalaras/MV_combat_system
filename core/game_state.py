@@ -356,7 +356,7 @@ class GameState:
         if internal_id is None:
             internal_id = ecs_manager.resolve_entity(entity_id)
         if internal_id is None:
-            raise KeyError(f"Entity with ID '{entity_id}' does not exist in ECS.")
+            raise KeyError(f"Cannot set component '{component_name}': entity with ID '{entity_id}' does not exist in ECS.")
         self._entity_component_keys.setdefault(entity_id, {})[type(component_value)] = component_name
         ecs_manager.add_component(internal_id, component_value)
 
