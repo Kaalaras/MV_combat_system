@@ -81,18 +81,15 @@ def _evaluate_action(action_def: ActionDef, actor_id: str, ecs: Any, rules_conte
         _check_costs(action_def, actor_id, ecs, rules_context)
     )
 
-    if action_def.id == "move":
-        targets, hints, failures = _compute_move_targets(actor_id, ecs, rules_context)
-        valid_targets.extend(targets)
-        ui_hints.update(hints)
-        predicates_failed.extend(failures)
-    elif action_def.id == "attack_melee":
-        targets, hints, failures = _compute_melee_targets(actor_id, ecs, rules_context)
-        valid_targets.extend(targets)
-        ui_hints.update(hints)
-        predicates_failed.extend(failures)
-    elif action_def.id == "attack_ranged":
-        targets, hints, failures = _compute_ranged_targets(actor_id, ecs, rules_context)
+    target_resolvers = {
+        "move": _compute_move_targets,
+        "attack_melee": _compute_melee_targets,
+        "attack_ranged": _compute_ranged_targets,
+    }
+
+    resolver = target_resolvers.get(action_def.id)
+    if resolver is not None:
+        targets, hints, failures = resolver(actor_id, ecs, rules_context)
         valid_targets.extend(targets)
         ui_hints.update(hints)
         predicates_failed.extend(failures)
