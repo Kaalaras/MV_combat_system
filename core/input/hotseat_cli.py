@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any, Callable, Mapping, Optional
+from typing import Any, Callable, Iterable, Mapping, Optional
 
 from core.actions.intent import ActionIntent, TargetSpec
 from core.events import topics
@@ -49,35 +49,45 @@ class HotSeatCLIController:
     # ------------------------------------------------------------------
     # Internal event handlers
     # ------------------------------------------------------------------
-    def _handle_request_actions(self, event: Mapping[str, Any]) -> None:
-        actor_id = str(event.get("actor_id"))
+    def _handle_request_actions(self, *, actor_id: str, **_: Any) -> None:
+        actor_id = str(actor_id)
         self._pending_actor = actor_id
         self.on_request_actions(actor_id)
 
-    def _handle_actions_available(self, event: Mapping[str, Any]) -> None:
+    def _handle_actions_available(
+        self,
+        *,
+        actor_id: str,
+        actions: Iterable[Mapping[str, Any]] | None = None,
+        source_player_id: Optional[str] = None,
+        client_tx_id: Optional[str] = None,
+        **_: Any,
+    ) -> None:
         if not self._event_bus:
             return
 
-        actor_id = str(event.get("actor_id"))
+        actor_id = str(actor_id)
         if self._pending_actor is not None and actor_id != self._pending_actor:
             return
 
-        actions = list(event.get("actions", []))
-        if not actions:
+        actions_list = list(actions or [])
+        if not actions_list:
             self._output("[HotSeat] No actions available.")
             return
 
         self._output(f"[HotSeat] Available actions for {actor_id}:")
-        for idx, action in enumerate(actions, start=1):
+        for idx, action in enumerate(actions_list, start=1):
             label = action.get("name") or action.get("id") or f"Action {idx}"
             self._output(f"  {idx}. {label}")
 
-        choice = self._prompt_index(len(actions), prompt="Select action (or 0 to skip): ")
+        choice = self._prompt_index(
+            len(actions_list), prompt="Select action (or 0 to skip): "
+        )
         if choice <= 0:
             self._output("[HotSeat] Action selection skipped.")
             return
 
-        action_data = actions[choice - 1]
+        action_data = actions_list[choice - 1]
         targets = self._prompt_targets(action_data)
         params = dict(action_data.get("default_params", {}))
 
@@ -86,35 +96,39 @@ class HotSeatCLIController:
             action_id=str(action_data.get("id") or action_data.get("name")),
             targets=tuple(targets),
             params=params,
-            source_player_id=event.get("source_player_id"),
-            client_tx_id=event.get("client_tx_id"),
+            source_player_id=source_player_id,
+            client_tx_id=client_tx_id,
         )
 
         self._publish(topics.INTENT_SUBMITTED, {"intent": intent.to_dict()})
 
-    def _handle_reaction_window(self, event: Mapping[str, Any]) -> None:
+    def _handle_reaction_window(
+        self, *, actor_id: str, options: Iterable[Mapping[str, Any]] | None = None, **_: Any
+    ) -> None:
         if not self._event_bus:
             return
 
-        actor_id = event.get("actor_id")
-        options = list(event.get("options", []))
-        context = {"options": options}
+        actor_id = str(actor_id)
+        options_list = list(options or [])
+        context = {"options": options_list}
         self.on_reaction_prompt(context)
 
-        if not options:
+        if not options_list:
             self._publish(
                 topics.REACTION_DECLARED,
                 {"actor_id": actor_id, "reaction": None, "passed": True},
             )
             return
 
-        choice = self._prompt_index(len(options), prompt="Select reaction (0 to pass): ")
+        choice = self._prompt_index(
+            len(options_list), prompt="Select reaction (0 to pass): "
+        )
         if choice <= 0:
             payload = {"actor_id": actor_id, "reaction": None, "passed": True}
         else:
             payload = {
                 "actor_id": actor_id,
-                "reaction": options[choice - 1],
+                "reaction": options_list[choice - 1],
                 "passed": False,
             }
 
@@ -141,36 +155,80 @@ class HotSeatCLIController:
             return targets
 
         for descriptor in target_descriptors:
-            kind = descriptor.get("kind") or descriptor.get("type")
-            prompt = descriptor.get("prompt") or f"Provide target for {kind}: "
-            user_input = self._input(prompt).strip()
-            if not user_input:
-                continue
-
+            raw_kind = descriptor.get("kind") or descriptor.get("type") or ""
+            kind = raw_kind.lower()
             if kind == "self":
                 targets.append(TargetSpec.self())
-            elif kind == "entity":
-                targets.append(TargetSpec.entity(user_input))
-            elif kind == "tile":
-                coords = tuple(int(part) for part in user_input.split(","))
-                targets.append(TargetSpec.tile(coords))
-            elif kind == "area":
-                coords_part, _, radius_part = user_input.partition(";")
-                coords = tuple(int(part) for part in coords_part.split(","))
-                radius = int(radius_part.strip() or descriptor.get("radius", 0))
-                shape = descriptor.get("shape", "circle")
-                targets.append(TargetSpec.area(coords, shape=shape, radius=radius))
-            else:
-                targets.append(
-                    TargetSpec(kind=str(kind), extra={"value": user_input})
-                )
+                continue
+
+            label = raw_kind or kind or "target"
+            prompt = descriptor.get("prompt") or f"Provide target for {label}: "
+            while True:
+                user_input = self._input(prompt).strip()
+                if not user_input:
+                    break
+
+                try:
+                    target = self._build_target(kind, raw_kind, user_input, descriptor)
+                except ValueError as error:
+                    self._output(str(error))
+                    continue
+
+                targets.append(target)
+                break
 
         return targets
+
+    def _build_target(
+        self, kind: str, raw_kind: str, user_input: str, descriptor: Mapping[str, Any]
+    ) -> TargetSpec:
+        if kind == "entity":
+            return TargetSpec.entity(user_input)
+        if kind == "tile":
+            coords = self._parse_coordinates(user_input)
+            return TargetSpec.tile(coords)
+        if kind == "area":
+            coords_part, _, radius_part = user_input.partition(";")
+            coords = self._parse_coordinates(coords_part)
+            default_radius = descriptor.get("radius", 0)
+            shape = descriptor.get("shape", "circle")
+            radius = self._parse_radius(radius_part, default_radius)
+            return TargetSpec.area(coords, shape=shape, radius=radius)
+
+        effective_kind = raw_kind or kind or "custom"
+        return TargetSpec(kind=str(effective_kind), extra={"value": user_input})
+
+    def _parse_coordinates(self, raw_value: str) -> tuple[int, ...]:
+        parts = [part.strip() for part in raw_value.split(",") if part.strip()]
+        if not parts:
+            raise ValueError(
+                "Invalid coordinates. Please enter comma-separated integers (e.g., 3,4)."
+            )
+        try:
+            return tuple(int(part) for part in parts)
+        except ValueError as exc:  # pragma: no cover - exercised via CLI flows
+            raise ValueError(
+                "Invalid coordinates. Please enter comma-separated integers (e.g., 3,4)."
+            ) from exc
+
+    def _parse_radius(self, raw_value: str, default: Any) -> int:
+        candidate = raw_value.strip()
+        if not candidate:
+            try:
+                return int(default)
+            except (TypeError, ValueError) as exc:  # pragma: no cover - config issue
+                raise ValueError("Invalid default radius configured for target descriptor.") from exc
+        try:
+            return int(candidate)
+        except ValueError as exc:  # pragma: no cover - exercised via CLI flows
+            raise ValueError(
+                "Invalid radius. Please enter an integer value (e.g., 3,4;2)."
+            ) from exc
 
     def _publish(self, topic: str, payload: Mapping[str, Any]) -> None:
         if not self._event_bus:
             raise RuntimeError("Controller must be bound to an event bus before use.")
-        self._event_bus.publish(topic, payload)
+        self._event_bus.publish(topic, **payload)
 
 
 __all__ = ["HotSeatCLIController"]

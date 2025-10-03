@@ -30,6 +30,14 @@ def test_target_spec_serialisation_variants() -> None:
         assert restored == target
 
 
+def test_target_spec_coordinate_validation() -> None:
+    assert TargetSpec.tile((1, 2, 3)).position == (1, 2, 3)
+    assert TargetSpec.tile((1.0, 2.0)).position == (1, 2)
+
+    with pytest.raises(ValueError):
+        TargetSpec.tile((1.5, 2))
+
+
 def test_action_intent_round_trip_and_immutability() -> None:
     intent = ActionIntent(
         actor_id="hero",
@@ -52,16 +60,16 @@ def test_action_intent_round_trip_and_immutability() -> None:
 
 class DummyEventBus:
     def __init__(self) -> None:
-        self.subscriptions: dict[str, list[Callable[[dict], None]]] = {}
-        self.published: list[tuple[str, dict]] = []
+        self.subscriptions: dict[str, list[Callable[..., None]]] = {}
+        self.published: list[tuple[str, dict[str, object]]] = []
 
-    def subscribe(self, topic: str, callback: Callable[[dict], None]) -> None:
+    def subscribe(self, topic: str, callback: Callable[..., None]) -> None:
         self.subscriptions.setdefault(topic, []).append(callback)
 
-    def publish(self, topic: str, payload: dict) -> None:
-        self.published.append((topic, payload))
+    def publish(self, topic: str, **payload: object) -> None:
+        self.published.append((topic, dict(payload)))
         for handler in self.subscriptions.get(topic, []):
-            handler(payload)
+            handler(**payload)
 
 
 def test_hotseat_controller_empty_loop() -> None:
@@ -76,9 +84,11 @@ def test_hotseat_controller_empty_loop() -> None:
 
     controller.bind(bus)
 
-    bus.publish(topics.REQUEST_ACTIONS, {"actor_id": "hero"})
-    bus.publish(topics.ACTIONS_AVAILABLE, {"actor_id": "hero", "actions": []})
-    bus.publish(topics.REACTION_WINDOW_OPENED, {"actor_id": "hero", "options": []})
+    bus.publish(topics.REQUEST_ACTIONS, actor_id="hero")
+    bus.publish(topics.ACTIONS_AVAILABLE, actor_id="hero", actions=[])
+    bus.publish(topics.REACTION_WINDOW_OPENED, actor_id="hero", options=[])
 
-    assert (topics.REACTION_DECLARED, {"actor_id": "hero", "reaction": None, "passed": True}) in bus.published
-
+    assert (
+        topics.REACTION_DECLARED,
+        {"actor_id": "hero", "reaction": None, "passed": True},
+    ) in bus.published

@@ -59,14 +59,21 @@ class TargetSpec:
 
     kind: str
     reference: Optional[str] = None
-    position: Optional[Tuple[int, int]] = None
+    position: Optional[Tuple[int, ...]] = None
     area_shape: Optional[str] = None
     radius: Optional[int] = None
     extra: Mapping[str, Any] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
-        if self.position is not None and not isinstance(self.position, tuple):
-            object.__setattr__(self, "position", tuple(self.position))
+        if self.position is not None:
+            object.__setattr__(
+                self,
+                "position",
+                self._coerce_position(self.position),
+            )
+
+        if self.radius is not None:
+            object.__setattr__(self, "radius", int(self.radius))
 
         if not isinstance(self.extra, Mapping):
             raise TypeError("extra must be a mapping")
@@ -93,9 +100,15 @@ class TargetSpec:
     def from_dict(cls, payload: Mapping[str, Any]) -> "TargetSpec":
         """Create a :class:`TargetSpec` from a mapping."""
 
-        position = payload.get("position")
-        if position is not None and not isinstance(position, tuple):
-            position = tuple(position)
+        position_payload = payload.get("position")
+        position: Optional[Tuple[int, ...]] = None
+        if position_payload is not None:
+            if isinstance(position_payload, Sequence) and not isinstance(
+                position_payload, (str, bytes)
+            ):
+                position = cls._coerce_position(position_payload)  # type: ignore[arg-type]
+            else:
+                raise TypeError("position must be a sequence of coordinates")
 
         extra = payload.get("extra", {})
         if extra is None:
@@ -104,9 +117,9 @@ class TargetSpec:
         return cls(
             kind=str(payload["kind"]),
             reference=payload.get("reference"),
-            position=position,  # type: ignore[arg-type]
+            position=position,
             area_shape=payload.get("area_shape"),
-            radius=payload.get("radius"),
+            radius=cls._coerce_optional_int(payload.get("radius")),
             extra=extra,
         )
 
@@ -119,8 +132,10 @@ class TargetSpec:
         return cls(kind="entity", reference=reference, extra=extra)
 
     @classmethod
-    def tile(cls, position: Sequence[int] | Sequence[float], **extra: Any) -> "TargetSpec":
-        return cls(kind="tile", position=tuple(position), extra=extra)
+    def tile(
+        cls, position: Sequence[int] | Sequence[float], **extra: Any
+    ) -> "TargetSpec":
+        return cls(kind="tile", position=cls._coerce_position(position), extra=extra)
 
     @classmethod
     def area(
@@ -133,11 +148,35 @@ class TargetSpec:
     ) -> "TargetSpec":
         return cls(
             kind="area",
-            position=tuple(position),
+            position=cls._coerce_position(position),
             area_shape=shape,
-            radius=radius,
+            radius=int(radius),
             extra=extra,
         )
+
+    @staticmethod
+    def _coerce_position(position: Sequence[int | float]) -> Tuple[int, ...]:
+        coords: list[int] = []
+        for coord in position:
+            if isinstance(coord, bool):
+                raise TypeError("boolean values are not valid coordinates")
+            if isinstance(coord, float):
+                if not coord.is_integer():
+                    raise ValueError("coordinates must be integers")
+                coords.append(int(coord))
+            elif isinstance(coord, int):
+                coords.append(int(coord))
+            else:
+                raise TypeError("coordinates must be numeric")
+        if not coords:
+            raise ValueError("at least one coordinate must be provided")
+        return tuple(coords)
+
+    @staticmethod
+    def _coerce_optional_int(value: Any) -> Optional[int]:
+        if value is None:
+            return None
+        return int(value)
 
 
 @dataclass(frozen=True, slots=True)
