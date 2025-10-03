@@ -3,6 +3,7 @@ from typing import Dict, Optional, Any, List, Tuple
 from typing import TYPE_CHECKING
 from core.visualization.battle_map import draw_battle_map
 import os
+from interface.event_constants import CoreEvents
 
 if TYPE_CHECKING:  # pragma: no cover - hints only
     from ecs.ecs_manager import CharacterTeamSnapshot, TeamSnapshot
@@ -109,9 +110,9 @@ class GameSystem:
             self.game_state.set_ecs_manager(self.ecs_manager)
 
         if self.event_bus:
-            self.event_bus.subscribe("action_performed", self.handle_action_resolved)
-            self.event_bus.subscribe("action_failed", self.handle_action_resolved)
-            self.event_bus.subscribe("request_end_turn", self.handle_request_end_turn)
+            self.event_bus.subscribe(CoreEvents.ACTION_PERFORMED, self.handle_action_resolved)
+            self.event_bus.subscribe(CoreEvents.ACTION_FAILED, self.handle_action_resolved)
+            self.event_bus.subscribe(CoreEvents.REQUEST_END_TURN, self.handle_request_end_turn)
 
     def set_map_directory(self, map_dir: str) -> None:
         """
@@ -241,7 +242,7 @@ class GameSystem:
                 print(f"[PlayerController] auto_play_turn error: {e}")
         # Safety: if no end-turn yet, force end to keep loop progressing
         if not self._turn_ended_flag and self.event_bus:
-            self.event_bus.publish("request_end_turn", entity_id=entity_id)
+            self.event_bus.publish(CoreEvents.REQUEST_END_TURN, entity_id=entity_id)
 
     def run_game_loop(self, max_rounds: int = 100) -> None:
         """
@@ -280,7 +281,7 @@ class GameSystem:
 
             if self.event_bus:
                 self.event_bus.publish(
-                    "round_start",
+                    CoreEvents.ROUND_START,
                     round_number=round_num,
                     team_state=team_state_start,
                 )
@@ -312,7 +313,7 @@ class GameSystem:
 
                 print(f"\n-- {char.name}'s turn (ID: {entity_id}) --")
                 if self.event_bus:
-                    self.event_bus.publish("turn_start", entity_id=entity_id)
+                    self.event_bus.publish(CoreEvents.TURN_START, entity_id=entity_id)
                 if self.action_system:
                     self.action_system.reset_counters(entity_id)
                 if self.event_bus:
@@ -335,11 +336,11 @@ class GameSystem:
                             action_success = ai_system.choose_action(entity_id)
                             if not action_success and self.event_bus:
                                 print(f"AI for {char.name} failed to choose a valid action. Ending turn.")
-                                self.event_bus.publish("request_end_turn", entity_id=entity_id)
+                                self.event_bus.publish(CoreEvents.REQUEST_END_TURN, entity_id=entity_id)
                     else:
                         print(f"AI script '{ai_name}' not found for {char.name}. Ending turn.")
                         if self.event_bus:
-                            self.event_bus.publish("request_end_turn", entity_id=entity_id)
+                            self.event_bus.publish(CoreEvents.REQUEST_END_TURN, entity_id=entity_id)
                 else:
                     if self.player_controller is not None:
                         self._process_player_turn_with_controller(entity_id, char)
@@ -352,7 +353,7 @@ class GameSystem:
 
                 print(f"{char.name} ends their turn.")
                 if self.event_bus:
-                    self.event_bus.publish("turn_end", entity_id=entity_id)
+                    self.event_bus.publish(CoreEvents.TURN_END, entity_id=entity_id)
                 self._current_turn_entity_id = None
 
             latest_snapshots: List["CharacterTeamSnapshot"] = list(
@@ -381,12 +382,12 @@ class GameSystem:
                 )
 
             if self.event_bus:
-                self.event_bus.publish("round_end", round_number=round_num, team_state=team_state)
+                self.event_bus.publish(CoreEvents.ROUND_END, round_number=round_num, team_state=team_state)
 
             if self.check_end_conditions(team_state):
                 print("Game ended!")
                 if self.event_bus:
-                    self.event_bus.publish("game_end")
+                    self.event_bus.publish(CoreEvents.GAME_END)
                 break
 
     def _handle_player_turn(self, entity_id: str, char: Any) -> None:
@@ -412,7 +413,7 @@ class GameSystem:
             if not available_actions:
                 print("No available actions. Ending turn.")
                 if self.event_bus:
-                    self.event_bus.publish("request_end_turn", entity_id=entity_id)
+                    self.event_bus.publish(CoreEvents.REQUEST_END_TURN, entity_id=entity_id)
                 break
 
             # Display available actions
@@ -432,7 +433,7 @@ class GameSystem:
             # Handle player choice
             if choice_idx == len(available_actions):
                 if self.event_bus:
-                    self.event_bus.publish("request_end_turn", entity_id=entity_id)
+                    self.event_bus.publish(CoreEvents.REQUEST_END_TURN, entity_id=entity_id)
             elif 0 <= choice_idx < len(available_actions):
                 selected_action = available_actions[choice_idx]
                 action_params = {}
@@ -442,7 +443,7 @@ class GameSystem:
 
                 if self.event_bus:
                     self.event_bus.publish(
-                        "action_requested",
+                        CoreEvents.ACTION_REQUESTED,
                         entity_id=entity_id,
                         action_name=selected_action.name,
                         **action_params

@@ -6,6 +6,7 @@ from entities.dice import Dice
 from typing import Any, Tuple, List, Dict
 from random import choice
 from math import floor
+from interface.event_constants import CoreEvents
 from ecs.actions.defensive_actions import (
     DodgeRangedAction,
     DodgeCloseCombatAction,
@@ -838,8 +839,12 @@ class RegisteredAttackAction(Action):
         if not target_id or not weapon_instance:
             print(f"[ActionSystem-Attack] Failed: Missing target_id or weapon for attack by {attacker_id}.")
             if hasattr(game_state, 'event_bus') and game_state.event_bus:
-                game_state.event_bus.publish("action_failed", entity_id=attacker_id, action_name=self.name,
-                                             reason="Missing params")
+                game_state.event_bus.publish(
+                    CoreEvents.ACTION_FAILED,
+                    entity_id=attacker_id,
+                    action_name=self.name,
+                    reason="Missing params",
+                )
             return False
 
         if not hasattr(game_state, 'movement') or game_state.movement is None:

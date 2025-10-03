@@ -5,6 +5,7 @@ from entities.character import Character
 from entities.dice import Dice
 from typing import Any, Tuple, Optional, List, Dict
 from math import floor, sqrt
+from interface.event_constants import CoreEvents
 
 
 class RegisteredAoEAttackAction(Action):
@@ -120,8 +121,12 @@ class RegisteredAoEAttackAction(Action):
         if not target_tile or not weapon_instance:
             print(f"[ActionSystem-AoEAttack] Failed: Missing target_tile or weapon for attack by {attacker_id}.")
             if hasattr(game_state, 'event_bus') and game_state.event_bus:
-                game_state.event_bus.publish("action_failed", entity_id=attacker_id, action_name=self.name,
-                                           reason="Missing params")
+                game_state.event_bus.publish(
+                    CoreEvents.ACTION_FAILED,
+                    entity_id=attacker_id,
+                    action_name=self.name,
+                    reason="Missing params",
+                )
             return {}
 
         if not hasattr(game_state, 'los_manager') or game_state.los_manager is None:
@@ -132,8 +137,12 @@ class RegisteredAoEAttackAction(Action):
             if not weapon_instance.consume_ammunition(1):
                 print(f"[ActionSystem-AoEAttack] Failed: Weapon {weapon_instance.name} has no ammunition left.")
                 if hasattr(game_state, 'event_bus') and game_state.event_bus:
-                    game_state.event_bus.publish("action_failed", entity_id=attacker_id, action_name=self.name,
-                                               reason="No ammunition")
+                    game_state.event_bus.publish(
+                        CoreEvents.ACTION_FAILED,
+                        entity_id=attacker_id,
+                        action_name=self.name,
+                        reason="No ammunition",
+                    )
                 return {}
 
         attack_executor = AoEAttackAction(

@@ -40,7 +40,7 @@ except Exception:  # pragma: no cover
 from interface.spectator import SpectatorController
 from interface.ui_adapter import UIAdapter
 from interface.ui_manager_v2 import UIManagerV2
-from interface.event_constants import UIStateEvents
+from interface.event_constants import UIStateEvents, CoreEvents
 
 
 class SimulationThread(threading.Thread):  # pragma: no cover - side effect oriented
@@ -53,9 +53,9 @@ class SimulationThread(threading.Thread):  # pragma: no cover - side effect orie
         self._event_bus = event_bus
         if event_bus:
             # Sleep briefly after turn start and action performed for visual pacing
-            event_bus.subscribe("turn_start", self._on_turn_start)
-            event_bus.subscribe("action_performed", self._on_action)
-            event_bus.subscribe("action_failed", self._on_action)
+            event_bus.subscribe(CoreEvents.TURN_START, self._on_turn_start)
+            event_bus.subscribe(CoreEvents.ACTION_PERFORMED, self._on_action)
+            event_bus.subscribe(CoreEvents.ACTION_FAILED, self._on_action)
 
     def _on_turn_start(self, **_):
         if self.turn_delay > 0:
