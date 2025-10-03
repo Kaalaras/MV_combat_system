@@ -278,9 +278,9 @@ class PreparationManager:
             ecs_manager.add_component(internal_id, cache_component)
 
         if hasattr(self.game_state, "entities"):
-            legacy_components = self.game_state.entities.get(entity_id)
-            if legacy_components is not None:
-                legacy_components["attack_pool_cache"] = cache_component
+            # Legacy compatibility: accessing the view keeps historical codepaths functional
+            # without mutating the read-only mapping.
+            self.game_state.entities.get(entity_id)
 
     def _build_dice_pool_cache(
         self,

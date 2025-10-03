@@ -7,15 +7,12 @@ from ecs.actions.movement_actions import JumpAction
 from ecs.systems.action_system import ActionSystem
 from ecs.components.position import PositionComponent
 from ecs.components.character_ref import CharacterRefComponent
+from ecs.components.cover import CoverComponent
 from ecs.ecs_manager import ECSManager
 from entities.character import Character
 from utils.condition_utils import NIGHT_VISION_PARTIAL, NIGHT_VISION_TOTAL
 from core.los_manager import LineOfSightManager
 from core.terrain_effect_system import TerrainEffectSystem
-
-class DummyCover:
-    def __init__(self, bonus:int):
-        self.bonus = bonus
 
 class TestTerrainEffectsExtended(unittest.TestCase):
     def setUp(self):
@@ -57,7 +54,11 @@ class TestTerrainEffectsExtended(unittest.TestCase):
         self.assertTrue(jump.is_available(eid,self.gs,target_tile=(2,0)))
         self.assertFalse(jump.is_available(eid,self.gs,target_tile=(3,0)))
         cover_id = self._add_entity('cover',1,0)
-        self.gs.get_entity('cover')['cover'] = DummyCover(bonus=3)
+        self.gs.set_component(
+            cover_id,
+            'cover',
+            CoverComponent(cover_type='custom', bonus=3),
+        )
         self.assertFalse(jump.execute(eid,self.gs,target_tile=(2,0)))
 
     def test_movement_cost_stacking_and_removal(self):

@@ -167,7 +167,10 @@ def test_melee_attack_no_ranged_cover_logic(base_game):
     add_character(gs,'att',0,0,'A')
     add_character(gs,'def',1,0,'B')
     # Ensure deterministic defense selection: mark defender as AI to prefer Dodge
-    gs.get_entity('def')['ai_controlled'] = True
+    defender_ref = gs.get_entity('def')["character_ref"]
+    defender_char = getattr(defender_ref, 'character', None)
+    if defender_char is not None:
+        defender_char.is_ai_controlled = True
     spawn_cover(gs,'light',0,1)
     melee_weapon = make_weapon('superficial', WeaponType.MELEE, rng=1)
     atk = AttackAction('att','def', melee_weapon, gs)
