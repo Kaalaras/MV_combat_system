@@ -44,3 +44,6 @@ ALL_EVENTS: Tuple[str, ...] = (
 def list_all_events() -> List[str]:
     return list(ALL_EVENTS)
 
+
+LEGACY_ALIAS_FIELD = "_legacy_alias_of"
+

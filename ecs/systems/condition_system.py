@@ -25,7 +25,7 @@ from ecs.components.health import HealthComponent
 from ecs.components.initiative import InitiativeComponent
 from ecs.components.willpower import WillpowerComponent
 from ecs.ecs_manager import ECSManager
-from interface.event_constants import CoreEvents
+from interface.event_constants import CoreEvents, LEGACY_ALIAS_FIELD
 from utils.condition_utils import (
     WEAKENED_PHYSICAL,
     WEAKENED_MENTAL_SOCIAL,
@@ -140,11 +140,11 @@ class ConditionSystem:
         bus.subscribe(CoreEvents.TURN_START, self._on_turn_started)
         self._subscribe_legacy_alias(CoreEvents.TURN_START, self._on_turn_started_legacy)
 
-    def _subscribe_legacy_alias(self, canonical_event: str, handler: Callable[..., Any]) -> None:
+    def _subscribe_legacy_alias(self, event_name: str, handler: Callable[..., Any]) -> None:
         if not self.event_bus:
             return
-        legacy_name = LEGACY_EVENT_ALIASES.get(canonical_event)
-        if legacy_name and legacy_name != canonical_event:
+        legacy_name = LEGACY_EVENT_ALIASES.get(event_name)
+        if legacy_name and legacy_name != event_name:
             self.event_bus.subscribe(legacy_name, handler)
 
     # Registration helpers --------------------------------------------------
@@ -664,7 +664,7 @@ class ConditionSystem:
         *args: Any,
         **kwargs: Any,
     ) -> None:
-        if kwargs.get('_legacy_alias_of') == canonical_event:
+        if kwargs.get(LEGACY_ALIAS_FIELD) == canonical_event:
             return
         handler(*args, **kwargs)
 

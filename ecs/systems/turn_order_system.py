@@ -51,7 +51,7 @@ from typing import List, Dict, Any, Tuple, Optional
 from ecs.components.character_ref import CharacterRefComponent
 from ecs.components.entity_id import EntityIdComponent
 from ecs.components.initiative import InitiativeComponent
-from interface.event_constants import CoreEvents
+from interface.event_constants import CoreEvents, LEGACY_ALIAS_FIELD
 
 
 class TurnOrderSystem:
@@ -296,5 +296,5 @@ class TurnOrderSystem:
         self.event_bus.publish(event_name, **payload)
         if legacy_name and legacy_name != event_name:
             legacy_payload = dict(payload)
-            legacy_payload.setdefault("_legacy_alias_of", event_name)
+            legacy_payload.setdefault(LEGACY_ALIAS_FIELD, event_name)
             self.event_bus.publish(legacy_name, **legacy_payload)
