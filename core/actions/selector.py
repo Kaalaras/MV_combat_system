@@ -259,9 +259,12 @@ def _get_position(entity_id: str, ecs: Any, rules_context: Any) -> Optional[tupl
 
 
 def _manhattan_distance(a: Sequence[int], b: Sequence[int]) -> int:
-    if len(a) != len(b):
+    len_a = len(a)
+    len_b = len(b)
+    if len_a != len_b:
         raise ValueError(
             "Cannot compute Manhattan distance: sequences have different lengths"
+            f" ({len_a} != {len_b})"
         )
 
     return sum(abs(int(x) - int(y)) for x, y in zip(a, b))

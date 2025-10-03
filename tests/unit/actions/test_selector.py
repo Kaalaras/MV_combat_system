@@ -3,7 +3,12 @@ from __future__ import annotations
 from collections.abc import Callable
 from dataclasses import dataclass
 
-from core.actions.selector import ActionOption, ActionSelector, compute_available_actions
+from core.actions.selector import (
+    ActionOption,
+    ActionSelector,
+    _manhattan_distance,
+    compute_available_actions,
+)
 from core.events import topics
 
 
@@ -128,3 +133,12 @@ def test_action_selector_publishes_on_bus() -> None:
     payload = published_payloads[-1]
     assert payload["actor_id"] == "hero"
     assert any(action["id"] == "move" for action in payload["actions"])  # type: ignore[index]
+
+
+def test_manhattan_distance_raises_on_mismatched_lengths() -> None:
+    try:
+        _manhattan_distance((0, 0), (1, 2, 3))
+    except ValueError as exc:
+        assert "2 != 3" in str(exc)
+    else:
+        raise AssertionError("Expected ValueError for mismatched coordinate lengths")
