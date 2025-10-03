@@ -231,7 +231,10 @@ class GameState:
                     component_key_map[comp_type] = name
 
         if component_key_map:
-            self._entity_component_keys[entity_id] = component_key_map
+            existing_map = self._entity_component_keys.get(entity_id, {})
+            merged_map = dict(existing_map)
+            merged_map.update(component_key_map)
+            self._entity_component_keys[entity_id] = merged_map
         else:
             self._entity_component_keys.pop(entity_id, None)
 
