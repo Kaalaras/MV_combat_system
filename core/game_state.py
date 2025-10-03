@@ -220,7 +220,11 @@ class GameState:
             comp_type = type(component)
             try:
                 derived_name = self._component_key_from_type(comp_type)
-            except (TypeError, ValueError):
+            except (TypeError, ValueError) as exc:
+                logger.warning(
+                    "Failed to derive component key from type '%s' for component '%s' on entity '%s': %s",
+                    comp_type, name, entity_id, exc
+                )
                 component_key_map[comp_type] = name
             else:
                 if derived_name != name:
