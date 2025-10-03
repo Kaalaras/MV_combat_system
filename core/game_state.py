@@ -110,7 +110,7 @@ class GameState:
     teams, and references to various game systems like event handling and movement.
 
     Attributes:
-        entities: Dictionary mapping entity IDs to their component dictionaries
+        entities: Read-only mapping view exposing entity component dictionaries
         terrain: The game's terrain data
         event_bus: Reference to the event management system
         teams: Dictionary mapping team identifiers to lists of entity IDs
@@ -628,27 +628,16 @@ class GameState:
         Returns:
             None
         """
-        if self.ecs_manager:
-            teams: Dict[str, List[str]] = {}
-            for entity_id, team_component in self.ecs_manager.iter_with_id(TeamComponent):
-                team_id = getattr(team_component, "team_id", None)
-                if team_id in (None, ""):
-                    continue
-                teams.setdefault(str(team_id), []).append(entity_id)
-            self.teams = teams
+        if not self.ecs_manager:
+            self.teams = {}
             return
 
         teams: Dict[str, List[str]] = {}
-        for eid, comps in self.entities.items():
-            cref = comps.get("character_ref")
-            if not cref:
+        for entity_id, team_component in self.ecs_manager.iter_with_id(TeamComponent):
+            team_id = getattr(team_component, "team_id", None)
+            if team_id in (None, ""):
                 continue
-            char = getattr(cref, 'character', None)
-            if not char:
-                continue
-            tm = getattr(char, 'team', None)
-            if tm is not None:
-                teams.setdefault(str(tm), []).append(eid)
+            teams.setdefault(str(team_id), []).append(entity_id)
         self.teams = teams
 
     def get_entity_size(self, entity_id: str) -> tuple[int, int]:
