@@ -158,7 +158,6 @@ class GameState:
         self._event_bus: Optional[Any] = None  # Optional: reference to EventBus, replace Any
         self.teams: Dict[str, List[str]] = {}
         self.movement: Optional[Any] = None  # Optional: reference to MovementSystem, replace Any
-        self.movement_turn_usage: Dict[str, Dict[str, Any]] = {}  # {'distance':int}
         self.condition_system: Any = None  # New: reference to ConditionSystem
         self.cover_system: Any = None  # New: reference to CoverSystem
         self.terrain_effect_system: Any = None  # Reference to TerrainEffectSystem
@@ -681,14 +680,18 @@ class GameState:
         self.reset_movement_usage(entity_id)
 
     def _handle_movement_distance_spent(self, entity_id: str, distance: int, **_: Any) -> None:
-        """Event callback updating cached movement usage totals."""
+        """Event callback invoked when movement distance has been spent."""
 
-        if distance <= 0:
+        if distance <= 0 or not self.ecs_manager:
             return
-        if entity_id not in self.movement_turn_usage:
-            self.movement_turn_usage[entity_id] = {"distance": 0}
-        self.movement_turn_usage[entity_id]["distance"] += distance
-
+        internal_id = self._resolve_internal_entity_id(entity_id)
+        if internal_id is None:
+            return
+        component = self.ecs_manager.try_get_component(internal_id, MovementUsageComponent)
+        if component is None:
+            component = MovementUsageComponent()
+            self.ecs_manager.add_component(internal_id, component)
+        component.add(distance)
     def _handle_visibility_state_changed(self, entity_id: str, **_: Any) -> None:
         """Event callback triggered when an entity's visibility-affecting state changes."""
 
@@ -696,44 +699,48 @@ class GameState:
 
     def reset_movement_usage(self, entity_id: str):
         """Reset per-turn movement tracking for an entity (called at turn start)."""
-        self.movement_turn_usage[entity_id] = {"distance": 0}
-        if self.ecs_manager:
-            internal_id = self._ecs_entities.get(entity_id)
-            if internal_id is None and self.ecs_manager:
-                internal_id = self.ecs_manager.resolve_entity(entity_id)
-            if internal_id is not None:
-                component = self.ecs_manager.try_get_component(internal_id, MovementUsageComponent)
-                if component is None:
-                    component = MovementUsageComponent()
-                    self.ecs_manager.add_component(internal_id, component)
-                else:
-                    component.reset()
+        internal_id = self._resolve_internal_entity_id(entity_id)
+        if not self.ecs_manager or internal_id is None:
+            return
+        component = self.ecs_manager.try_get_component(internal_id, MovementUsageComponent)
+        if component is None:
+            component = MovementUsageComponent()
+            self.ecs_manager.add_component(internal_id, component)
+        component.reset()
 
     def add_movement_steps(self, entity_id: str, steps: int):
-        if entity_id not in self.movement_turn_usage:
-            self.reset_movement_usage(entity_id)
-        self.movement_turn_usage[entity_id]["distance"] += steps
-        if self.ecs_manager and steps:
-            internal_id = self._ecs_entities.get(entity_id)
-            if internal_id is None:
-                internal_id = self.ecs_manager.resolve_entity(entity_id)
-            if internal_id is not None:
-                component = self.ecs_manager.try_get_component(internal_id, MovementUsageComponent)
-                if component is None:
-                    component = MovementUsageComponent()
-                    self.ecs_manager.add_component(internal_id, component)
-                component.add(steps)
+        if not self.ecs_manager or steps <= 0:
+            return
+        internal_id = self._resolve_internal_entity_id(entity_id)
+        if internal_id is None:
+            return
+        component = self.ecs_manager.try_get_component(internal_id, MovementUsageComponent)
+        if component is None:
+            component = MovementUsageComponent()
+            self.ecs_manager.add_component(internal_id, component)
+        component.add(steps)
 
     def get_movement_used(self, entity_id: str) -> int:
-        if self.ecs_manager:
-            internal_id = self._ecs_entities.get(entity_id)
-            if internal_id is None:
-                internal_id = self.ecs_manager.resolve_entity(entity_id)
-            if internal_id is not None:
-                component = self.ecs_manager.try_get_component(internal_id, MovementUsageComponent)
-                if component is not None:
-                    return int(getattr(component, "distance", 0))
-        return self.movement_turn_usage.get(entity_id, {}).get("distance", 0)
+        if not self.ecs_manager:
+            return 0
+        internal_id = self._resolve_internal_entity_id(entity_id)
+        if internal_id is None:
+            return 0
+        component = self.ecs_manager.try_get_component(internal_id, MovementUsageComponent)
+        if component is None:
+            return 0
+        return int(component.distance)
+
+    def _resolve_internal_entity_id(self, entity_id: str) -> Optional[int]:
+        if not self.ecs_manager:
+            return None
+        internal_id = self._ecs_entities.get(entity_id)
+        if internal_id is not None:
+            return internal_id
+        internal_id = self.ecs_manager.resolve_entity(entity_id)
+        if internal_id is not None:
+            self._ecs_entities[entity_id] = internal_id
+        return internal_id
 
     # Version bump helpers for LOS / cover caching
     def bump_terrain_version(self):
