@@ -729,7 +729,7 @@ class GameState:
         component = self.ecs_manager.try_get_component(internal_id, MovementUsageComponent)
         if component is None:
             return 0
-        return int(getattr(component, "distance", 0))
+        return int(component.distance)
 
     def _resolve_internal_entity_id(self, entity_id: str) -> Optional[int]:
         if not self.ecs_manager:
