@@ -686,7 +686,7 @@ class GameState:
 
         if not isinstance(component_type, type):
             raise TypeError(
-                f"Component type must be a class, got {type(component_type)!r} instead."
+                f"Component type must be a class, got {component_type!r} instead."
             )
 
         name = getattr(component_type, "__name__", None)
