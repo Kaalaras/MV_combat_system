@@ -11,6 +11,9 @@ from ecs.components.team import TeamComponent
 from ecs.components.condition_tracker import ConditionTrackerComponent
 
 
+LEGACY_CONDITION_COMPONENT_TYPES: Tuple[Type[Any], ...] = (set,)
+
+
 class _EntitiesView(Mapping[str, Dict[str, Any]]):
     """Read-only adapter exposing ECS entities via the legacy dictionary API."""
 
@@ -259,6 +262,9 @@ class GameState:
             try:
                 self.ecs_manager = ECSManager(event_bus)
             except Exception:
+                logger.exception(
+                    "Failed to initialize ECSManager with event_bus, falling back without bus."
+                )
                 self.ecs_manager = ECSManager()
         return self.ecs_manager
 
@@ -280,6 +286,9 @@ class GameState:
         """
         internal_id = self._ecs_entities.pop(entity_id, None)
         self._entity_component_keys.pop(entity_id, None)
+        if internal_id is None and self.ecs_manager is not None:
+            internal_id = self.ecs_manager.resolve_entity(entity_id)
+
         if self.ecs_manager and internal_id is not None:
             try:
                 self.ecs_manager.delete_entity(internal_id)
@@ -729,8 +738,11 @@ class GameState:
         for comp_type, component in components_by_type.items():
             key = key_lookup.get(comp_type)
             if key is None:
-                key = "conditions" if comp_type == set else self._component_key_from_type(comp_type)
-            if comp_type == set and key == "conditions":
+                if comp_type in LEGACY_CONDITION_COMPONENT_TYPES:
+                    key = "conditions"
+                else:
+                    key = self._component_key_from_type(comp_type)
+            if comp_type in LEGACY_CONDITION_COMPONENT_TYPES and key == "conditions":
                 component_map[key] = set(component)
                 continue
             component_map[key] = component
