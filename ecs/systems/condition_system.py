@@ -17,7 +17,7 @@ recheck_damage_based(). The Total variant can be added as timed/permanent.
 from __future__ import annotations
 import logging
 from dataclasses import dataclass, field
-from typing import Optional, Dict, Any, Set
+from typing import Optional, Dict, Any, Set, Callable
 
 from ecs.components.condition_tracker import ConditionTrackerComponent
 from ecs.components.character_ref import CharacterRefComponent
@@ -47,6 +47,11 @@ DYNAMIC_WEAKENED = {WEAKENED_PHYSICAL, WEAKENED_MENTAL_SOCIAL}
 STACKABLE_NAMES = {'InitiativeMod','MaxHealthMod','DamageOutMod','DamageInMod'}
 
 logger = logging.getLogger(__name__)
+
+LEGACY_EVENT_ALIASES = {
+    CoreEvents.ROUND_START: "round_started",
+    CoreEvents.TURN_START: "turn_started",
+}
 
 @dataclass
 class Condition:
@@ -130,12 +135,17 @@ class ConditionSystem:
         if not bus:
             return
         bus.subscribe(CoreEvents.ROUND_START, self._on_round_started)
-        if CoreEvents.ROUND_START != "round_started":
-            bus.subscribe("round_started", self._on_round_started_legacy)
+        self._subscribe_legacy_alias(CoreEvents.ROUND_START, self._on_round_started_legacy)
         bus.subscribe('damage_inflicted', self._on_damage_inflicted)
         bus.subscribe(CoreEvents.TURN_START, self._on_turn_started)
-        if CoreEvents.TURN_START != "turn_started":
-            bus.subscribe("turn_started", self._on_turn_started_legacy)
+        self._subscribe_legacy_alias(CoreEvents.TURN_START, self._on_turn_started_legacy)
+
+    def _subscribe_legacy_alias(self, canonical_event: str, handler: Callable[..., Any]) -> None:
+        if not self.event_bus:
+            return
+        legacy_name = LEGACY_EVENT_ALIASES.get(canonical_event)
+        if legacy_name and legacy_name != canonical_event:
+            self.event_bus.subscribe(legacy_name, handler)
 
     # Registration helpers --------------------------------------------------
     def register_start_turn_handler(self, condition_name: str, func: Any):
@@ -642,14 +652,21 @@ class ConditionSystem:
                 self.game_state.bump_blocker_version()
 
     def _on_round_started_legacy(self, **evt):
-        if evt.get('_legacy_alias_of') == CoreEvents.ROUND_START:
-            return
-        self._on_round_started(**evt)
+        self._forward_legacy_alias(self._on_round_started, CoreEvents.ROUND_START, **evt)
 
     def _on_turn_started_legacy(self, entity_id: str, **evt):
-        if evt.get('_legacy_alias_of') == CoreEvents.TURN_START:
+        self._forward_legacy_alias(self._on_turn_started, CoreEvents.TURN_START, entity_id, **evt)
+
+    def _forward_legacy_alias(
+        self,
+        handler: Callable[..., Any],
+        canonical_event: str,
+        *args: Any,
+        **kwargs: Any,
+    ) -> None:
+        if kwargs.get('_legacy_alias_of') == canonical_event:
             return
-        self._on_turn_started(entity_id, **evt)
+        handler(*args, **kwargs)
 
     def _on_round_started(self, **evt):
         expired = []
