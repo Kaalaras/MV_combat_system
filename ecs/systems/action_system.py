@@ -42,13 +42,19 @@ Example:
     action_system.reset_counters("player1")
 
     # Trigger the action via the event bus
-    event_bus.publish("action_requested", entity_id="player1", action_name="attack", target_id="enemy1")
+    event_bus.publish(
+        CoreEvents.ACTION_REQUESTED,
+        entity_id="player1",
+        action_name="attack",
+        target_id="enemy1",
+    )
 """
 
 from __future__ import annotations
 from typing import Any, Callable, Dict, List, Optional
 from dataclasses import dataclass, field
 from enum import Enum
+from interface.event_constants import CoreEvents
 
 
 class ActionType(Enum):
@@ -149,7 +155,7 @@ class ActionSystem:
         self.cooldowns: Dict[str, Dict[str, int]] = {}
 
         if self.event_bus:
-            self.event_bus.subscribe("action_requested", self.handle_action_requested)
+            self.event_bus.subscribe(CoreEvents.ACTION_REQUESTED, self.handle_action_requested)
 
     # --- Helpers for robust enum handling -----------------------------------
     def _normalize_action_type(self, at) -> str:
@@ -208,19 +214,34 @@ class ActionSystem:
         if not action:
             print(f"[ActionSystem][WARN] Action '{action_name}' not found for entity {entity_id}")
             if self.event_bus:
-                self.event_bus.publish("action_failed", entity_id=entity_id, action_name=action_name, reason="not_found")
+                self.event_bus.publish(
+                    CoreEvents.ACTION_FAILED,
+                    entity_id=entity_id,
+                    action_name=action_name,
+                    reason="not_found",
+                )
             return
 
         if not self.can_perform_action(entity_id, action, **action_params):
             print(f"[ActionSystem][DEBUG] Action '{action_name}' cannot be performed by {entity_id}")
             if self.event_bus:
-                self.event_bus.publish("action_failed", entity_id=entity_id, action_name=action_name, reason="unavailable")
+                self.event_bus.publish(
+                    CoreEvents.ACTION_FAILED,
+                    entity_id=entity_id,
+                    action_name=action_name,
+                    reason="unavailable",
+                )
             return
 
         result = self.perform_action(entity_id, action, **action_params)
         if self.event_bus:
             try:
-                self.event_bus.publish("action_performed", entity_id=entity_id, action_name=action.name, result=result)
+                self.event_bus.publish(
+                    CoreEvents.ACTION_PERFORMED,
+                    entity_id=entity_id,
+                    action_name=action.name,
+                    result=result,
+                )
             except Exception as e:
                 print(f"[ActionSystem][WARN] Failed to publish action_performed: {e}")
         return result
@@ -396,7 +417,12 @@ class ActionSystem:
         # Publish here as safety if direct calls bypass handle_action_requested
         if self.event_bus:
             try:
-                self.event_bus.publish("action_performed", entity_id=entity_id, action_name=action.name, result=result)
+                self.event_bus.publish(
+                    CoreEvents.ACTION_PERFORMED,
+                    entity_id=entity_id,
+                    action_name=action.name,
+                    result=result,
+                )
             except Exception as e:
                 print(f"[ActionSystem][WARN] Failed to publish action_performed (direct): {e}")
         return result  # Return the actual result from action execution

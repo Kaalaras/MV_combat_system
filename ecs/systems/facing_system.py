@@ -14,6 +14,7 @@ Rules:
 from typing import Optional, Tuple
 from ..components.facing import FacingComponent  # changed to relative import
 from ..components.position import PositionComponent  # changed to relative import
+from interface.event_constants import CoreEvents
 
 
 class FacingSystem:
@@ -38,8 +39,8 @@ class FacingSystem:
 
         # Subscribe to action events
         if event_bus:
-            event_bus.subscribe("action_requested", self._on_action_requested)
-            event_bus.subscribe("action_performed", self._on_action_performed)
+            event_bus.subscribe(CoreEvents.ACTION_REQUESTED, self._on_action_requested)
+            event_bus.subscribe(CoreEvents.ACTION_PERFORMED, self._on_action_performed)
 
     # ------------------------------------------------------------------
     # Event Handlers

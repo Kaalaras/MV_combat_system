@@ -13,6 +13,7 @@ Publishes (already defined in terrain_manager):
   EVT_TERRAIN_EFFECT_TRIGGER (delegated via terrain.handle_entity_enter or forced re-trigger)
 """
 from typing import Any, Tuple
+from interface.event_constants import CoreEvents
 from core.terrain_manager import (
     EFFECT_CURRENT,
     EVT_TERRAIN_CURRENT_MOVED,
@@ -28,8 +29,8 @@ class TerrainEffectSystem:
         self.terrain = terrain
         self.event_bus = event_bus
         if event_bus:
-            event_bus.subscribe("round_start", self.on_round_start)
-            event_bus.subscribe("turn_start", self.on_turn_start)
+            event_bus.subscribe(CoreEvents.ROUND_START, self.on_round_start)
+            event_bus.subscribe(CoreEvents.TURN_START, self.on_turn_start)
 
     # --- Event handlers -------------------------------------------------
     def on_round_start(self, round_number: int, **kwargs):  # kwargs for bus compatibility

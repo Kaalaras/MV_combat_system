@@ -22,6 +22,7 @@ from . import targeting
 from . import movement
 from . import utils
 from core.los_manager import LineOfSightManager
+from interface.event_constants import CoreEvents
 
 class TurnOrderSystemWrapper:
     """
@@ -499,7 +500,7 @@ class BasicAISystem:
         if (reload_action and ctx.ranged_weapon and hasattr(ctx.ranged_weapon, 'ammunition') and ctx.ranged_weapon.ammunition <= 0
             and not ctx.adjacent_enemies and self.action_system.can_perform_action(char_id, reload_action)):
             self._debug(f"{char_id}: Reloading before attacks")
-            self.event_bus.publish("action_requested", entity_id=char_id, action_name=reload_action.name)
+            self.event_bus.publish(CoreEvents.ACTION_REQUESTED, entity_id=char_id, action_name=reload_action.name)
             return True
 
         # Step 1: Immediate ranged attack (no adjacent enemy)
@@ -540,7 +541,7 @@ class BasicAISystem:
                 move_params = {'target_tile': cover_tile}
                 if self.action_system.can_perform_action(char_id, sprint_action, **move_params):
                     self.turn_order_system.reserved_tiles.add(cover_tile)
-                    self.event_bus.publish("action_requested", entity_id=char_id, action_name=sprint_action.name, **move_params)
+                    self.event_bus.publish(CoreEvents.ACTION_REQUESTED, entity_id=char_id, action_name=sprint_action.name, **move_params)
                     return True
 
         # Step 6: Sprint toward closest enemy (aggressive advance)
@@ -559,7 +560,7 @@ class BasicAISystem:
                 move_params = {'target_tile': target_tile}
                 if self.action_system.can_perform_action(char_id, sprint_action, **move_params):
                     self.turn_order_system.reserved_tiles.add(target_tile)
-                    self.event_bus.publish("action_requested", entity_id=char_id, action_name=sprint_action.name, **move_params)
+                    self.event_bus.publish(CoreEvents.ACTION_REQUESTED, entity_id=char_id, action_name=sprint_action.name, **move_params)
                     return True
 
         # Fallback: If still have attack (maybe only long range) attempt ranged again (penalized)
@@ -588,7 +589,7 @@ class BasicAISystem:
             return False
         params = {'target_id': target_id, 'weapon': ctx.ranged_weapon}
         if self.action_system.can_perform_action(char_id, attack_action, **params):
-            self.event_bus.publish("action_requested", entity_id=char_id, action_name=attack_action.name, **params)
+            self.event_bus.publish(CoreEvents.ACTION_REQUESTED, entity_id=char_id, action_name=attack_action.name, **params)
             return True
         return False
 
@@ -600,7 +601,7 @@ class BasicAISystem:
             if attack_action:
                 params = {'target_id': target_id, 'weapon': ctx.melee_weapon}
                 if self.action_system.can_perform_action(char_id, attack_action, **params):
-                    self.event_bus.publish("action_requested", entity_id=char_id, action_name=attack_action.name, **params)
+                    self.event_bus.publish(CoreEvents.ACTION_REQUESTED, entity_id=char_id, action_name=attack_action.name, **params)
                     return True
         return False
 
@@ -628,28 +629,28 @@ class BasicAISystem:
 
         if move_action and self.action_system.can_perform_action(char_id, move_action, **move_params):
             self.turn_order_system.reserved_tiles.add(move_tile)
-            self.event_bus.publish("action_requested", entity_id=char_id, action_name=move_action.name, **move_params)
+            self.event_bus.publish(CoreEvents.ACTION_REQUESTED, entity_id=char_id, action_name=move_action.name, **move_params)
 
             # Try to queue attack
             attack_action = self._find_action(char_id, "Attack")
             if attack_action:
                 attack_params = {'target_id': target_id, 'weapon': weapon}
                 if self.action_system.can_perform_action(char_id, attack_action, **attack_params):
-                    self.event_bus.publish("action_requested", entity_id=char_id, action_name=attack_action.name, **attack_params)
+                    self.event_bus.publish(CoreEvents.ACTION_REQUESTED, entity_id=char_id, action_name=attack_action.name, **attack_params)
             return True
 
         # Try Sprint if Standard Move failed
         sprint_action = self._find_action(char_id, "Sprint")
         if sprint_action and self.action_system.can_perform_action(char_id, sprint_action, **move_params):
             self.turn_order_system.reserved_tiles.add(move_tile)
-            self.event_bus.publish("action_requested", entity_id=char_id, action_name=sprint_action.name, **move_params)
+            self.event_bus.publish(CoreEvents.ACTION_REQUESTED, entity_id=char_id, action_name=sprint_action.name, **move_params)
 
             # Try to queue attack
             attack_action = self._find_action(char_id, "Attack")
             if attack_action:
                 attack_params = {'target_id': target_id, 'weapon': weapon}
                 if self.action_system.can_perform_action(char_id, attack_action, **attack_params):
-                    self.event_bus.publish("action_requested", entity_id=char_id, action_name=attack_action.name, **attack_params)
+                    self.event_bus.publish(CoreEvents.ACTION_REQUESTED, entity_id=char_id, action_name=attack_action.name, **attack_params)
             return True
 
         return False
@@ -658,7 +659,7 @@ class BasicAISystem:
         """Try to reload weapon"""
         reload_action = self._find_action(char_id, "Reload")
         if reload_action and self.action_system.can_perform_action(char_id, reload_action):
-            self.event_bus.publish("action_requested", entity_id=char_id, action_name="Reload")
+            self.event_bus.publish(CoreEvents.ACTION_REQUESTED, entity_id=char_id, action_name="Reload")
             return True
         return False
 
@@ -693,7 +694,7 @@ class BasicAISystem:
         if move_action and self.action_system.can_perform_action(char_id, move_action, **move_params):
             self.turn_order_system.reserved_tiles.add(target_tile)
             if self.event_bus:
-                self.event_bus.publish("action_requested", entity_id=char_id, action_name=move_action.name, **move_params)
+                self.event_bus.publish(CoreEvents.ACTION_REQUESTED, entity_id=char_id, action_name=move_action.name, **move_params)
             return True
 
         # Try Sprint if Standard Move failed
@@ -701,7 +702,7 @@ class BasicAISystem:
         if sprint_action and self.action_system.can_perform_action(char_id, sprint_action, **move_params):
             self.turn_order_system.reserved_tiles.add(target_tile)
             if self.event_bus:
-                self.event_bus.publish("action_requested", entity_id=char_id, action_name=sprint_action.name, **move_params)
+                self.event_bus.publish(CoreEvents.ACTION_REQUESTED, entity_id=char_id, action_name=sprint_action.name, **move_params)
             return True
 
         return False
@@ -710,7 +711,7 @@ class BasicAISystem:
         """End the turn"""
         end_turn_action = self._find_action(char_id, "End Turn")
         if end_turn_action and self.action_system.can_perform_action(char_id, end_turn_action):
-            self.event_bus.publish("action_requested", entity_id=char_id, action_name="End Turn")
+            self.event_bus.publish(CoreEvents.ACTION_REQUESTED, entity_id=char_id, action_name="End Turn")
             return True
         else:
             self._debug(f"WARNING: End Turn action not found for {char_id}!")
@@ -727,4 +728,4 @@ class BasicAISystem:
                 char_name = getattr(entity["character_ref"].character, "name", char_name)
             print(f"AI for {char_name} failed to choose a valid action. Ending turn.")
             if self.event_bus:
-                self.event_bus.publish("request_end_turn", entity_id=entity_id)
+                self.event_bus.publish(CoreEvents.REQUEST_END_TURN, entity_id=entity_id)
