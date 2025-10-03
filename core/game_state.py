@@ -216,8 +216,20 @@ class GameState:
                     "Skipping None component '%s' while adding entity %s", name, entity_id
                 )
                 continue
-            component_key_map[type(component)] = name
-        self._entity_component_keys[entity_id] = component_key_map
+
+            comp_type = type(component)
+            try:
+                derived_name = self._component_key_from_type(comp_type)
+            except (TypeError, ValueError):
+                component_key_map[comp_type] = name
+            else:
+                if derived_name != name:
+                    component_key_map[comp_type] = name
+
+        if component_key_map:
+            self._entity_component_keys[entity_id] = component_key_map
+        else:
+            self._entity_component_keys.pop(entity_id, None)
 
         try:
             internal_id = self._mirror_entity(entity_id, components)
@@ -378,7 +390,20 @@ class GameState:
             internal_id = ecs_manager.resolve_entity(entity_id)
         if internal_id is None:
             raise KeyError(f"Cannot set component '{component_name}': entity with ID '{entity_id}' does not exist in ECS.")
-        self._entity_component_keys.setdefault(entity_id, {})[type(component_value)] = component_name
+        component_type = type(component_value)
+        try:
+            derived_name = self._component_key_from_type(component_type)
+        except (TypeError, ValueError):
+            self._entity_component_keys.setdefault(entity_id, {})[component_type] = component_name
+        else:
+            if derived_name != component_name:
+                self._entity_component_keys.setdefault(entity_id, {})[component_type] = component_name
+            else:
+                key_map = self._entity_component_keys.get(entity_id)
+                if key_map is not None:
+                    key_map.pop(component_type, None)
+                    if not key_map:
+                        self._entity_component_keys.pop(entity_id, None)
         ecs_manager.add_component(internal_id, component_value)
 
     def set_terrain(self, terrain: Any) -> None:
@@ -791,9 +816,11 @@ class GameState:
                     key = "conditions"
                 else:
                     key = self._component_key_from_type(comp_type)
+
             if isinstance(component, LEGACY_CONDITION_VALUE_TYPES) and key == "conditions":
                 component_map[key] = set(component)
                 continue
+
             component_map[key] = component
 
         return component_map
