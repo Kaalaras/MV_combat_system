@@ -77,7 +77,8 @@ def test_compute_available_actions_core_paths() -> None:
 
     melee_option = option_map["attack_melee"]
     assert melee_option.is_available
-    assert any(target.to_dict()["reference"] == "ghoul" for target in melee_option.valid_targets)  # type: ignore[union-attr]
+    target_refs = [target.to_dict()["reference"] for target in melee_option.valid_targets]
+    assert "ghoul" in target_refs
 
     ranged_option = option_map["attack_ranged"]
     assert ranged_option.is_available

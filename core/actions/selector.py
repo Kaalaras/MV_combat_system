@@ -18,15 +18,12 @@ class EventBusLike(Protocol):
         ...
 
 
-TargetResolver = Callable[[str, Any, Any], Sequence[TargetSpec]]
-
-
 @dataclass(slots=True)
 class ActionOption:
     """Action candidate enriched with gameplay metadata."""
 
     definition: ActionDef
-    valid_targets: list[TargetSpec | TargetResolver] = field(default_factory=list)
+    valid_targets: list[TargetSpec] = field(default_factory=list)
     ui_hints: Mapping[str, Any] = field(default_factory=dict)
     predicates_failed: list[str] = field(default_factory=list)
 
@@ -41,10 +38,7 @@ class ActionOption:
     def to_payload(self) -> dict[str, Any]:
         targets_payload: list[Any] = []
         for entry in self.valid_targets:
-            if isinstance(entry, TargetSpec):
-                targets_payload.append(entry.to_dict())
-            else:
-                targets_payload.append(entry)
+            targets_payload.append(entry.to_dict())
 
         return {
             "id": self.definition.id,
@@ -80,7 +74,7 @@ def compute_available_actions(actor_id: str, ecs: Any, rules_context: Any) -> li
 
 def _evaluate_action(action_def: ActionDef, actor_id: str, ecs: Any, rules_context: Any) -> ActionOption:
     predicates_failed: list[str] = []
-    valid_targets: list[TargetSpec | TargetResolver] = []
+    valid_targets: list[TargetSpec] = []
     ui_hints: dict[str, Any] = {}
 
     predicates_failed.extend(
@@ -265,14 +259,19 @@ def _get_position(entity_id: str, ecs: Any, rules_context: Any) -> Optional[tupl
 
 
 def _manhattan_distance(a: Sequence[int], b: Sequence[int]) -> int:
+    if len(a) != len(b):
+        raise ValueError(
+            "Cannot compute Manhattan distance: sequences have different lengths"
+        )
+
     return sum(abs(int(x) - int(y)) for x, y in zip(a, b))
 
 
 def _check_costs(action_def: ActionDef, actor_id: str, ecs: Any, rules_context: Any) -> list[str]:
     failures: list[str] = []
     costs = action_def.costs
-    cost_items = costs.to_dict().items()
-    for resource, required in cost_items:
+    cost_dict = costs.to_dict()
+    for resource, required in cost_dict.items():
         if required <= 0:
             continue
         available = _resolve_resource(actor_id, resource, ecs, rules_context)
