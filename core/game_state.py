@@ -233,27 +233,48 @@ class GameState:
             raise
 
     def get_entity(self, entity_id: str) -> Optional[Dict[str, Any]]:
-        """
-        Retrieve all components for a specific entity.
+        """Return the ECS-backed projection for ``entity_id`` if it exists."""
 
-        Args:
-            entity_id: The unique identifier for the entity
+        entities_view = self.entities
+        if not isinstance(entities_view, _EntitiesView):
+            return None
 
-        Returns:
-            Dictionary of components if entity exists, None otherwise
+        internal_id = entities_view._resolve_internal_id(entity_id)
+        ecs_manager = self.ecs_manager
 
-        Example:
-            ```python
-            # Get all components for an entity
-            if player := game_state.get_entity("player1"):
-                # Entity exists, access its components
-                position = player.get("position")
+        if internal_id is None or ecs_manager is None:
+            return None
+
+        components = self._collect_components_for_internal_id(
+            internal_id,
+            manager=ecs_manager,
+            entity_id=entity_id,
+        )
+        if not components:
+            return None
+
+        result: Dict[str, Any] = dict(components)
+
+        tracker = result.get("condition_tracker")
+        if isinstance(tracker, ConditionTrackerComponent):
+            result["conditions"] = set(tracker.active_states())
+        else:
+            legacy_conditions = result.get("conditions")
+            if isinstance(legacy_conditions, set):
+                result["conditions"] = set(legacy_conditions)
             else:
-                # Entity doesn't exist
-                print("Player not found")
-            ```
-        """
-        return self.entities.get(entity_id)
+                result["conditions"] = set()
+
+        char_ref = result.get("character_ref")
+        character = getattr(char_ref, "character", None) if char_ref is not None else None
+        if character is not None:
+            result.setdefault("ai_controlled", getattr(character, "is_ai_controlled", False))
+
+        for key in entities_view._ENSURED_KEYS:
+            if key == "conditions":
+                result.setdefault(key, set())
+
+        return result
 
     def _ensure_ecs_manager(self) -> Any:
         """Instantiate a fallback ECS manager when one is not already configured."""
