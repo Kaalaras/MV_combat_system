@@ -37,7 +37,7 @@ class TerrainEffectSystem:
         """Process currents: push entities in current tiles.
         Each entity checked once using its starting anchor position.
         If multiple current effects on same tile, apply the first in list (legacy simple behavior)."""
-        for entity_id, comps in list(self.game_state.entities.items()):
+        for entity_id, comps in self.game_state.entities.items():
             pos = comps.get("position")
             if not pos:
                 continue

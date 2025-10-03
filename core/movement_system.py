@@ -168,7 +168,8 @@ class MovementSystem:
 
         publish = getattr(self.event_bus, "publish", None) if self.event_bus else None
         if callable(publish):
-            add_to_component()
+            if not getattr(self.game_state, "_movement_event_registered", False):
+                add_to_component()
             publish(
                 "movement_distance_spent",
                 entity_id=entity_id,
