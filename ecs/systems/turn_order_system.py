@@ -46,7 +46,7 @@ Example:
     turn_system.delay_current_entity()
 """
 import random
-from typing import List, Dict, Any, Tuple, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 from ecs.components.character_ref import CharacterRefComponent
 from ecs.components.entity_id import EntityIdComponent

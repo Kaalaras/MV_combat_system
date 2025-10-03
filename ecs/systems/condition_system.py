@@ -655,7 +655,12 @@ class ConditionSystem:
         self._forward_legacy_alias(self._on_round_started, CoreEvents.ROUND_START, **evt)
 
     def _on_turn_started_legacy(self, entity_id: str, **evt):
-        self._forward_legacy_alias(self._on_turn_started, CoreEvents.TURN_START, entity_id, **evt)
+        self._forward_legacy_alias(
+            self._on_turn_started,
+            CoreEvents.TURN_START,
+            entity_id=entity_id,
+            **evt,
+        )
 
     def _forward_legacy_alias(
         self,
@@ -664,6 +669,10 @@ class ConditionSystem:
         *args: Any,
         **kwargs: Any,
     ) -> None:
+        # Prevent infinite forwarding loops by respecting the alias marker inserted by
+        # the publishing system. This relies on publishers providing the marker when
+        # they emit legacy-compatible events; if the canonical event shows up through
+        # the legacy channel we bail out instead of invoking the handler again.
         if kwargs.get(LEGACY_ALIAS_FIELD) == canonical_event:
             return
         handler(*args, **kwargs)
