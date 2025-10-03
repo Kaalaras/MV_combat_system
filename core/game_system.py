@@ -110,9 +110,13 @@ class GameSystem:
             self.game_state.set_ecs_manager(self.ecs_manager)
 
         if self.event_bus:
-            self.event_bus.subscribe(CoreEvents.ACTION_PERFORMED, self.handle_action_resolved)
-            self.event_bus.subscribe(CoreEvents.ACTION_FAILED, self.handle_action_resolved)
-            self.event_bus.subscribe(CoreEvents.REQUEST_END_TURN, self.handle_request_end_turn)
+            subscriptions = (
+                (CoreEvents.ACTION_PERFORMED, self.handle_action_resolved),
+                (CoreEvents.ACTION_FAILED, self.handle_action_resolved),
+                (CoreEvents.REQUEST_END_TURN, self.handle_request_end_turn),
+            )
+            for topic, handler in subscriptions:
+                self.event_bus.subscribe(topic, handler)
 
     def set_map_directory(self, map_dir: str) -> None:
         """
