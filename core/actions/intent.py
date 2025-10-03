@@ -1,6 +1,6 @@
 """Definitions for declarative action intents and related specifications.
 
-This module contains lightweight, serialisable dataclasses that describe the
+This module contains lightweight, serializable dataclasses that describe the
 intent of an actor without performing any direct game state mutations.  These
 structures are meant to be shared between different layers (UI, AI, network)
 and therefore avoid dependencies on the runtime game state objects.
@@ -24,7 +24,7 @@ class CostSpec:
     ammunition: int = 0
 
     def to_dict(self) -> dict[str, Any]:
-        """Return a serialisable representation of the cost specification."""
+        """Return a serializable representation of the cost specification."""
 
         return {
             "action_points": self.action_points,
@@ -81,7 +81,7 @@ class TargetSpec:
         object.__setattr__(self, "extra", MappingProxyType(dict(self.extra)))
 
     def to_dict(self) -> dict[str, Any]:
-        """Return a serialisable representation of the target specification."""
+        """Return a serializable representation of the target specification."""
 
         payload: dict[str, Any] = {"kind": self.kind}
         if self.reference is not None:
@@ -210,7 +210,7 @@ class ActionIntent:
         object.__setattr__(self, "params", MappingProxyType(dict(self.params)))
 
     def to_dict(self) -> dict[str, Any]:
-        """Return a serialisable representation of the intent."""
+        """Return a serializable representation of the intent."""
 
         return {
             "actor_id": self.actor_id,
