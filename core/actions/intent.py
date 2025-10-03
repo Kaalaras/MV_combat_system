@@ -159,6 +159,7 @@ class TargetSpec:
         coords: list[int] = []
         for coord in position:
             if isinstance(coord, bool):
+                # bool is a subclass of int; reject explicitly to avoid implicit coercion.
                 raise TypeError("boolean values are not valid coordinates")
             if isinstance(coord, float):
                 if not coord.is_integer():
