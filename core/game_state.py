@@ -634,7 +634,7 @@ class GameState:
 
         teams: Dict[str, List[str]] = {}
         for entity_id, team_component in self.ecs_manager.iter_with_id(TeamComponent):
-            team_id = getattr(team_component, "team_id", None)
+            team_id = team_component.team_id
             if team_id in (None, ""):
                 continue
             teams.setdefault(str(team_id), []).append(entity_id)
