@@ -1,11 +1,95 @@
 # core/game_state.py
 import logging
-from typing import Dict, List, Any, Optional
+import re
+from collections.abc import Iterator, Mapping
+from typing import Any, Dict, List, Optional, Tuple, Type
 
 from ecs.components.entity_id import EntityIdComponent
 from ecs.components.initiative import InitiativeComponent
 from ecs.components.movement_usage import MovementUsageComponent
 from ecs.components.team import TeamComponent
+from ecs.components.condition_tracker import ConditionTrackerComponent
+
+
+class _EntitiesView(Mapping[str, Dict[str, Any]]):
+    """Read-only adapter exposing ECS entities via the legacy dictionary API."""
+
+    _ENSURED_KEYS: Tuple[str, ...] = (
+        "position",
+        "cover",
+        "structure",
+        "team",
+        "character_ref",
+        "equipment",
+        "movement_usage",
+        "conditions",
+    )
+
+    def __init__(self, game_state: "GameState") -> None:
+        self._game_state = game_state
+
+    def __iter__(self) -> Iterator[str]:
+        ecs_manager = self._game_state.ecs_manager
+        if ecs_manager is not None:
+            lookup = getattr(ecs_manager, "_entity_lookup", None)
+            if lookup:
+                yield from lookup.keys()
+                return
+        yield from self._game_state._ecs_entities.keys()
+
+    def __len__(self) -> int:
+        ecs_manager = self._game_state.ecs_manager
+        if ecs_manager is not None:
+            lookup = getattr(ecs_manager, "_entity_lookup", None)
+            if lookup is not None:
+                return len(lookup)
+        return len(self._game_state._ecs_entities)
+
+    def __getitem__(self, entity_id: str) -> Dict[str, Any]:
+        internal_id = self._resolve_internal_id(entity_id)
+        ecs_manager = self._game_state.ecs_manager
+        if internal_id is None or ecs_manager is None:
+            raise KeyError(entity_id)
+
+        components = self._game_state._collect_components_for_internal_id(
+            internal_id,
+            manager=ecs_manager,
+            entity_id=entity_id,
+        )
+        result: Dict[str, Any] = dict(components)
+
+        tracker = result.get("condition_tracker")
+        if isinstance(tracker, ConditionTrackerComponent):
+            result["conditions"] = set(tracker.active_states())
+        else:
+            legacy_conditions = result.get("conditions")
+            if isinstance(legacy_conditions, set):
+                result["conditions"] = set(legacy_conditions)
+            else:
+                result["conditions"] = set()
+
+        char_ref = result.get("character_ref")
+        character = getattr(char_ref, "character", None) if char_ref is not None else None
+        if character is not None:
+            result.setdefault("ai_controlled", getattr(character, "is_ai_controlled", False))
+
+        for key in self._ENSURED_KEYS:
+            if key == "conditions":
+                result.setdefault(key, set())
+
+        return result
+
+    def items(self) -> Iterator[Tuple[str, Dict[str, Any]]]:  # type: ignore[override]
+        for entity_id in self:
+            yield entity_id, self[entity_id]
+
+    def _resolve_internal_id(self, entity_id: str) -> Optional[int]:
+        ecs_manager = self._game_state.ecs_manager
+        if ecs_manager is not None:
+            internal_id = ecs_manager.resolve_entity(entity_id)
+            if internal_id is not None:
+                return internal_id
+        return self._game_state._ecs_entities.get(entity_id)
 
 
 # (Assuming EventBus and MovementSystem types are imported or defined elsewhere)
@@ -66,7 +150,7 @@ class GameState:
         """
         Initialize an empty game state with no entities or system references.
         """
-        self.entities: Dict[str, Dict[str, Any]] = {}  # entity_id -> component dict
+        self.entities = _EntitiesView(self)
         self.terrain: Any = None  # Replace Any with actual Terrain type
         self._event_bus: Optional[Any] = None  # Optional: reference to EventBus, replace Any
         self.teams: Dict[str, List[str]] = {}
@@ -80,6 +164,7 @@ class GameState:
         self.vision_system: Optional[Any] = None  # Optional: VisionSystem auto-wired on set_terrain
         self.ecs_manager: Optional[Any] = ecs_manager
         self._ecs_entities: Dict[str, int] = {}
+        self._entity_component_keys: Dict[str, Dict[Type[Any], str]] = {}
         self._movement_event_registered = False
         self._movement_subscription_bus: Optional[Any] = None
         self._visibility_subscription_registered = False
@@ -119,23 +204,27 @@ class GameState:
         if "character_ref" in components and "initiative" not in components:
             components["initiative"] = InitiativeComponent()
 
-        # Add the entity and its components to the dictionary
-        self.entities[entity_id] = components
+        ecs_manager = self._ensure_ecs_manager()
 
-        if self.ecs_manager:
-            try:
-                internal_id = self._mirror_entity(entity_id, components)
-                self._ecs_entities[entity_id] = internal_id
-            except (TypeError, ValueError) as exc:
-                # Ensure partial failures do not leave stale references
-                self.entities.pop(entity_id, None)
-                self._cleanup_partial_ecs_entity(entity_id)
-                logger.error(
-                    "Failed to create ECS entity for %s: %s",
-                    entity_id,
-                    exc,
-                )
-                raise
+        component_key_map: Dict[Type[Any], str] = {}
+        for name, component in components.items():
+            if component is None:
+                continue
+            component_key_map[type(component)] = name
+        self._entity_component_keys[entity_id] = component_key_map
+
+        try:
+            internal_id = self._mirror_entity(entity_id, components)
+            self._ecs_entities[entity_id] = internal_id
+        except (TypeError, ValueError) as exc:
+            self._cleanup_partial_ecs_entity(entity_id)
+            self._entity_component_keys.pop(entity_id, None)
+            logger.error(
+                "Failed to create ECS entity for %s: %s",
+                entity_id,
+                exc,
+            )
+            raise
 
     def get_entity(self, entity_id: str) -> Optional[Dict[str, Any]]:
         """
@@ -160,6 +249,19 @@ class GameState:
         """
         return self.entities.get(entity_id)
 
+    def _ensure_ecs_manager(self) -> Any:
+        """Instantiate a fallback ECS manager when one is not already configured."""
+
+        if self.ecs_manager is None:
+            from ecs.ecs_manager import ECSManager  # Local import to avoid cycles
+
+            event_bus = getattr(self, "_event_bus", None)
+            try:
+                self.ecs_manager = ECSManager(event_bus)
+            except Exception:
+                self.ecs_manager = ECSManager()
+        return self.ecs_manager
+
     def remove_entity(self, entity_id: str) -> None:
         """
         Remove an entity and all its components from the game state.
@@ -176,9 +278,8 @@ class GameState:
             game_state.remove_entity("ogre1")
             ```
         """
-        if entity_id in self.entities:
-            del self.entities[entity_id]
         internal_id = self._ecs_entities.pop(entity_id, None)
+        self._entity_component_keys.pop(entity_id, None)
         if self.ecs_manager and internal_id is not None:
             try:
                 self.ecs_manager.delete_entity(internal_id)
@@ -237,8 +338,14 @@ class GameState:
                 game_state.set_component("player1", "health", health)
             ```
         """
-        if entity_id in self.entities:
-            self.entities[entity_id][component_name] = component_value
+        ecs_manager = self._ensure_ecs_manager()
+        internal_id = self._ecs_entities.get(entity_id)
+        if internal_id is None:
+            internal_id = ecs_manager.resolve_entity(entity_id)
+        if internal_id is None:
+            raise KeyError(f"Entity with ID '{entity_id}' does not exist in ECS.")
+        self._entity_component_keys.setdefault(entity_id, {})[type(component_value)] = component_name
+        ecs_manager.add_component(internal_id, component_value)
 
     def set_terrain(self, terrain: Any) -> None:
         """
@@ -384,11 +491,29 @@ class GameState:
 
         if ecs_manager is self.ecs_manager:
             return
+
+        existing_payloads: List[Tuple[str, Dict[str, Any]]] = []
+        if self.ecs_manager is not None and ecs_manager is not None:
+            # Capture current ECS state before switching managers.
+            snapshot_ids = list(self.entities)
+            for entity_id in snapshot_ids:
+                internal_id = self.ecs_manager.resolve_entity(entity_id)
+                if internal_id is None:
+                    continue
+                payload = self._collect_components_for_internal_id(
+                    internal_id,
+                    manager=self.ecs_manager,
+                    entity_id=entity_id,
+                )
+                existing_payloads.append((entity_id, payload))
+
         self.ecs_manager = ecs_manager
         self._ecs_entities.clear()
+
         if not self.ecs_manager:
             return
-        for entity_id, components in self.entities.items():
+
+        for entity_id, components in existing_payloads:
             try:
                 internal_id = self._mirror_entity(entity_id, components)
             except (TypeError, ValueError) as exc:
@@ -543,6 +668,75 @@ class GameState:
         self.blocker_version += 1
 
     # Internal helpers ---------------------------------------------------
+    def _component_key_from_type(self, component_type: Type[Any]) -> str:
+        name = component_type.__name__
+        if name.endswith("Component"):
+            name = name[: -len("Component")]
+        key = re.sub(r"(?<!^)(?=[A-Z])", "_", name).lower()
+        return key
+
+    def _collect_components_for_internal_id(
+        self,
+        internal_id: int,
+        *,
+        manager: Optional[Any] = None,
+        entity_id: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        ecs_manager = manager or self.ecs_manager
+        if ecs_manager is None:
+            return {}
+
+        world = getattr(ecs_manager, "world", None)
+        if world is None:
+            return {}
+
+        components_by_type: Dict[Type[Any], Any] = {}
+        key_lookup = self._entity_component_keys.get(entity_id, {}) if entity_id else {}
+
+        components_for_entity = getattr(world, "components_for_entity", None)
+        if callable(components_for_entity):
+            try:
+                raw_components = components_for_entity(internal_id)
+            except Exception:
+                raw_components = None
+            else:
+                for item in raw_components:
+                    if isinstance(item, tuple):
+                        if len(item) == 2 and isinstance(item[0], type):
+                            comp_type, component = item
+                        elif len(item) == 1:
+                            component = item[0]
+                            comp_type = type(component)
+                        else:
+                            component = item[-1]
+                            comp_type = type(component)
+                    else:
+                        component = item
+                        comp_type = type(component)
+                    if isinstance(component, EntityIdComponent):
+                        continue
+                    components_by_type[comp_type] = component
+
+        if not components_by_type:
+            storage = getattr(world, "_components", None)
+            if isinstance(storage, dict):
+                for comp_type, component in storage.get(internal_id, {}).items():
+                    if isinstance(component, EntityIdComponent):
+                        continue
+                    components_by_type[comp_type] = component
+
+        component_map: Dict[str, Any] = {}
+        for comp_type, component in components_by_type.items():
+            key = key_lookup.get(comp_type)
+            if key is None:
+                key = "conditions" if comp_type is set else self._component_key_from_type(comp_type)
+            if comp_type is set and key == "conditions":
+                component_map[key] = set(component)
+                continue
+            component_map[key] = component
+
+        return component_map
+
     def _mirror_entity(self, entity_id: str, components: Dict[str, Any]) -> int:
         """Create an ECS entity mirroring ``entity_id`` and return its internal id."""
 
