@@ -224,24 +224,42 @@ def _iter_enemy_ids(rules_context: Any, actor_id: str) -> Iterable[str]:
     return iterable
 
 
+def _coerce_position(value: Any) -> Optional[tuple[int, int]]:
+    if value is None or isinstance(value, (str, bytes)):
+        return None
+
+    try:
+        x, y = value
+    except (TypeError, ValueError):
+        return None
+
+    try:
+        return int(x), int(y)
+    except (TypeError, ValueError):
+        return None
+
+
 def _get_position(entity_id: str, ecs: Any, rules_context: Any) -> Optional[tuple[int, int]]:
     getter = getattr(rules_context, "get_position", None)
     if callable(getter):
         position = getter(entity_id)
-        if position is not None:
-            return tuple(position)
+        coerced = _coerce_position(position)
+        if coerced is not None:
+            return coerced
 
     getter = getattr(ecs, "get_position", None)
     if callable(getter):
         position = getter(entity_id)
-        if position is not None:
-            return tuple(position)
+        coerced = _coerce_position(position)
+        if coerced is not None:
+            return coerced
 
     positions = getattr(ecs, "positions", None)
     if isinstance(positions, Mapping):
         value = positions.get(entity_id)
-        if value is not None:
-            return tuple(value)
+        coerced = _coerce_position(value)
+        if coerced is not None:
+            return coerced
 
     return None
 
