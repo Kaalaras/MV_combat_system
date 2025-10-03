@@ -158,7 +158,7 @@ class TargetSpec:
     def _coerce_position(position: Sequence[int | float]) -> Tuple[int, ...]:
         coords: list[int] = []
         for coord in position:
-            if type(coord) is bool:
+            if isinstance(coord, bool):
                 raise TypeError("boolean values are not valid coordinates")
             if isinstance(coord, float):
                 if not coord.is_integer():
@@ -226,10 +226,14 @@ class ActionIntent:
         """Create an :class:`ActionIntent` from a mapping."""
 
         targets_payload = payload.get("targets", [])
-        if isinstance(targets_payload, Iterable):
+        if isinstance(targets_payload, Iterable) and not isinstance(
+            targets_payload, (str, bytes)
+        ):
             targets = tuple(TargetSpec.from_dict(target) for target in targets_payload)
         else:
-            raise TypeError("targets must be an iterable of mappings")
+            raise TypeError(
+                "targets must be an iterable of mappings (not a string or bytes)"
+            )
 
         params_payload = payload.get("params", {})
         if params_payload is None:

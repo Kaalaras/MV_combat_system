@@ -37,6 +37,9 @@ def test_target_spec_coordinate_validation() -> None:
     with pytest.raises(ValueError):
         TargetSpec.tile((1.5, 2))
 
+    with pytest.raises(TypeError):
+        TargetSpec.tile((True, 2))
+
 
 def test_action_intent_round_trip_and_immutability() -> None:
     intent = ActionIntent(
@@ -56,6 +59,18 @@ def test_action_intent_round_trip_and_immutability() -> None:
 
     with pytest.raises(TypeError):
         restored.params["distance"] = 5  # type: ignore[index]
+
+
+def test_action_intent_rejects_string_targets() -> None:
+    payload = {
+        "actor_id": "hero",
+        "action_id": "move",
+        "targets": "invalid",
+        "params": {},
+    }
+
+    with pytest.raises(TypeError):
+        ActionIntent.from_dict(payload)
 
 
 class DummyEventBus:
