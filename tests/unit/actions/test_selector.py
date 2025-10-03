@@ -132,7 +132,10 @@ def test_action_selector_publishes_on_bus() -> None:
     assert published_payloads
     payload = published_payloads[-1]
     assert payload["actor_id"] == "hero"
-    assert any(action["id"] == "move" for action in payload["actions"])  # type: ignore[index]
+    actions = payload["actions"]
+    assert isinstance(actions, list)
+    action_ids = [action["id"] for action in actions if isinstance(action, dict)]
+    assert "move" in action_ids
 
 
 def test_manhattan_distance_raises_on_mismatched_lengths() -> None:

@@ -36,17 +36,16 @@ class ActionOption:
         return not self.predicates_failed and bool(self.valid_targets or self._accepts_free_targeting)
 
     def to_payload(self) -> dict[str, Any]:
-        targets_payload: list[Any] = []
-        for entry in self.valid_targets:
-            targets_payload.append(entry.to_dict())
+        definition = self.definition
+        targets_payload = [entry.to_dict() for entry in self.valid_targets]
 
         return {
-            "id": self.definition.id,
-            "name": self.definition.name,
-            "category": self.definition.category,
+            "id": definition.id,
+            "name": definition.name,
+            "category": definition.category,
             "targets": targets_payload,
             "ui_hints": dict(self.ui_hints),
-            "tags": list(self.definition.tags),
+            "tags": list(definition.tags),
             "predicates_failed": list(self.predicates_failed),
             "available": self.is_available,
         }
