@@ -729,8 +729,8 @@ class GameState:
         for comp_type, component in components_by_type.items():
             key = key_lookup.get(comp_type)
             if key is None:
-                key = "conditions" if comp_type is set else self._component_key_from_type(comp_type)
-            if comp_type is set and key == "conditions":
+                key = "conditions" if comp_type == set else self._component_key_from_type(comp_type)
+            if comp_type == set and key == "conditions":
                 component_map[key] = set(component)
                 continue
             component_map[key] = component
