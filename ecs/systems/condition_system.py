@@ -17,7 +17,7 @@ recheck_damage_based(). The Total variant can be added as timed/permanent.
 from __future__ import annotations
 import logging
 from dataclasses import dataclass, field
-from typing import Optional, Dict, Any, Set
+from typing import Optional, Dict, Any, Set, Callable
 
 from ecs.components.condition_tracker import ConditionTrackerComponent
 from ecs.components.character_ref import CharacterRefComponent
@@ -25,6 +25,7 @@ from ecs.components.health import HealthComponent
 from ecs.components.initiative import InitiativeComponent
 from ecs.components.willpower import WillpowerComponent
 from ecs.ecs_manager import ECSManager
+from interface.event_constants import CoreEvents, LEGACY_ALIAS_FIELD
 from utils.condition_utils import (
     WEAKENED_PHYSICAL,
     WEAKENED_MENTAL_SOCIAL,
@@ -46,6 +47,11 @@ DYNAMIC_WEAKENED = {WEAKENED_PHYSICAL, WEAKENED_MENTAL_SOCIAL}
 STACKABLE_NAMES = {'InitiativeMod','MaxHealthMod','DamageOutMod','DamageInMod'}
 
 logger = logging.getLogger(__name__)
+
+LEGACY_EVENT_ALIASES = {
+    CoreEvents.ROUND_START: "round_started",
+    CoreEvents.TURN_START: "turn_started",
+}
 
 @dataclass
 class Condition:
@@ -128,9 +134,18 @@ class ConditionSystem:
         bus = self.event_bus
         if not bus:
             return
-        bus.subscribe('round_started', self._on_round_started)
+        bus.subscribe(CoreEvents.ROUND_START, self._on_round_started)
+        self._subscribe_legacy_alias(CoreEvents.ROUND_START, self._on_round_started_legacy)
         bus.subscribe('damage_inflicted', self._on_damage_inflicted)
-        bus.subscribe('turn_started', self._on_turn_started)
+        bus.subscribe(CoreEvents.TURN_START, self._on_turn_started)
+        self._subscribe_legacy_alias(CoreEvents.TURN_START, self._on_turn_started_legacy)
+
+    def _subscribe_legacy_alias(self, event_name: str, handler: Callable[..., Any]) -> None:
+        if not self.event_bus:
+            return
+        legacy_name = LEGACY_EVENT_ALIASES.get(event_name)
+        if legacy_name and legacy_name != event_name:
+            self.event_bus.subscribe(legacy_name, handler)
 
     # Registration helpers --------------------------------------------------
     def register_start_turn_handler(self, condition_name: str, func: Any):
@@ -635,6 +650,32 @@ class ConditionSystem:
             gs_bus = getattr(self.game_state, 'event_bus', None)
             if not published or gs_bus is None or gs_bus is not self.event_bus:
                 self.game_state.bump_blocker_version()
+
+    def _on_round_started_legacy(self, **evt):
+        self._forward_legacy_alias(self._on_round_started, CoreEvents.ROUND_START, **evt)
+
+    def _on_turn_started_legacy(self, entity_id: str, **evt):
+        self._forward_legacy_alias(
+            self._on_turn_started,
+            CoreEvents.TURN_START,
+            entity_id=entity_id,
+            **evt,
+        )
+
+    def _forward_legacy_alias(
+        self,
+        handler: Callable[..., Any],
+        canonical_event: str,
+        *args: Any,
+        **kwargs: Any,
+    ) -> None:
+        # Prevent infinite forwarding loops by respecting the alias marker inserted by
+        # the publishing system. This relies on publishers providing the marker when
+        # they emit legacy-compatible events; if the canonical event shows up through
+        # the legacy channel we bail out instead of invoking the handler again.
+        if kwargs.get(LEGACY_ALIAS_FIELD) == canonical_event:
+            return
+        handler(*args, **kwargs)
 
     def _on_round_started(self, **evt):
         expired = []
