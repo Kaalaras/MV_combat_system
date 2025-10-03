@@ -467,7 +467,7 @@ class GameState:
             # game_systems.combat.handle_combat(entity1, entity2, game_state.event_bus)
             ```
         """
-        previous_bus = self._movement_subscription_bus if self._movement_event_registered else None
+        previous_bus = self._movement_subscription_bus
         if previous_bus and previous_bus is not event_bus and hasattr(previous_bus, "unsubscribe"):
             for event_name, handler in (
                 ("movement_reset_requested", self._handle_movement_reset_requested),
@@ -485,9 +485,7 @@ class GameState:
             self._movement_event_registered = False
             self._movement_subscription_bus = None
 
-        visibility_previous_bus = (
-            self._visibility_subscription_bus if self._visibility_subscription_registered else None
-        )
+        visibility_previous_bus = self._visibility_subscription_bus
         if (
             visibility_previous_bus
             and visibility_previous_bus is not event_bus
