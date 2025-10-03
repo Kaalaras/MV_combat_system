@@ -212,6 +212,9 @@ class GameState:
         component_key_map: Dict[Type[Any], str] = {}
         for name, component in components.items():
             if component is None:
+                logger.warning(
+                    "Skipping None component '%s' while adding entity %s", name, entity_id
+                )
                 continue
             component_key_map[type(component)] = name
         self._entity_component_keys[entity_id] = component_key_map
@@ -261,9 +264,10 @@ class GameState:
             event_bus = getattr(self, "_event_bus", None)
             try:
                 self.ecs_manager = ECSManager(event_bus)
-            except Exception:
+            except (TypeError, ValueError) as exc:
                 logger.exception(
-                    "Failed to initialize ECSManager with event_bus, falling back without bus."
+                    "Failed to initialize ECSManager with event_bus, falling back without bus.",
+                    exc_info=exc,
                 )
                 self.ecs_manager = ECSManager()
         return self.ecs_manager
@@ -726,9 +730,10 @@ class GameState:
         if callable(components_for_entity):
             try:
                 raw_components = components_for_entity(internal_id)
-            except Exception:
+            except (KeyError, TypeError, ValueError) as exc:
                 logging.exception(
-                    "Exception occurred in components_for_entity(%r)", internal_id
+                    "Exception occurred in components_for_entity(%r)", internal_id,
+                    exc_info=exc,
                 )
                 raw_components = None
             else:
