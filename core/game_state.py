@@ -11,7 +11,7 @@ from ecs.components.team import TeamComponent
 from ecs.components.condition_tracker import ConditionTrackerComponent
 
 
-LEGACY_CONDITION_COMPONENT_TYPES: Tuple[Type[Any], ...] = (set,)
+LEGACY_CONDITION_VALUE_TYPES: Tuple[Type[Any], ...] = (set, frozenset)
 
 
 class _EntitiesView(Mapping[str, Dict[str, Any]]):
@@ -689,13 +689,18 @@ class GameState:
         if not isinstance(name, str):
             raise TypeError("Component type must define a string __name__ attribute.")
 
-        if not re.match(r"^[A-Z][a-zA-Z0-9]*Component$", name):
+        if not name.endswith("Component"):
             raise ValueError(
-                "Component type name must follow the 'CamelCaseComponent' convention: "
+                "Component type name must end with 'Component' to derive a legacy key: "
                 f"{name!r}"
             )
 
         base_name = name[: -len("Component")]
+        if not base_name or not base_name[0].isalpha():
+            raise ValueError(
+                "Component type name must provide a non-empty CamelCase prefix before 'Component': "
+                f"{name!r}"
+            )
         key = re.sub(r"(?<!^)(?=[A-Z])", "_", base_name).lower()
         return key
 
@@ -756,11 +761,11 @@ class GameState:
         for comp_type, component in components_by_type.items():
             key = key_lookup.get(comp_type)
             if key is None:
-                if comp_type in LEGACY_CONDITION_COMPONENT_TYPES:
+                if isinstance(component, LEGACY_CONDITION_VALUE_TYPES):
                     key = "conditions"
                 else:
                     key = self._component_key_from_type(comp_type)
-            if comp_type in LEGACY_CONDITION_COMPONENT_TYPES and key == "conditions":
+            if isinstance(component, LEGACY_CONDITION_VALUE_TYPES) and key == "conditions":
                 component_map[key] = set(component)
                 continue
             component_map[key] = component
