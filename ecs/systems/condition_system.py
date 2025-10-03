@@ -25,6 +25,7 @@ from ecs.components.health import HealthComponent
 from ecs.components.initiative import InitiativeComponent
 from ecs.components.willpower import WillpowerComponent
 from ecs.ecs_manager import ECSManager
+from interface.event_constants import CoreEvents
 from utils.condition_utils import (
     WEAKENED_PHYSICAL,
     WEAKENED_MENTAL_SOCIAL,
@@ -128,9 +129,13 @@ class ConditionSystem:
         bus = self.event_bus
         if not bus:
             return
-        bus.subscribe('round_started', self._on_round_started)
+        bus.subscribe(CoreEvents.ROUND_START, self._on_round_started)
+        if CoreEvents.ROUND_START != "round_started":
+            bus.subscribe("round_started", self._on_round_started_legacy)
         bus.subscribe('damage_inflicted', self._on_damage_inflicted)
-        bus.subscribe('turn_started', self._on_turn_started)
+        bus.subscribe(CoreEvents.TURN_START, self._on_turn_started)
+        if CoreEvents.TURN_START != "turn_started":
+            bus.subscribe("turn_started", self._on_turn_started_legacy)
 
     # Registration helpers --------------------------------------------------
     def register_start_turn_handler(self, condition_name: str, func: Any):
@@ -635,6 +640,16 @@ class ConditionSystem:
             gs_bus = getattr(self.game_state, 'event_bus', None)
             if not published or gs_bus is None or gs_bus is not self.event_bus:
                 self.game_state.bump_blocker_version()
+
+    def _on_round_started_legacy(self, **evt):
+        if evt.get('_legacy_alias_of') == CoreEvents.ROUND_START:
+            return
+        self._on_round_started(**evt)
+
+    def _on_turn_started_legacy(self, entity_id: str, **evt):
+        if evt.get('_legacy_alias_of') == CoreEvents.TURN_START:
+            return
+        self._on_turn_started(entity_id, **evt)
 
     def _on_round_started(self, **evt):
         expired = []

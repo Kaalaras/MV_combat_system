@@ -51,6 +51,7 @@ from typing import List, Dict, Any, Tuple, Optional
 from ecs.components.character_ref import CharacterRefComponent
 from ecs.components.entity_id import EntityIdComponent
 from ecs.components.initiative import InitiativeComponent
+from interface.event_constants import CoreEvents
 
 
 class TurnOrderSystem:
@@ -183,12 +184,16 @@ class TurnOrderSystem:
         )
         self.turn_order = [entity_id for entity_id, _, _ in live_entities]
         self.turn_index = 0
-        # Publish round started event
-        if self.event_bus:
-            self.event_bus.publish('round_started', round_number=self.round_number, turn_order=list(self.turn_order))
+        payload = {"round_number": self.round_number, "turn_order": list(self.turn_order)}
+        self._publish_event(CoreEvents.ROUND_START, legacy_name="round_started", **payload)
         # Also publish first turn started if exists
-        if self.turn_order and self.event_bus:
-            self.event_bus.publish('turn_started', round_number=self.round_number, entity_id=self.turn_order[0])
+        if self.turn_order:
+            self._publish_event(
+                CoreEvents.TURN_START,
+                legacy_name="turn_started",
+                round_number=self.round_number,
+                entity_id=self.turn_order[0],
+            )
 
     def get_turn_order(self) -> List[str]:
         """
@@ -263,13 +268,33 @@ class TurnOrderSystem:
             2
         """
         current_entity_id = self.current_entity()
-        if self.event_bus and current_entity_id is not None:
-            self.event_bus.publish('turn_ended', round_number=self.round_number, entity_id=current_entity_id)
+        if current_entity_id is not None:
+            self._publish_event(
+                CoreEvents.TURN_END,
+                legacy_name="turn_ended",
+                round_number=self.round_number,
+                entity_id=current_entity_id,
+            )
         self.turn_index += 1
         if self.turn_index >= len(self.turn_order):
             self.start_new_round()
         # Publish new turn started
         new_entity = self.current_entity()
-        if self.event_bus and new_entity is not None:
-            self.event_bus.publish('turn_started', round_number=self.round_number, entity_id=new_entity)
+        if new_entity is not None:
+            self._publish_event(
+                CoreEvents.TURN_START,
+                legacy_name="turn_started",
+                round_number=self.round_number,
+                entity_id=new_entity,
+            )
         return new_entity
+
+    def _publish_event(self, event_name: str, *, legacy_name: Optional[str] = None, **payload: Any) -> None:
+        """Publish an event, emitting both the new and legacy names when needed."""
+        if not self.event_bus:
+            return
+        self.event_bus.publish(event_name, **payload)
+        if legacy_name and legacy_name != event_name:
+            legacy_payload = dict(payload)
+            legacy_payload.setdefault("_legacy_alias_of", event_name)
+            self.event_bus.publish(legacy_name, **legacy_payload)
