@@ -406,7 +406,10 @@ class GameState:
         component_type = type(component_value)
         try:
             derived_name = self._component_key_from_type(component_type)
-        except (TypeError, ValueError):
+        except (TypeError, ValueError) as e:
+            logging.warning(
+                f"Failed to derive component key from type '{component_type}' for component '{component_name}' on entity '{entity_id}': {e}. Using fallback mapping."
+            )
             self._entity_component_keys.setdefault(entity_id, {})[component_type] = component_name
         else:
             if derived_name != component_name:
