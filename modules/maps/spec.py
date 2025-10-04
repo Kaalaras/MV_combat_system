@@ -36,7 +36,7 @@ def _descriptor_signature(descriptor: TerrainDescriptor) -> tuple[int, int | Non
 def _normalise_cell_value(value: CellSpec) -> list[str] | str:
     if isinstance(value, str):
         return value
-    if isinstance(value, Sequence) and not isinstance(value, (str, bytes)):
+    if isinstance(value, Sequence) and not isinstance(value, str):
         return [str(item) for item in value]
     raise TypeError("cell values must be strings or sequences of strings")
 
