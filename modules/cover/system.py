@@ -10,8 +10,9 @@ from modules.maps.terrain_types import TerrainFlags
 GridCoord = Tuple[int, int]
 
 # Default modifier used when no cover applies.  ``-2`` mirrors the existing
-# combat balance rules and represents a defensive penalty for being exposed.
-_NO_COVER_BONUS = -2
+# combat balance rules documented in ``docs/combat.md`` and represents a
+# defensive penalty for being exposed.
+DEFAULT_NO_COVER_BONUS = -2
 _COVER_PRIORITY = (
     (TerrainFlags.FORTIFICATION, 1),
     (TerrainFlags.COVER_HEAVY, 0),
@@ -28,17 +29,22 @@ class CoverSystem:
         *,
         event_bus: Optional[object] = None,
         map_resolver: Optional[ActiveMapResolver] = None,
+        default_no_cover_bonus: int = DEFAULT_NO_COVER_BONUS,
     ) -> None:
         self._resolver = map_resolver or ActiveMapResolver(ecs_manager, event_bus=event_bus)
+        self._default_no_cover_bonus = default_no_cover_bonus
 
     def _get_grid(self) -> MapGrid:
         resolution: MapResolution = self._resolver.get_active_map()
         return resolution.grid
 
-    def tile_cover_bonus(self, x: int, y: int, *, default: int = _NO_COVER_BONUS) -> int:
+    def tile_cover_bonus(self, x: int, y: int, *, default: Optional[int] = None) -> int:
         """Return the cover modifier supplied by the tile at ``(x, y)``."""
 
         grid = self._get_grid()
+        if default is None:
+            default = self._default_no_cover_bonus
+
         if not grid.in_bounds(x, y):
             return default
 
@@ -53,7 +59,7 @@ class CoverSystem:
         target: GridCoord,
         *,
         edge_offsets: Optional[Sequence[GridCoord]] = None,
-        default: int = _NO_COVER_BONUS,
+        default: Optional[int] = None,
     ) -> int:
         """Return the best cover modifier available to a defender.
 

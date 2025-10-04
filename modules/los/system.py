@@ -10,6 +10,10 @@ from modules.maps.terrain_types import TerrainFlags
 
 GridCoord = Tuple[int, int]
 
+DEFAULT_BLOCKING_FLAGS = (
+    TerrainFlags.BLOCKS_LOS | TerrainFlags.IMPASSABLE | TerrainFlags.WALL
+)
+
 
 def _bresenham(start: GridCoord, end: GridCoord) -> Iterator[GridCoord]:
     """Yield integer coordinates between ``start`` and ``end`` (inclusive)."""
@@ -38,10 +42,6 @@ def _bresenham(start: GridCoord, end: GridCoord) -> Iterator[GridCoord]:
 class LineOfSightSystem:
     """Perform simple raycasts on the active map grid."""
 
-    DEFAULT_BLOCKING_FLAGS = (
-        TerrainFlags.BLOCKS_LOS | TerrainFlags.IMPASSABLE | TerrainFlags.WALL
-    )
-
     def __init__(
         self,
         ecs_manager: "ECSManager",
@@ -52,7 +52,7 @@ class LineOfSightSystem:
     ) -> None:
         self._resolver = map_resolver or ActiveMapResolver(ecs_manager, event_bus=event_bus)
         self._blocking_flags = (
-            blocking_flags if blocking_flags is not None else self.DEFAULT_BLOCKING_FLAGS
+            blocking_flags if blocking_flags is not None else DEFAULT_BLOCKING_FLAGS
         )
 
     def _get_grid(self) -> MapGrid:
