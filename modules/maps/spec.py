@@ -210,11 +210,17 @@ def _grid_signature(grid: MapGrid, x: int, y: int) -> tuple[int, int | None, int
     return (flags_value, final_move_cost, hazard_damage)
 
 
-_SIGNATURE_CATALOG = _SignatureCatalog()
 
 
-def from_map_component(map_component: MapComponent) -> MapSpec:
+
+def from_map_component(
+    map_component: MapComponent,
+    signature_catalog: _SignatureCatalog | None = None,
+) -> MapSpec:
     """Convert a :class:`MapComponent` into a :class:`MapSpec`."""
+
+    if signature_catalog is None:
+        signature_catalog = _SignatureCatalog()
 
     grid = map_component.grid
     cells: list[list[CellSpec]] = []
@@ -222,7 +228,7 @@ def from_map_component(map_component: MapComponent) -> MapSpec:
         row: list[CellSpec] = []
         for x in range(grid.width):
             signature = _grid_signature(grid, x, y)
-            names = _SIGNATURE_CATALOG.resolve(signature)
+            names = signature_catalog.resolve(signature)
             if len(names) == 1:
                 row.append(names[0])
             else:
