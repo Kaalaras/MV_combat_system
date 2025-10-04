@@ -62,6 +62,11 @@ class MapGrid:
         clamped_y = min(max(y, 0), self.height - 1)
         return clamped_x, clamped_y
 
+    def in_bounds(self, x: int, y: int) -> bool:
+        """Return ``True`` when ``(x, y)`` lies within the grid bounds."""
+
+        return 0 <= x < self.width and 0 <= y < self.height
+
     def get_flags(self, x: int, y: int) -> TerrainFlags:
         """Return the terrain flags at the requested coordinates."""
 
