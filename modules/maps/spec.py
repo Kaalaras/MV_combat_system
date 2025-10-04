@@ -276,11 +276,9 @@ def load_json(path: str | Path) -> MapSpec:
     try:
         data = json.loads(text)
     except json.JSONDecodeError as exc:
-        raise json.JSONDecodeError(
-            f"Error parsing JSON in file '{source}': {exc.msg}",
-            exc.doc,
-            exc.pos,
-        ) from exc
+        # Enhanced error message with file path, but preserve original exception context
+        print(f"Error parsing JSON in file '{source}': {exc.msg}")
+        raise
     meta_data = data.get("meta", {})
     meta = MapMeta(
         name=meta_data.get("name", ""),
