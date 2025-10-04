@@ -129,13 +129,25 @@ class ActionPerformer:
             "target": target_id,
         }
         if callable(resolver) and target_id:
-            outcome = resolver(intent.actor_id, target_id, intent=intent, payload=payload, kind=kind)
+            kwargs: dict[str, Any] = {}
+            if _supports_keyword(resolver, "intent"):
+                kwargs["intent"] = intent
+            if _supports_keyword(resolver, "payload"):
+                kwargs["payload"] = payload
+            if _supports_keyword(resolver, "kind"):
+                kwargs["kind"] = kind
+            try:
+                outcome = resolver(intent.actor_id, target_id, **kwargs)
+            except TypeError:
+                outcome = resolver(intent.actor_id, target_id)
             if isinstance(outcome, Mapping):
                 result.update(outcome)
-        else:
+
+        if "hit" not in result:
             # Minimal deterministic placeholder.
-            result.setdefault("hit", bool(target_id))
-            result.setdefault("damage", DEFAULT_ATTACK_DAMAGE if target_id else 0)
+            result["hit"] = bool(target_id)
+        if "damage" not in result:
+            result["damage"] = DEFAULT_ATTACK_DAMAGE if target_id else 0
         return result
 
 

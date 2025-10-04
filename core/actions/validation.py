@@ -177,15 +177,25 @@ def _verify_action_state(
     blockers = getattr(rules_ctx, "get_blocked_actions", None)
     if callable(blockers):
         blocked = blockers(intent.actor_id)
-        blocked_ids = _normalise_blocked_actions(blocked)
+        blocked_ids = _normalize_blocked_actions(blocked)
         if blocked_ids and action_def.id in blocked_ids:
             return "action_blocked"
 
     for prereq in action_def.prereqs:
         if isinstance(prereq, str):
             predicate = getattr(rules_ctx, prereq, None)
-            if callable(predicate) and not predicate(intent.actor_id, intent=intent):
-                return f"prereq_failed:{prereq}"
+            if callable(predicate):
+                try:
+                    result = predicate(
+                        intent.actor_id,
+                        intent=intent,
+                        ecs=ecs,
+                        rules=rules_ctx,
+                    )
+                except TypeError:
+                    result = predicate(intent.actor_id)
+                if not result:
+                    return f"prereq_failed:{prereq}"
             continue
 
         if callable(prereq):
@@ -299,7 +309,7 @@ def _verify_cooldowns(
     return None
 
 
-def _normalise_blocked_actions(blocked: Any) -> set[str]:
+def _normalize_blocked_actions(blocked: Any) -> set[str]:
     if not blocked:
         return set()
     if isinstance(blocked, Mapping):
