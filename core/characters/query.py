@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any, Mapping
+from typing import Any, Mapping, Sequence
 
 
 def get_character_summary(actor_id: str, ecs: Any) -> dict[str, Any]:
@@ -42,10 +42,14 @@ def get_character_summary(actor_id: str, ecs: Any) -> dict[str, Any]:
     traits = _ensure_mapping(getattr(character, "traits", {}))
     summary["attributes"] = _clone_mapping(traits.get("Attributes", {}))
     summary["skills"] = _clone_mapping(
-        traits.get("Abilities")
-        or traits.get("Skills")
-        or traits.get("Competences")
-        or {}
+        _select_first_present_mapping(
+            traits,
+            (
+                "Abilities",
+                "Skills",
+                "Competences",
+            ),
+        )
     )
 
     discipline_ids: set[str] = set()
@@ -113,6 +117,17 @@ def _locate_ecs_manager(ecs: Any) -> Any:
 def _ensure_mapping(value: Any) -> Mapping[str, Any]:
     if isinstance(value, Mapping):
         return value
+    return {}
+
+
+def _select_first_present_mapping(
+    source: Mapping[str, Any], keys: Sequence[str]
+) -> Mapping[str, Any]:
+    for key in keys:
+        if key in source:
+            candidate = source[key]
+            if isinstance(candidate, Mapping):
+                return candidate
     return {}
 
 
