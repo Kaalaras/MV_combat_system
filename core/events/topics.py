@@ -18,3 +18,5 @@ REACTION_RESOLVED = "reaction_resolved"
 
 END_TURN = "end_turn"
 
+INVENTORY_QUERIED = "inventory_queried"
+
