@@ -238,8 +238,8 @@ class DuelInteractiveController:
 
         for (cell_x, cell_y), entity_id in getattr(terrain, "grid", {}).items():
             if not (0 <= cell_x < width and 0 <= cell_y < height):
-                # Bounds check: this guards against possible invalid coordinates in the terrain grid.
-                # If the terrain grid is always guaranteed to be valid, this check could be removed.
+                # Defensive bounds check: prevents errors if the terrain grid contains invalid coordinates.
+                # This ensures robustness against unexpected or corrupted terrain data.
                 continue
             label = self.labels.get(entity_id)
             if label and label.team:
