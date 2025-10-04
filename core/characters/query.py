@@ -6,8 +6,21 @@ from typing import Any, Mapping, Sequence
 
 
 def get_character_summary(actor_id: str, ecs: Any) -> dict[str, Any]:
-    """Return a read-only summary of character data relevant to the UI layer."""
+    """
+    Return a read-only summary of character data relevant to the UI layer.
 
+    Returns:
+        dict: A dictionary with the following structure:
+            - actor_id (str): The unique identifier for the character.
+            - name (str or None): The character's name, or None if unavailable.
+            - clan (str or None): The character's clan, or None if unavailable.
+            - attributes (dict): A mapping of attribute names to their values (may be empty).
+            - skills (dict): A mapping of skill names to their values (may be empty).
+            - disciplines (tuple): A tuple of discipline IDs (as strings), possibly empty.
+            - states (tuple): A tuple of state names (as strings), possibly empty.
+
+    All values are read-only and suitable for display in the UI layer.
+    """
     manager = _locate_ecs_manager(ecs)
     summary = {
         "actor_id": actor_id,
