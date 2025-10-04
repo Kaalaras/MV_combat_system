@@ -63,7 +63,7 @@ class MovementSystem:
             raise IndexError(f"coordinates ({x}, {y}) are outside the grid bounds")
 
         flags = TerrainFlags(grid.flags[y][x])
-        blocks = bool(grid.blocks_move_mask[y][x]) or bool(flags & TerrainFlags.IMPASSABLE)
+        blocks = grid.blocks_move_mask[y][x] or bool(flags & TerrainFlags.IMPASSABLE)
         move_cost = int(grid.move_cost[y][x])
         return TileInfo(x=x, y=y, move_cost=move_cost, flags=flags, blocks_movement=blocks)
 

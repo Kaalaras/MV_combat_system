@@ -78,8 +78,14 @@ class ActiveMapResolver:
             if resolution is not None:
                 return resolution
 
-        for entity_id, component in self._ecs_manager.iter_with_id(MapComponent):
+        candidates = list(self._ecs_manager.iter_with_id(MapComponent))
+        if len(candidates) == 1:
+            entity_id, component = candidates[0]
             return MapResolution(entity_id=entity_id, component=component)
+        if len(candidates) > 1:
+            raise LookupError(
+                "Multiple map entities provide MapComponent; specify the active map via the event bus."
+            )
 
         raise LookupError("No active map entity providing MapComponent was found.")
 

@@ -9,11 +9,6 @@ from modules.maps.resolver import ActiveMapResolver, MapResolution
 from modules.maps.terrain_types import TerrainFlags
 
 GridCoord = Tuple[int, int]
-_BLOCKING_FLAGS = (
-    TerrainFlags.BLOCKS_LOS
-    | TerrainFlags.IMPASSABLE
-    | TerrainFlags.WALL
-)
 
 
 def _bresenham(start: GridCoord, end: GridCoord) -> Iterator[GridCoord]:
@@ -43,14 +38,22 @@ def _bresenham(start: GridCoord, end: GridCoord) -> Iterator[GridCoord]:
 class LineOfSightSystem:
     """Perform simple raycasts on the active map grid."""
 
+    DEFAULT_BLOCKING_FLAGS = (
+        TerrainFlags.BLOCKS_LOS | TerrainFlags.IMPASSABLE | TerrainFlags.WALL
+    )
+
     def __init__(
         self,
         ecs_manager: "ECSManager",
         *,
         event_bus: Optional[object] = None,
         map_resolver: Optional[ActiveMapResolver] = None,
+        blocking_flags: Optional[TerrainFlags] = None,
     ) -> None:
         self._resolver = map_resolver or ActiveMapResolver(ecs_manager, event_bus=event_bus)
+        self._blocking_flags = (
+            blocking_flags if blocking_flags is not None else self.DEFAULT_BLOCKING_FLAGS
+        )
 
     def _get_grid(self) -> MapGrid:
         resolution: MapResolution = self._resolver.get_active_map()
@@ -82,7 +85,7 @@ class LineOfSightSystem:
                 return False
 
             flags = TerrainFlags(grid.flags[y][x])
-            if flags & _BLOCKING_FLAGS:
+            if flags & self._blocking_flags:
                 if ignore_target_blocking and (x, y) == end:
                     continue
                 return False

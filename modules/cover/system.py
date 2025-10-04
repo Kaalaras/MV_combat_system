@@ -9,6 +9,8 @@ from modules.maps.terrain_types import TerrainFlags
 
 GridCoord = Tuple[int, int]
 
+# Default modifier used when no cover applies.  ``-2`` mirrors the existing
+# combat balance rules and represents a defensive penalty for being exposed.
 _NO_COVER_BONUS = -2
 _COVER_PRIORITY = (
     (TerrainFlags.FORTIFICATION, 1),
