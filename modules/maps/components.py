@@ -104,9 +104,7 @@ class MapGrid:
         blocks_los = bool(descriptor.flags & TerrainFlags.BLOCKS_LOS)
 
         self.flags[cy][cx] = flags_value
-        self.move_cost[cy][cx] = (
-            descriptor.move_cost if descriptor.move_cost is not None else 0
-        )
+        self.move_cost[cy][cx] = descriptor.move_cost or 0
         self.hazard_damage[cy][cx] = descriptor.hazard_damage
         self.blocks_move_mask[cy][cx] = blocks_move
         self.blocks_los_mask[cy][cx] = blocks_los
