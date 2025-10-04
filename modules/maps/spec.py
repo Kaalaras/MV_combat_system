@@ -30,8 +30,10 @@ def _descriptor_signature(descriptor: TerrainDescriptor) -> tuple[int, int | Non
     """
     move_cost = descriptor.move_cost
     if move_cost is not None:
-        move_cost = int(move_cost)
-    return (int(descriptor.flags), move_cost, int(descriptor.hazard_damage))
+        move_cost_int = int(move_cost)
+    else:
+        move_cost_int = None
+    return (int(descriptor.flags), move_cost_int, int(descriptor.hazard_damage))
 
 
 def _normalise_cell_value(value: CellSpec) -> list[str] | str:
@@ -205,10 +207,10 @@ def _grid_signature(grid: MapGrid, x: int, y: int) -> tuple[int, int | None, int
     hazard_damage = int(grid.hazard_damage[y][x])
     flags = TerrainFlags(flags_value)
     if flags & TerrainFlags.IMPASSABLE:
-        move_cost: int | None = None
+        final_move_cost: int | None = None
     else:
-        move_cost = move_cost_value
-    return (flags_value, move_cost, hazard_damage)
+        final_move_cost = move_cost_value
+    return (flags_value, final_move_cost, hazard_damage)
 
 
 _SIGNATURE_CATALOG = _SignatureCatalog()
