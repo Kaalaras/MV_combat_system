@@ -73,10 +73,8 @@ def _collect_equipment_items(equipment: Any) -> list[ItemRef]:
     _append(getattr(equipment, "equipped_weapon", None), dedupe=True)
 
     weapons = getattr(equipment, "weapons", {})
-    if isinstance(weapons, dict):
-        for weapon in weapons.values():
-            _append(weapon, dedupe=True)
-
+    for weapon in weapons.values():
+        _append(weapon, dedupe=True)
     _append(getattr(equipment, "armor", None), dedupe=True)
 
     other_items = getattr(equipment, "other_items", None)
