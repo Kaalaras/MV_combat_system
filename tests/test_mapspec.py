@@ -4,6 +4,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import json
+import pytest
 
 from modules.maps.components import MapMeta
 from modules.maps.spec import (
@@ -106,4 +107,28 @@ def test_roundtrip_via_spec_and_json(tmp_path):
 
     component_loaded = to_map_component(loaded)
     assert _grid_snapshot(component_loaded) == snapshot_original
+
+
+def test_load_json_missing_required_field_includes_field_name(tmp_path):
+    path = Path(tmp_path) / "missing_width.json"
+    path.write_text(
+        json.dumps({"height": 1, "cell_size": 1, "meta": {}, "cells": []}),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(KeyError) as excinfo:
+        load_json(path)
+
+    assert "Missing required field in map JSON data" in str(excinfo.value)
+    assert "'width'" in str(excinfo.value)
+
+
+def test_load_json_invalid_json_mentions_source_path(tmp_path):
+    path = Path(tmp_path) / "bad.json"
+    path.write_text("{", encoding="utf-8")
+
+    with pytest.raises(json.JSONDecodeError) as excinfo:
+        load_json(path)
+
+    assert str(path) in str(excinfo.value)
 

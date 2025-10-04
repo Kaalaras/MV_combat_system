@@ -139,39 +139,49 @@ def _build_signature_catalog() -> tuple[
     return catalog, names
 
 
-def _populate_catalog_until(
-    catalog: dict[tuple[int, int | None, int], list[str]],
-    names: list[str],
-    target_size: int,
-) -> None:
-    """Ensure ``catalog`` contains all combinations up to ``target_size``."""
+class _SignatureCatalog:
+    """Lazily populated descriptor signature lookup."""
 
-    global _SIGNATURE_CATALOG_MAX_SIZE
-    while _SIGNATURE_CATALOG_MAX_SIZE < target_size:
-        next_size = _SIGNATURE_CATALOG_MAX_SIZE + 1
-        for combo in combinations(names, next_size):
-            descriptor = combine(*combo)
-            catalog.setdefault(_descriptor_signature(descriptor), list(combo))
-        _SIGNATURE_CATALOG_MAX_SIZE = next_size
+    __slots__ = ("_catalog", "_names", "_max_size")
 
+    def __init__(self) -> None:
+        catalog, names = _build_signature_catalog()
+        self._catalog = catalog
+        self._names = names
+        # Base descriptors are already present; combinations start from size two.
+        self._max_size = 1
 
-def _ensure_signature_known(signature: tuple[int, int | None, int]) -> None:
-    """Populate combination entries until ``signature`` is known."""
+    def _populate_until(self, target_size: int) -> None:
+        """Ensure the catalog contains combinations up to ``target_size``."""
 
-    if signature in _SIGNATURE_CATALOG:
-        return
+        while self._max_size < target_size:
+            next_size = self._max_size + 1
+            for combo in combinations(self._names, next_size):
+                descriptor = combine(*combo)
+                self._catalog.setdefault(
+                    _descriptor_signature(descriptor),
+                    list(combo),
+                )
+            self._max_size = next_size
 
-    max_size = len(_SIGNATURE_CATALOG_NAMES)
-    while _SIGNATURE_CATALOG_MAX_SIZE < max_size:
-        _populate_catalog_until(_SIGNATURE_CATALOG, _SIGNATURE_CATALOG_NAMES, _SIGNATURE_CATALOG_MAX_SIZE + 1)
-        if signature in _SIGNATURE_CATALOG:
-            return
+    def resolve(self, signature: tuple[int, int | None, int]) -> list[str]:
+        """Return the descriptor names for ``signature`` or raise an error."""
 
-    # If we reach this point the signature does not match any descriptor.
-    raise ValueError(
-        "no terrain descriptor combination matches cell signature "
-        f"{signature}"
-    )
+        names = self._catalog.get(signature)
+        if names is not None:
+            return names
+
+        max_size = len(self._names)
+        while self._max_size < max_size:
+            self._populate_until(self._max_size + 1)
+            names = self._catalog.get(signature)
+            if names is not None:
+                return names
+
+        raise ValueError(
+            "no terrain descriptor combination matches cell signature "
+            f"{signature}"
+        )
 
 
 def _grid_signature(grid: MapGrid, x: int, y: int) -> tuple[int, int | None, int]:
@@ -201,8 +211,7 @@ def _grid_signature(grid: MapGrid, x: int, y: int) -> tuple[int, int | None, int
     return (flags_value, move_cost, hazard_damage)
 
 
-_SIGNATURE_CATALOG, _SIGNATURE_CATALOG_NAMES = _build_signature_catalog()
-_SIGNATURE_CATALOG_MAX_SIZE = 1
+_SIGNATURE_CATALOG = _SignatureCatalog()
 
 
 def from_map_component(map_component: MapComponent) -> MapSpec:
@@ -214,13 +223,7 @@ def from_map_component(map_component: MapComponent) -> MapSpec:
         row: list[CellSpec] = []
         for x in range(grid.width):
             signature = _grid_signature(grid, x, y)
-            _ensure_signature_known(signature)
-            names = _SIGNATURE_CATALOG.get(signature)
-            if names is None:
-                raise ValueError(
-                    "no terrain descriptor combination matches cell signature "
-                    f"{signature}"
-                )
+            names = _SIGNATURE_CATALOG.resolve(signature)
             if len(names) == 1:
                 row.append(names[0])
             else:
@@ -264,7 +267,15 @@ def load_json(path: str | Path) -> MapSpec:
     """Load a :class:`MapSpec` from JSON data on disk."""
 
     source = Path(path)
-    data = json.loads(source.read_text(encoding="utf-8"))
+    text = source.read_text(encoding="utf-8")
+    try:
+        data = json.loads(text)
+    except json.JSONDecodeError as exc:
+        raise json.JSONDecodeError(
+            f"Error parsing JSON in file '{source}': {exc.msg}",
+            exc.doc,
+            exc.pos,
+        ) from exc
     meta_data = data.get("meta", {})
     meta = MapMeta(
         name=meta_data.get("name", ""),
@@ -276,10 +287,19 @@ def load_json(path: str | Path) -> MapSpec:
     for row in cells_data:
         cells.append([_normalise_cell_value(cell) for cell in row])
 
+    try:
+        width = int(data["width"])
+        height = int(data["height"])
+        cell_size = int(data["cell_size"])
+    except KeyError as exc:
+        raise KeyError(
+            f"Missing required field in map JSON data: {exc.args[0]!r}"
+        ) from exc
+
     return MapSpec(
-        width=int(data["width"]),
-        height=int(data["height"]),
-        cell_size=int(data["cell_size"]),
+        width=width,
+        height=height,
+        cell_size=cell_size,
         meta=meta,
         cells=cells,
     )
