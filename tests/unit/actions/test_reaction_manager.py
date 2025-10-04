@@ -67,6 +67,7 @@ def test_reaction_manager_opens_window_and_resumes_flow() -> None:
 
     resolved_events = [payload for topic, payload in bus.published if topic == topics.ACTION_RESOLVED]
     assert resolved_events, "action should eventually resolve"
+    assert not reactions._pending_actions, "pending action should be cleared after resolution"
 
 
 def test_reaction_manager_rejects_wrong_actor_response() -> None:
@@ -115,4 +116,39 @@ def test_reaction_manager_rejects_wrong_actor_response() -> None:
 
     resolved_events = [payload for topic, payload in bus.published if topic == topics.ACTION_RESOLVED]
     assert resolved_events, "authorized defender resolves the action"
+
+
+def test_reaction_manager_clears_pending_for_auto_ids() -> None:
+    bus = DummyEventBus()
+    rules = StubRules()
+    reactions = ReactionManager(rules)
+    performer = ActionPerformer(rules)
+    reactions.bind(bus)
+    performer.bind(bus)
+
+    intent = ActionIntent(
+        actor_id="hunter",
+        action_id="attack_melee",
+        targets=(TargetSpec.entity("ghoul"),),
+    )
+
+    bus.publish(
+        topics.PERFORM_ACTION,
+        intent=intent.to_dict(),
+        intent_obj=intent,
+        await_reactions=True,
+    )
+
+    window_events = [payload for topic, payload in bus.published if topic == topics.REACTION_WINDOW_OPENED]
+    window_id = window_events[0]["window_id"]
+
+    bus.publish(
+        topics.REACTION_DECLARED,
+        actor_id="ghoul",
+        reaction={"id": "defend_dodge", "reaction_speed": "fast"},
+        passed=False,
+        window_id=window_id,
+    )
+
+    assert not reactions._pending_actions, "auto-generated action id should be cleaned up"
 

@@ -47,6 +47,7 @@ class PendingWindow:
 
 @dataclass
 class PendingAction:
+    action_id: str
     action_payload: Dict[str, Any]
     windows: Dict[str, PendingWindow]
 
@@ -111,7 +112,11 @@ class ReactionManager:
             windows[window_id] = window
             self._publish_window(window, normalised, action_def)
 
-        self._pending_actions[action_id] = PendingAction(action_payload=action_payload, windows=windows)
+        self._pending_actions[action_id] = PendingAction(
+            action_id=action_id,
+            action_payload=action_payload,
+            windows=windows,
+        )
 
     def _handle_reaction_declared(self, *, actor_id: str, reaction: Any = None, passed: bool = False, window_id: Optional[str] = None, **_: Any) -> None:
         if self._bus is None:
@@ -161,7 +166,7 @@ class ReactionManager:
 
     def _locate_window(self, actor_id: str, window_id: Optional[str]) -> tuple[Optional[PendingAction], Optional[PendingWindow]]:
         if window_id:
-            action_id = window_id.split(":", 1)[0]
+            action_id = window_id.rsplit(":", 1)[0]
             pending = self._pending_actions.get(action_id)
             if not pending:
                 return None, None
@@ -180,7 +185,6 @@ class ReactionManager:
         if self._bus is None:
             return
 
-        action_id = pending.action_payload.get("reservation_id") or pending.action_payload.get("client_tx_id")
         sorted_reactions = sorted(
             reactions,
             key=lambda entry: _reaction_priority(entry.get("reaction_speed")),
@@ -194,7 +198,7 @@ class ReactionManager:
             context=pending.action_payload.get("intent"),
         )
 
-        self._resume_action(action_id or "pending", pending.action_payload, sorted_reactions)
+        self._resume_action(pending.action_id, pending.action_payload, sorted_reactions)
 
     def _resume_action(self, action_id: str, payload: Dict[str, Any], reactions: List[Mapping[str, Any]]) -> None:
         if self._bus is None:
