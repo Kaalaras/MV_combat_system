@@ -29,10 +29,7 @@ def _descriptor_signature(descriptor: TerrainDescriptor) -> tuple[int, int | Non
     round-tripping between :class:`MapSpec` instances and ECS grid data.
     """
     move_cost = descriptor.move_cost
-    if move_cost is not None:
-        move_cost_int = int(move_cost)
-    else:
-        move_cost_int = None
+    move_cost_int = int(move_cost) if move_cost is not None else None
     return (int(descriptor.flags), move_cost_int, int(descriptor.hazard_damage))
 
 
