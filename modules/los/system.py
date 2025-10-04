@@ -72,10 +72,9 @@ class LineOfSightSystem:
         if not grid.in_bounds(*start) or not grid.in_bounds(*end):
             return False
 
-        for index, (x, y) in enumerate(_bresenham(start, end)):
-            if index == 0:
-                continue  # Skip the origin tile.
-
+        ray = iter(_bresenham(start, end))
+        next(ray, None)  # Skip the origin tile.
+        for x, y in ray:
             if not grid.in_bounds(x, y):
                 return False
 
