@@ -1,24 +1,12 @@
 from __future__ import annotations
 
-from typing import Any, Callable
+from typing import Any
 
 from core.actions.intent import ActionIntent, TargetSpec
 from core.actions.performers import ActionPerformer
 from core.events import topics
 
-
-class DummyEventBus:
-    def __init__(self) -> None:
-        self.subscriptions: dict[str, list[Callable[..., None]]] = {}
-        self.published: list[tuple[str, dict[str, Any]]] = []
-
-    def subscribe(self, topic: str, handler: Callable[..., None]) -> None:
-        self.subscriptions.setdefault(topic, []).append(handler)
-
-    def publish(self, topic: str, /, **payload: Any) -> None:
-        self.published.append((topic, dict(payload)))
-        for handler in list(self.subscriptions.get(topic, [])):
-            handler(**payload)
+from tests.unit.test_utils import DummyEventBus
 
 
 class StubMovementSystem:

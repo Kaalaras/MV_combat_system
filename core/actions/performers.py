@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import Any, Callable, Iterable, Mapping, Optional, Protocol
 
 from core.actions.intent import ActionIntent, TargetSpec
@@ -16,6 +17,40 @@ class EventBusLike(Protocol):
         ...
 
 
+@dataclass(frozen=True)
+class PerformActionEvent:
+    """Structured view of a ``PERFORM_ACTION`` event payload."""
+
+    intent: ActionIntent
+    await_reactions: bool
+    reactions_resolved: bool
+    payload: Mapping[str, Any]
+
+    @classmethod
+    def from_bus(cls, data: Mapping[str, Any]) -> "PerformActionEvent":
+        extras = dict(data)
+        intent_obj = extras.pop("intent_obj", None)
+        intent_payload = extras.get("intent")
+        intent = _ensure_intent(intent_obj, intent_payload)
+        extras.setdefault("intent", intent.to_dict())
+        extras.setdefault("intent_obj", intent)
+
+        await_reactions = bool(extras.pop("await_reactions", False))
+        reactions_resolved = bool(extras.pop("reactions_resolved", False))
+
+        # Preserve signalling flags so downstream consumers can still inspect
+        # them when the performer republishes the payload.
+        extras["await_reactions"] = await_reactions
+        extras["reactions_resolved"] = reactions_resolved
+
+        return cls(
+            intent=intent,
+            await_reactions=await_reactions,
+            reactions_resolved=reactions_resolved,
+            payload=extras,
+        )
+
+
 class ActionPerformer:
     """Dispatch ``PERFORM_ACTION`` events to the appropriate subsystems."""
 
@@ -28,21 +63,23 @@ class ActionPerformer:
         bus.subscribe(topics.PERFORM_ACTION, self._handle_perform_action)
 
     # ------------------------------------------------------------------
-    def _handle_perform_action(self, *, intent: Any, intent_obj: Any | None = None, await_reactions: bool | None = None, reactions_resolved: bool | None = None, **payload: Any) -> None:
+    def _handle_perform_action(self, **raw_payload: Any) -> None:
         if self._bus is None:
             return
 
-        if await_reactions and not reactions_resolved:
+        event = PerformActionEvent.from_bus(raw_payload)
+
+        if event.await_reactions and not event.reactions_resolved:
             # Wait for reaction manager to re-dispatch the event.
             return
 
-        normalised = _ensure_intent(intent_obj, intent)
+        normalised = event.intent
         action_id = normalised.action_id
         handler = getattr(self, f"_perform_{action_id}", None)
         if callable(handler):
-            result = handler(normalised, payload)
+            result = handler(normalised, event.payload)
         else:
-            result = self._perform_generic(normalised, payload)
+            result = self._perform_generic(normalised, event.payload)
 
         publish_payload = {
             "actor_id": normalised.actor_id,
@@ -50,7 +87,7 @@ class ActionPerformer:
             "intent": normalised.to_dict(),
             "result": result,
         }
-        publish_payload.update(payload)
+        publish_payload.update(event.payload)
         self._bus.publish(topics.ACTION_RESOLVED, **publish_payload)
 
     # ------------------------------------------------------------------

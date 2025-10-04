@@ -1,25 +1,13 @@
 from __future__ import annotations
 
-from typing import Any, Callable
+from typing import Any
 
 from core.actions.intent import ActionIntent, TargetSpec
 from core.actions.performers import ActionPerformer
 from core.events import topics
 from core.reactions.manager import ReactionManager
 
-
-class DummyEventBus:
-    def __init__(self) -> None:
-        self.subscriptions: dict[str, list[Callable[..., None]]] = {}
-        self.published: list[tuple[str, dict[str, Any]]] = []
-
-    def subscribe(self, topic: str, handler: Callable[..., None]) -> None:
-        self.subscriptions.setdefault(topic, []).append(handler)
-
-    def publish(self, topic: str, /, **payload: Any) -> None:
-        self.published.append((topic, dict(payload)))
-        for handler in list(self.subscriptions.get(topic, [])):
-            handler(**payload)
+from tests.unit.test_utils import DummyEventBus
 
 
 class StubRules:
@@ -79,4 +67,52 @@ def test_reaction_manager_opens_window_and_resumes_flow() -> None:
 
     resolved_events = [payload for topic, payload in bus.published if topic == topics.ACTION_RESOLVED]
     assert resolved_events, "action should eventually resolve"
+
+
+def test_reaction_manager_rejects_wrong_actor_response() -> None:
+    bus = DummyEventBus()
+    rules = StubRules()
+    reactions = ReactionManager(rules)
+    performer = ActionPerformer(rules)
+    reactions.bind(bus)
+    performer.bind(bus)
+
+    intent = ActionIntent(
+        actor_id="hero",
+        action_id="attack_melee",
+        targets=(TargetSpec.entity("ghoul"),),
+    )
+
+    bus.publish(
+        topics.PERFORM_ACTION,
+        intent=intent.to_dict(),
+        intent_obj=intent,
+        await_reactions=True,
+        reservation_id="txn-2",
+    )
+
+    window_events = [payload for topic, payload in bus.published if topic == topics.REACTION_WINDOW_OPENED]
+    window_id = window_events[0]["window_id"]
+
+    bus.publish(
+        topics.REACTION_DECLARED,
+        actor_id="nosy_vampire",
+        reaction={"id": "defend_dodge", "reaction_speed": "fast"},
+        passed=False,
+        window_id=window_id,
+    )
+
+    resolved_events = [payload for topic, payload in bus.published if topic == topics.ACTION_RESOLVED]
+    assert not resolved_events, "unauthorised reaction should be ignored"
+
+    bus.publish(
+        topics.REACTION_DECLARED,
+        actor_id="ghoul",
+        reaction={"id": "defend_dodge", "reaction_speed": "fast"},
+        passed=False,
+        window_id=window_id,
+    )
+
+    resolved_events = [payload for topic, payload in bus.published if topic == topics.ACTION_RESOLVED]
+    assert resolved_events, "authorized defender resolves the action"
 

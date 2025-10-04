@@ -169,11 +169,20 @@ def _verify_action_state(
     blockers = getattr(rules_ctx, "get_blocked_actions", None)
     if callable(blockers):
         blocked = blockers(intent.actor_id)
-        try:
-            if blocked and action_def.id in set(blocked):
-                return "action_blocked"
-        except TypeError:
-            pass
+        blocked_ids: set[str] = set()
+        if blocked:
+            if isinstance(blocked, Mapping):
+                iterable = blocked.values()
+            elif isinstance(blocked, str):
+                iterable = (blocked,)
+            else:
+                try:
+                    iterable = tuple(blocked)
+                except TypeError:
+                    iterable = (blocked,)
+            blocked_ids = {str(entry) for entry in iterable}
+        if blocked_ids and action_def.id in blocked_ids:
+            return "action_blocked"
 
     for prereq in action_def.prereqs:
         if isinstance(prereq, str):

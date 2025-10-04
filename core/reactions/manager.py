@@ -121,6 +121,10 @@ class ReactionManager:
         if pending is None or window is None:
             return
 
+        if window.defender_id != actor_id:
+            # Ignore attempts to resolve a window by an unrelated actor.
+            return
+
         window.resolved = True
         if not passed and reaction:
             window.selection = reaction
@@ -157,11 +161,13 @@ class ReactionManager:
 
     def _locate_window(self, actor_id: str, window_id: Optional[str]) -> tuple[Optional[PendingAction], Optional[PendingWindow]]:
         if window_id:
-            action_id = window_id.split(":", 2)[0]
+            action_id = window_id.split(":", 1)[0]
             pending = self._pending_actions.get(action_id)
             if not pending:
                 return None, None
             window = pending.windows.get(window_id)
+            if window and window.defender_id != actor_id:
+                return None, None
             return pending, window
 
         for action_id, pending in self._pending_actions.items():

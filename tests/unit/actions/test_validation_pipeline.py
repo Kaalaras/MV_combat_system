@@ -1,49 +1,16 @@
 from __future__ import annotations
-
-from typing import Any, Callable
-
-import pytest
-
 from core.actions.intent import ActionIntent, TargetSpec
 from core.actions.validation import IntentValidator, validate_intent
 from core.events import topics
 
-
-class StubECS:
-    def __init__(self) -> None:
-        self._entities = {"hero": 1, "ghoul": 2}
-
-    def resolve_entity(self, entity_id: str) -> int | None:
-        return self._entities.get(entity_id)
+from tests.unit.test_utils import DummyEventBus, StubECS, StubRules
 
 
-class StubRules:
-    def get_movement_points(self, actor_id: str) -> int:
-        return 4
-
-    def get_action_points(self, actor_id: str) -> int:
-        return 2
-
-    def validate_targets(self, intent: ActionIntent, action_def: Any, **_: Any):
-        return True
-
-
-class DummyEventBus:
-    def __init__(self) -> None:
-        self.subscriptions: dict[str, list[Callable[..., None]]] = {}
-        self.published: list[tuple[str, dict[str, Any]]] = []
-
-    def subscribe(self, topic: str, handler: Callable[..., None]) -> None:
-        self.subscriptions.setdefault(topic, []).append(handler)
-
-    def publish(self, topic: str, /, **payload: Any) -> None:
-        self.published.append((topic, dict(payload)))
-        for handler in list(self.subscriptions.get(topic, [])):
-            handler(**payload)
+ENTITIES = {"hero": 1, "ghoul": 2}
 
 
 def test_validate_intent_success() -> None:
-    ecs = StubECS()
+    ecs = StubECS(ENTITIES)
     rules = StubRules()
     intent = ActionIntent(
         actor_id="hero",
@@ -59,7 +26,7 @@ def test_validate_intent_success() -> None:
 
 
 def test_validate_intent_rejects_insufficient_resources() -> None:
-    ecs = StubECS()
+    ecs = StubECS(ENTITIES)
 
     class NoPoints(StubRules):
         def get_action_points(self, actor_id: str) -> int:
@@ -79,7 +46,7 @@ def test_validate_intent_rejects_insufficient_resources() -> None:
 
 
 def test_validate_intent_rejects_bad_target_kind() -> None:
-    ecs = StubECS()
+    ecs = StubECS(ENTITIES)
     rules = StubRules()
     intent = ActionIntent(
         actor_id="hero",
@@ -94,7 +61,7 @@ def test_validate_intent_rejects_bad_target_kind() -> None:
 
 
 def test_intent_validator_publishes_events() -> None:
-    ecs = StubECS()
+    ecs = StubECS(ENTITIES)
     rules = StubRules()
     validator = IntentValidator(ecs, rules)
     bus = DummyEventBus()
