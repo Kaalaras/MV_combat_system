@@ -266,9 +266,18 @@ def _collect_defenders(targets: Iterable[TargetSpec]) -> List[str]:
     return defenders
 
 
+REACTION_PRIORITY_FAST = 0
+REACTION_PRIORITY_NORMAL = 1
+REACTION_PRIORITY_SLOW = 2
+
+
 def _reaction_priority(speed: Any) -> int:
-    order = {"fast": 0, "normal": 1, "slow": 2}
-    return order.get(str(speed).lower(), 1)
+    order = {
+        "fast": REACTION_PRIORITY_FAST,
+        "normal": REACTION_PRIORITY_NORMAL,
+        "slow": REACTION_PRIORITY_SLOW,
+    }
+    return order.get(str(speed).lower(), REACTION_PRIORITY_NORMAL)
 
 
 __all__ = ["ReactionManager"]

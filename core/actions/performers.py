@@ -10,6 +10,9 @@ from core.actions.intent import ActionIntent, TargetSpec
 from core.events import topics
 
 
+DEFAULT_ATTACK_DAMAGE = 1
+
+
 class EventBusLike(Protocol):
     def subscribe(self, topic: str, handler: Callable[..., None]) -> None:
         ...
@@ -132,7 +135,7 @@ class ActionPerformer:
         else:
             # Minimal deterministic placeholder.
             result.setdefault("hit", bool(target_id))
-            result.setdefault("damage", 1 if target_id else 0)
+            result.setdefault("damage", DEFAULT_ATTACK_DAMAGE if target_id else 0)
         return result
 
 

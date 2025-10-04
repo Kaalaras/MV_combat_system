@@ -18,6 +18,14 @@ from core.actions.intent import ActionIntent, CostSpec
 from core.events import topics
 
 
+RESOURCE_GETTER_PATTERNS = (
+    "get_{resource}",
+    "get_{resource}_points",
+    "get_{resource}_pool",
+    "get_{resource}_remaining",
+)
+
+
 class EventBusLike(Protocol):
     """Minimal protocol required to interact with the project event bus."""
 
@@ -340,12 +348,7 @@ def _resolve_resource(
     ecs: Any,
     rules_ctx: Any,
 ) -> Optional[int]:
-    getter_names = (
-        f"get_{resource}",
-        f"get_{resource}_points",
-        f"get_{resource}_pool",
-        f"get_{resource}_remaining",
-    )
+    getter_names = tuple(pattern.format(resource=resource) for pattern in RESOURCE_GETTER_PATTERNS)
     for name in getter_names:
         accessor = getattr(rules_ctx, name, None)
         if callable(accessor):
