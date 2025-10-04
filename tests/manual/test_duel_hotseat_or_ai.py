@@ -36,7 +36,7 @@ Optional arguments:
 ``--grid``
     Size of the square arena (default: 12).
 ``--map``
-    Force-enable the ASCII battle map even if disabled previously.
+    Enable the ASCII battle map (overrides ``--no-map``).
 ``--no-map``
     Disable the ASCII battle map if you prefer a quieter console.
 
@@ -116,6 +116,9 @@ def setup_duel(grid_size: int, max_rounds: int) -> Dict[str, Any]:
 
 class DuelInteractiveController:
     """Console interaction manager supporting one or two local players."""
+
+    _EMPTY_TILE = " . "
+    _WALL_TILE = " # "
 
     def __init__(
         self,
@@ -209,6 +212,9 @@ class DuelInteractiveController:
     def _screen_row_from_game_y(self, game_y: int, height: int) -> int:
         return height - game_y - 1
 
+    def _format_marker(self, marker: str) -> str:
+        return f" {marker} "
+
     def _build_ascii_map(self) -> str:
         if self._map_cache is not None:
             return self._map_cache
@@ -224,14 +230,16 @@ class DuelInteractiveController:
             self._map_cache = "[Invalid terrain dimensions]"
             return self._map_cache
 
-        rows = [[" . " for _ in range(width)] for _ in range(height)]
+        rows = [[self._EMPTY_TILE for _ in range(width)] for _ in range(height)]
 
         for wall_x, wall_y in getattr(terrain, "walls", set()):
             if 0 <= wall_x < width and 0 <= wall_y < height:
-                rows[self._screen_row_from_game_y(wall_y, height)][wall_x] = " # "
+                rows[self._screen_row_from_game_y(wall_y, height)][wall_x] = self._WALL_TILE
 
         for (cell_x, cell_y), entity_id in getattr(terrain, "grid", {}).items():
             if not (0 <= cell_x < width and 0 <= cell_y < height):
+                # Bounds check: this guards against possible invalid coordinates in the terrain grid.
+                # If the terrain grid is always guaranteed to be valid, this check could be removed.
                 continue
             label = self.labels.get(entity_id)
             if label and label.team:
@@ -242,7 +250,7 @@ class DuelInteractiveController:
                 marker = entity_id[:1].upper()
             else:
                 marker = "?"
-            rows[self._screen_row_from_game_y(cell_y, height)][cell_x] = f" {marker} "
+            rows[self._screen_row_from_game_y(cell_y, height)][cell_x] = self._format_marker(marker)
 
         header = "    " + "".join(f"{x:>3}" for x in range(width))
         lines = [header]
@@ -257,7 +265,8 @@ class DuelInteractiveController:
             else:
                 marker = label.label[:1].upper()
             control = "Player" if label.is_player_controlled else "AI"
-            lines.append(f"  {marker} = {label.label} [{control}]")
+            marker_display = self._format_marker(marker).strip()
+            lines.append(f"  {marker_display} = {label.label} [{control}]")
 
         self._map_cache = "\n".join(lines)
         return self._map_cache
@@ -427,8 +436,14 @@ class DuelInteractiveController:
                     lowered = chosen.lower()
                     if lowered in {"standard move", "move", "sprint"}:
                         coords = input("Target tile x y: ").strip().split()
-                        if len(coords) == 2 and all(c.lstrip("-").isdigit() for c in coords):
-                            self._send_targeted_action(active_id, chosen, target=(int(coords[0]), int(coords[1])))
+                        if len(coords) == 2:
+                            try:
+                                x = int(coords[0])
+                                y = int(coords[1])
+                            except ValueError:
+                                print("Invalid tile input. Coordinates must be integers.")
+                            else:
+                                self._send_targeted_action(active_id, chosen, target=(x, y))
                         else:
                             print("Invalid tile input.")
                     elif lowered in {"basic attack", "attack", "registered attack"}:
