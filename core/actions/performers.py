@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import inspect
 from dataclasses import dataclass
 from typing import Any, Callable, Iterable, Mapping, Optional, Protocol
 
@@ -99,10 +100,12 @@ class ActionPerformer:
         success = False
         if movement_system and destination:
             steps = payload.get("max_steps")
-            try:
-                success = bool(movement_system.move(intent.actor_id, destination, max_steps=steps))
-            except TypeError:
-                success = bool(movement_system.move(intent.actor_id, destination))
+            mover = getattr(movement_system, "move", None)
+            if callable(mover):
+                if steps is not None and _supports_keyword(mover, "max_steps"):
+                    success = bool(mover(intent.actor_id, destination, max_steps=steps))
+                else:
+                    success = bool(mover(intent.actor_id, destination))
         return {"success": success, "destination": destination}
 
     def _perform_attack_melee(self, intent: ActionIntent, payload: Mapping[str, Any]) -> Mapping[str, Any]:
@@ -157,6 +160,17 @@ def _first_entity(targets: Iterable[TargetSpec]) -> Optional[str]:
         if target.kind == "entity" and target.reference:
             return target.reference
     return None
+
+
+def _supports_keyword(callable_obj: Callable[..., Any], keyword: str) -> bool:
+    try:
+        signature = inspect.signature(callable_obj)
+    except (TypeError, ValueError):
+        return False
+    params = signature.parameters
+    if keyword in params:
+        return True
+    return any(param.kind == inspect.Parameter.VAR_KEYWORD for param in params.values())
 
 
 __all__ = ["ActionPerformer"]

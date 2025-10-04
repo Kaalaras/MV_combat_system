@@ -18,6 +18,15 @@ class StubMovementSystem:
         return True
 
 
+class LegacyMovementSystem:
+    def __init__(self) -> None:
+        self.calls: list[tuple[str, tuple[int, int]]] = []
+
+    def move(self, actor_id: str, dest: tuple[int, int]) -> bool:
+        self.calls.append((actor_id, dest))
+        return True
+
+
 class StubRules:
     def __init__(self) -> None:
         self.movement_system = StubMovementSystem()
@@ -43,6 +52,33 @@ def test_performer_executes_move_action() -> None:
     events = [topic for topic, _ in bus.published]
     assert topics.ACTION_RESOLVED in events
     assert rules.movement_system.calls == [("hero", (2, 3))]
+
+
+def test_performer_handles_legacy_movement_signature() -> None:
+    class Rules(StubRules):
+        def __init__(self) -> None:
+            self.movement_system = LegacyMovementSystem()
+
+    rules = Rules()
+    performer = ActionPerformer(rules)
+    bus = DummyEventBus()
+    performer.bind(bus)
+
+    intent = ActionIntent(
+        actor_id="hero",
+        action_id="move",
+        targets=(TargetSpec.tile((5, 6)),),
+    )
+
+    bus.publish(
+        topics.PERFORM_ACTION,
+        intent=intent.to_dict(),
+        intent_obj=intent,
+        await_reactions=False,
+        max_steps=3,
+    )
+
+    assert rules.movement_system.calls == [("hero", (5, 6))]
 
 
 def test_performer_waits_for_reactions() -> None:

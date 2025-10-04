@@ -152,3 +152,18 @@ def test_reaction_manager_clears_pending_for_auto_ids() -> None:
 
     assert not reactions._pending_actions, "auto-generated action id should be cleaned up"
 
+
+def test_reaction_manager_derive_action_id_prefers_client_tx() -> None:
+    rules = StubRules()
+    reactions = ReactionManager(rules)
+    intent = ActionIntent(
+        actor_id="hunter",
+        action_id="attack_melee",
+        targets=(TargetSpec.entity("ghoul"),),
+        client_tx_id="client-42",
+    )
+
+    action_id = reactions._derive_action_id({}, intent)
+
+    assert action_id == "client-42"
+

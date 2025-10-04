@@ -169,18 +169,7 @@ def _verify_action_state(
     blockers = getattr(rules_ctx, "get_blocked_actions", None)
     if callable(blockers):
         blocked = blockers(intent.actor_id)
-        blocked_ids: set[str] = set()
-        if blocked:
-            if isinstance(blocked, Mapping):
-                iterable = blocked.values()
-            elif isinstance(blocked, str):
-                iterable = (blocked,)
-            else:
-                try:
-                    iterable = tuple(blocked)
-                except TypeError:
-                    iterable = (blocked,)
-            blocked_ids = {str(entry) for entry in iterable}
+        blocked_ids = _normalise_blocked_actions(blocked)
         if blocked_ids and action_def.id in blocked_ids:
             return "action_blocked"
 
@@ -300,6 +289,21 @@ def _verify_cooldowns(
                 pass
 
     return None
+
+
+def _normalise_blocked_actions(blocked: Any) -> set[str]:
+    if not blocked:
+        return set()
+    if isinstance(blocked, Mapping):
+        entries = blocked.values()
+    elif isinstance(blocked, str):
+        entries = (blocked,)
+    else:
+        try:
+            entries = tuple(blocked)
+        except TypeError:
+            entries = (blocked,)
+    return {str(entry) for entry in entries}
 
 
 def _entity_exists(entity_id: str, ecs: Any) -> bool:

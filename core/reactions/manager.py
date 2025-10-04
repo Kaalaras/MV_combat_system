@@ -88,7 +88,7 @@ class ReactionManager:
             "action_id": normalised.action_id,
             "actor_id": normalised.actor_id,
         })
-        action_id = action_payload.get("reservation_id") or normalised.client_tx_id or f"{normalised.actor_id}:{normalised.action_id}:{next(self._counter)}"
+        action_id = self._derive_action_id(action_payload, normalised)
 
         defenders = _collect_defenders(normalised.targets)
         if not defenders:
@@ -199,6 +199,14 @@ class ReactionManager:
         )
 
         self._resume_action(pending.action_id, pending.action_payload, sorted_reactions)
+
+    def _derive_action_id(self, payload: Mapping[str, Any], intent: ActionIntent) -> str:
+        reservation_id = payload.get("reservation_id")
+        if reservation_id:
+            return str(reservation_id)
+        if intent.client_tx_id:
+            return str(intent.client_tx_id)
+        return f"{intent.actor_id}:{intent.action_id}:{next(self._counter)}"
 
     def _resume_action(self, action_id: str, payload: Dict[str, Any], reactions: List[Mapping[str, Any]]) -> None:
         if self._bus is None:

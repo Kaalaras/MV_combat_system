@@ -5,6 +5,8 @@ from core.events import topics
 
 from tests.unit.test_utils import DummyEventBus, StubECS, StubRules
 
+from core.actions.validation import _normalise_blocked_actions
+
 
 ENTITIES = {"hero": 1, "ghoul": 2}
 
@@ -77,4 +79,11 @@ def test_intent_validator_publishes_events() -> None:
 
     events = [topic for topic, _ in bus.published]
     assert topics.INTENT_VALIDATED in events
+
+
+def test_normalise_blocked_actions_handles_various_inputs() -> None:
+    assert _normalise_blocked_actions(None) == set()
+    assert _normalise_blocked_actions("attack_melee") == {"attack_melee"}
+    assert _normalise_blocked_actions(["move", "attack_melee"]) == {"move", "attack_melee"}
+    assert _normalise_blocked_actions({"a": "move"}) == {"move"}
 
