@@ -1,4 +1,4 @@
-"""Tests for the MapSpec serialisation helpers."""
+"""Tests for the MapSpec serialization helpers."""
 from __future__ import annotations
 
 from pathlib import Path
