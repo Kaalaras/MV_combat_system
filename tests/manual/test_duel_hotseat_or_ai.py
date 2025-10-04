@@ -143,6 +143,7 @@ class DuelInteractiveController:
         self.player_turn_controller = PlayerTurnController(
             self.event_bus,
             is_player_entity=lambda eid: eid in self.player_entities,
+            action_requires_target=self._action_requires_target,
         )
 
         self.spectator = SpectatorController(self.event_bus, entity_order=game_setup["all_ids"])
@@ -205,6 +206,9 @@ class DuelInteractiveController:
             print("  end. End Turn")
         print("Commands: <number>, m x y, a, end, status, map, help, quit")
 
+    def _screen_row_from_game_y(self, game_y: int, height: int) -> int:
+        return height - game_y - 1
+
     def _build_ascii_map(self) -> str:
         if self._map_cache is not None:
             return self._map_cache
@@ -220,11 +224,11 @@ class DuelInteractiveController:
             self._map_cache = "[Invalid terrain dimensions]"
             return self._map_cache
 
-        rows = [[" · " for _ in range(width)] for _ in range(height)]
+        rows = [[" . " for _ in range(width)] for _ in range(height)]
 
         for wall_x, wall_y in getattr(terrain, "walls", set()):
             if 0 <= wall_x < width and 0 <= wall_y < height:
-                rows[height - wall_y - 1][wall_x] = " # "
+                rows[self._screen_row_from_game_y(wall_y, height)][wall_x] = " # "
 
         for (cell_x, cell_y), entity_id in getattr(terrain, "grid", {}).items():
             if not (0 <= cell_x < width and 0 <= cell_y < height):
@@ -238,7 +242,7 @@ class DuelInteractiveController:
                 marker = entity_id[:1].upper()
             else:
                 marker = "?"
-            rows[height - cell_y - 1][cell_x] = f" {marker} "
+            rows[self._screen_row_from_game_y(cell_y, height)][cell_x] = f" {marker} "
 
         header = "    " + "".join(f"{x:>3}" for x in range(width))
         lines = [header]
@@ -310,9 +314,49 @@ class DuelInteractiveController:
     def _send_action(self, entity_id: str, action_name: str) -> None:
         self.event_bus.publish(UIIntents.SELECT_ACTION, entity_id=entity_id, action_name=action_name)
 
+    def _action_requires_target(self, action_name: str) -> bool:
+        lowered = action_name.lower()
+        return lowered in {
+            "standard move",
+            "move",
+            "sprint",
+            "jump",
+            "basic attack",
+            "attack",
+            "registered attack",
+        }
+
+    def _select_default_weapon(self, entity_id: str) -> Optional[Any]:
+        equipment = self.game_state.get_component(entity_id, "equipment")
+        if not equipment:
+            return None
+        weapon = getattr(equipment, "equipped_weapon", None)
+        if weapon:
+            return weapon
+        for slot in ("melee", "ranged", "mental", "social", "special"):
+            weapon = equipment.weapons.get(slot)
+            if weapon:
+                return weapon
+        return None
+
+    def _build_target_payload(self, entity_id: str, action_name: str, target: Any) -> Dict[str, Any]:
+        lowered = action_name.lower()
+        payload: Dict[str, Any] = {"target": target}
+        if lowered in {"standard move", "move", "sprint", "jump"}:
+            payload["target_tile"] = target
+        elif lowered in {"basic attack", "attack", "registered attack"}:
+            payload["target_id"] = target
+            weapon = self._select_default_weapon(entity_id)
+            if weapon:
+                payload["weapon"] = weapon
+            else:
+                print("[Warning] No weapon equipped; attack request may fail.")
+        return payload
+
     def _send_targeted_action(self, entity_id: str, action_name: str, target: Any) -> None:
         self.event_bus.publish(UIIntents.SELECT_ACTION, entity_id=entity_id, action_name=action_name)
-        self.event_bus.publish(UIIntents.SELECT_TARGET, entity_id=entity_id, action_name=action_name, target=target)
+        payload = self._build_target_payload(entity_id, action_name, target)
+        self.event_bus.publish(UIIntents.SELECT_TARGET, entity_id=entity_id, action_name=action_name, **payload)
 
     def _end_turn(self, entity_id: str) -> None:
         self.event_bus.publish(UIIntents.END_TURN, entity_id=entity_id)
@@ -415,7 +459,7 @@ def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
     parser.add_argument("--rounds", type=int, default=20, help="Maximum rounds before auto-termination.")
     parser.add_argument("--grid", type=int, default=12, help="Grid size of the square arena.")
     parser.add_argument("--map", dest="show_map", action="store_true",
-                        help="Force-enable the ASCII battle map (enabled by default).")
+                        help="Enable the ASCII battle map (overrides --no-map).")
     parser.add_argument("--no-map", dest="show_map", action="store_false",
                         help="Disable the ASCII battle map output.")
     parser.set_defaults(show_map=True)
