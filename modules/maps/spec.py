@@ -210,9 +210,6 @@ def _grid_signature(grid: MapGrid, x: int, y: int) -> tuple[int, int | None, int
     return (flags_value, final_move_cost, hazard_damage)
 
 
-
-
-
 def from_map_component(
     map_component: MapComponent,
     signature_catalog: _SignatureCatalog | None = None,
