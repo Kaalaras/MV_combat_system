@@ -75,16 +75,20 @@ def get_character_summary(actor_id: str, ecs: Any) -> dict[str, Any]:
         tracker = tracker_components[0] if tracker_components else None
 
     if tracker is not None:
-        active_states_attr = getattr(tracker, "active_states", None)
-        tracker_states: Any = ()
+        for attr_name in ("active_states", "dynamic_states"):
+            tracker_states_attr = getattr(tracker, attr_name, None)
+            tracker_states: Any = ()
 
-        if callable(active_states_attr):
-            tracker_states = active_states_attr()
-        elif active_states_attr is not None:
-            tracker_states = active_states_attr
+            if callable(tracker_states_attr):
+                try:
+                    tracker_states = tracker_states_attr()
+                except TypeError:  # pragma: no cover - defensive guard
+                    tracker_states = ()
+            elif tracker_states_attr is not None:
+                tracker_states = tracker_states_attr
 
-        for state in _iterate_state_values(tracker_states):
-            states.add(str(state))
+            for state in _iterate_state_values(tracker_states):
+                states.add(str(state))
 
     summary["states"] = tuple(sorted(states))
 
