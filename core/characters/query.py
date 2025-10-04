@@ -74,12 +74,16 @@ def get_character_summary(actor_id: str, ecs: Any) -> dict[str, Any]:
         tracker_components = manager.get_components_for_entity(actor_id, ConditionTrackerComponent)
         tracker = tracker_components[0] if tracker_components else None
 
-    if tracker is not None and hasattr(tracker, "active_states"):
-        try:
-            tracker_states = tracker.active_states()
-        except TypeError:  # pragma: no cover - defensive guard
-            tracker_states = set()
-        for state in tracker_states:
+    if tracker is not None:
+        active_states_attr = getattr(tracker, "active_states", None)
+        tracker_states: Any = ()
+
+        if callable(active_states_attr):
+            tracker_states = active_states_attr()
+        elif active_states_attr is not None:
+            tracker_states = active_states_attr
+
+        for state in _iterate_state_values(tracker_states):
             states.add(str(state))
 
     summary["states"] = tuple(sorted(states))
@@ -119,6 +123,22 @@ def _clone_mapping(payload: Any) -> dict[str, Any]:
         else:
             result[str(key)] = value
     return result
+
+
+def _iterate_state_values(candidate: Any) -> tuple[Any, ...]:
+    if candidate is None:
+        return ()
+
+    if isinstance(candidate, (list, tuple, set)):
+        return tuple(candidate)
+
+    if isinstance(candidate, Mapping):
+        return tuple(candidate.keys())
+
+    if hasattr(candidate, "__iter__") and not isinstance(candidate, (str, bytes)):
+        return tuple(candidate)
+
+    return (candidate,)
 
 
 __all__ = ["get_character_summary"]

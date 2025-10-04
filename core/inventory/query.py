@@ -56,30 +56,33 @@ def get_equipped(actor_id: str, ecs: Any) -> list[ItemRef]:
 
 def _collect_equipment_items(equipment: Any) -> list[ItemRef]:
     items: list[ItemRef] = []
-    seen: set[int] = set()
+    seen_identities: set[int] = set()
 
-    def _append(item: Any) -> None:
+    def _append(item: Any, *, dedupe: bool) -> None:
         if item is None:
             return
-        identity = id(item)
-        if identity in seen:
-            return
-        seen.add(identity)
+
+        if dedupe:
+            identity = id(item)
+            if identity in seen_identities:
+                return
+            seen_identities.add(identity)
+
         items.append(item)
 
-    _append(getattr(equipment, "equipped_weapon", None))
+    _append(getattr(equipment, "equipped_weapon", None), dedupe=True)
 
     weapons = getattr(equipment, "weapons", {})
     if isinstance(weapons, dict):
         for weapon in weapons.values():
-            _append(weapon)
+            _append(weapon, dedupe=True)
 
-    _append(getattr(equipment, "armor", None))
+    _append(getattr(equipment, "armor", None), dedupe=True)
 
     other_items = getattr(equipment, "other_items", None)
     if isinstance(other_items, Sequence):
         for item in other_items:
-            _append(item)
+            _append(item, dedupe=False)
 
     return items
 

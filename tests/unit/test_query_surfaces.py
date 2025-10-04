@@ -56,6 +56,23 @@ def test_get_equipped_returns_items_and_emits_event(ecs_manager: ECSManager) -> 
     assert (topics.INVENTORY_QUERIED, {"actor_id": "hero", "items": tuple(items)}) in bus.events
 
 
+def test_get_equipped_preserves_duplicate_other_items(ecs_manager: ECSManager) -> None:
+    equipment = EquipmentComponent()
+    equipment.other_items.extend(["blood_potion", "blood_potion"])
+
+    ecs_manager.create_entity(EntityIdComponent("hero"), equipment)
+
+    items = get_equipped("hero", ecs_manager)
+
+    assert items.count("blood_potion") == 2
+
+    bus = ecs_manager.event_bus
+    assert bus is not None
+    queried = [payload for topic, payload in bus.events if topic == topics.INVENTORY_QUERIED]
+    assert queried
+    assert queried[-1]["items"].count("blood_potion") == 2
+
+
 def test_get_character_summary_merges_traits_and_states(ecs_manager: ECSManager) -> None:
     traits = {
         "Attributes": {"Physical": {"Strength": 3, "Dexterity": 2}},
@@ -83,3 +100,22 @@ def test_get_character_summary_merges_traits_and_states(ecs_manager: ECSManager)
     assert "Celerity" in summary["disciplines"]
     assert "roused" in summary["states"]
     assert "hidden" in summary["states"]
+
+
+def test_get_character_summary_handles_passive_active_states_attribute(
+    ecs_manager: ECSManager,
+) -> None:
+    character = Character(name="Test", clan="Brujah", traits={}, base_traits={})
+
+    tracker = ConditionTrackerComponent()
+    tracker.active_states = {"poisoned"}  # type: ignore[assignment]
+
+    ecs_manager.create_entity(
+        EntityIdComponent("hero"),
+        CharacterRefComponent(character),
+        tracker,
+    )
+
+    summary = get_character_summary("hero", ecs_manager)
+
+    assert "poisoned" in summary["states"]
