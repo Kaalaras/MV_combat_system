@@ -265,7 +265,7 @@ class DuelInteractiveController:
             else:
                 marker = label.label[:1].upper()
             control = "Player" if label.is_player_controlled else "AI"
-            marker_display = self._format_marker(marker).strip()
+            marker_display = self._format_marker(marker)
             lines.append(f"  {marker_display} = {label.label} [{control}]")
 
         self._map_cache = "\n".join(lines)
