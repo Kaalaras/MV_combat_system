@@ -45,7 +45,7 @@ class TerrainDescriptor:
             raise ValueError("hazard_damage cannot be negative")
 
 
-# Catalogue of basic terrain descriptors available in the system.
+# Catalog of basic terrain descriptors available in the system.
 TERRAIN_CATALOG: Dict[str, TerrainDescriptor] = {
     "floor": TerrainDescriptor(
         name="floor",
