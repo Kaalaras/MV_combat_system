@@ -333,7 +333,7 @@ class TiledImporter:
         for key, descriptor in OBJECT_LAYER_DESCRIPTORS.items():
             name = object_layer_keys.get(key)
             layer = layers_by_name.get(name)
-            if isinstance(layer, ObjectLayer) and layer.visible is not False:
+            if isinstance(layer, ObjectLayer) and layer.visible:
                 _apply_object_layer(cells, layer, descriptor, tile_width, tile_height)
 
         properties = tiled_map.properties or {}
