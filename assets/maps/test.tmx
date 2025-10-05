@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<map version="1.9" tiledversion="1.10.2" orientation="orthogonal" renderorder="right-down" width="2" height="2" tilewidth="32" tileheight="32" infinite="0" nextlayerid="2" nextobjectid="1">
+ <properties>
+  <property name="name" value="Test Map"/>
+  <property name="biome" value="test_biome"/>
+ </properties>
+ <layer id="1" name="layer.terrain" width="2" height="2">
+  <data encoding="csv">
+0,0,
+0,0
+  </data>
+ </layer>
+</map>
