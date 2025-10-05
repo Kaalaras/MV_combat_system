@@ -310,7 +310,6 @@ def _connect_tree(
         _connect_tree(node.left, cells, rng, corridor_width)
         _connect_tree(node.right, cells, rng, corridor_width)
 
-
 def _ensure_border_walls(cells: list[list[str]]) -> None:
     if not cells:
         return
@@ -322,7 +321,6 @@ def _ensure_border_walls(cells: list[list[str]]) -> None:
     for y in range(height):
         cells[y][0] = "wall"
         cells[y][width - 1] = "wall"
-
 
 def _apply_symmetry(cells: list[list[str]], symmetry: MapSymmetry) -> None:
     if symmetry == "none":
@@ -355,7 +353,6 @@ def _apply_symmetry(cells: list[list[str]], symmetry: MapSymmetry) -> None:
         raise ValueError(
             f"Unknown symmetry mode '{symmetry}'. Supported modes: none, mirror_x, mirror_y, rot_180"
         )
-
 
 def generate_layout(params: MapGenParams) -> MapSpec:
     """Generate a :class:`MapSpec` using a BSP layout algorithm."""
