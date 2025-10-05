@@ -165,9 +165,9 @@ def parse_hazard_timing(value: Any) -> HazardTiming:
 def apply_tile_defaults(properties: Mapping[str, Any]) -> dict[str, Any]:
     """Retourne un dict de propriétés complété avec les valeurs de repli."""
 
-    resolved: dict[str, Any] = {}
+    resolved: dict[str, Any] = dict(properties)
     for key, default_value in TILED_DEFAULTS.items():
-        resolved[key] = properties.get(key, default_value)
+        resolved.setdefault(key, default_value)
     return resolved
 
 
