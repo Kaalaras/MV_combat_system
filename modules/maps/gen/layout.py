@@ -71,7 +71,7 @@ class BSPNode:
         elif self.rect.height / max(1, self.rect.width) > 1.25:
             split_vertical = False
         else:
-            split_vertical = bool(rng.choice([True, False]))
+            split_vertical = rng.random() < 0.5
 
         if split_vertical:
             min_split = _MIN_LEAF_SIZE
