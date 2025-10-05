@@ -22,7 +22,7 @@ Propriété       | Type | Valeurs autorisées                                | 
 `blocks_move`   | bool | `true` / `false` (`1` / `0`, `yes` / `no`, `on` / `off` acceptés) | `false`         | Bloque le déplacement.
 `blocks_los`    | bool | `true` / `false` (`1` / `0`, `yes` / `no`, `on` / `off` acceptés) | `false`         | Bloque la ligne de vue.
 `cover`         | str  | `"none"`, `"light"`, `"heavy"`, `"fortification"` | `"none"`       | Flags de couvert appliqués.
-`hazard`        | str  | `"none"`, `"dangerous"`, `"very_dangerous"`      | `"none"`       | Flags + dégâts de terrain.
+`hazard`        | str  | `"none"`, `"dangerous"`, `"very_dangerous"`      | `"none"`       | Flags + dégâts de terrain (`dangerous` : 5, `very_dangerous` : 10).
 `hazard_timing` | str  | `"on_enter"`, `"end_of_turn"`, `"per_tile"`      | `"on_enter"`   | Moment d'application des dégâts.
 
 Les valeurs de repli correspondent au terrain « sol » (floor). Elles sont appliquées dès qu'une propriété est absente afin de garantir un état jouable cohérent.
