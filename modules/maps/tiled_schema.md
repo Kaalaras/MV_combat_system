@@ -27,5 +27,6 @@ Propriété       | Type | Valeurs autorisées                                | 
 
 Les valeurs de repli correspondent au terrain « sol » (floor). Elles sont appliquées dès qu'une propriété est absente afin de garantir un état jouable cohérent.
 
+> **Note :** Les parseurs traitent les valeurs vides (par exemple, chaîne vide ou espaces) comme « absentes » pour les propriétés `move_cost`, `cover`, `hazard` et `hazard_timing`. Dans ces cas, la valeur de repli est appliquée.
 ## Unités et coordonnées
 Toutes les conversions se font en coordonnées de grille (cases). Les objets et formes issus de Tiled doivent donc être convertis avant usage gameplay, sans utiliser les pixels comme référence.
