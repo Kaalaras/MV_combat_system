@@ -159,7 +159,8 @@ def parse_hazard_timing(value: Any) -> HazardTiming:
     if not timing:
         return HAZARD_DEFAULT_TIMING
     if timing not in _HAZARD_TIMINGS:
-        raise ValueError(f"hazard_timing inconnu: {value!r}")
+        expected = ", ".join(sorted(_HAZARD_TIMINGS))
+        raise ValueError(f"hazard_timing inconnu: {value!r} (attendu: {expected})")
     return cast(HazardTiming, timing)
 
 
