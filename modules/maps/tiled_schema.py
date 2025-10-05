@@ -131,7 +131,8 @@ def parse_cover_str(value: Any) -> TerrainFlags:
     try:
         return _COVER_FLAGS[key]
     except KeyError as exc:
-        raise ValueError(f"cover inconnu: {value!r}") from exc
+        valid = ", ".join(sorted(_COVER_FLAGS))
+        raise ValueError(f"cover inconnu: {value!r} (attendu: {valid})") from exc
 
 
 def parse_hazard_str(value: Any) -> tuple[TerrainFlags, int]:
