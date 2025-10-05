@@ -46,7 +46,7 @@ class MapGenParams:
     def __post_init__(self) -> None:
         try:
             dimensions = self.SIZE_DIMENSIONS[self.size]
-        except KeyError as exc:  # pragma: no cover - defensive guard
+        except KeyError as exc:  # pragma: no cover - invalid size should be caught by type system
             raise ValueError(f"unknown map size '{self.size}'") from exc
 
         min_corridor, max_corridor = self.corridor_width
