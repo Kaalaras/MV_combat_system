@@ -1,6 +1,7 @@
 """Event-driven system responsible for importing maps into the ECS."""
 from __future__ import annotations
 
+import logging
 import re
 from pathlib import Path
 from typing import Callable, Optional, Protocol
@@ -22,8 +23,13 @@ class _EventBus(Protocol):
         ...
 
 
+logger = logging.getLogger(__name__)
+
+
 class MapLoaderSystem:
     """Listen for :class:`LoadMapFromTiled` requests and create map entities."""
+
+    MAX_ENTITY_ID_ATTEMPTS = 1000
 
     def __init__(
         self,
@@ -73,17 +79,46 @@ class MapLoaderSystem:
 
         candidate = f"map:{base}"
         suffix = 1
-        max_attempts = 1000
         attempts = 0
         while self._ecs.resolve_entity(candidate) is not None:
             attempts += 1
-            if attempts >= max_attempts:
+            if attempts >= self.MAX_ENTITY_ID_ATTEMPTS:
+                logger.error(
+                    "Unable to generate a unique map entity id for base '%s' "
+                    "after %s attempts while loading '%s'. Consider increasing "
+                    "MapLoaderSystem.MAX_ENTITY_ID_ATTEMPTS or cleaning up stale map entities.",
+                    base,
+                    self.MAX_ENTITY_ID_ATTEMPTS,
+                    path,
+                )
                 raise RuntimeError(
                     "Failed to generate a unique map entity ID after "
-                    f"{max_attempts} attempts (base='{base}')."
+                    f"{self.MAX_ENTITY_ID_ATTEMPTS} attempts (base='{base}')."
                 )
             suffix += 1
             candidate = f"map:{base}:{suffix}"
+        if attempts >= self.MAX_ENTITY_ID_ATTEMPTS - 1:
+            logger.warning(
+                "Map entity id generation for '%s' consumed %s attempts (limit %s); "
+                "consider increasing the limit.",
+                path,
+                attempts,
+                self.MAX_ENTITY_ID_ATTEMPTS,
+            )
+        elif attempts:
+            logger.info(
+                "Map entity id generation for '%s' succeeded after %s attempts "
+                "(limit %s).",
+                path,
+                attempts,
+                self.MAX_ENTITY_ID_ATTEMPTS,
+            )
+        else:
+            logger.debug(
+                "Map entity id generation for '%s' succeeded without collisions (limit %s).",
+                path,
+                self.MAX_ENTITY_ID_ATTEMPTS,
+            )
         return candidate
 
     @staticmethod
