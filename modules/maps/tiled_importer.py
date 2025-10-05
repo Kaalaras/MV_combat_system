@@ -57,21 +57,27 @@ def _normalise_gid(gid: int) -> int:
 
 def _gather_tile_properties(tiled_map) -> dict[int, Mapping[str, object]]:
     gid_properties: dict[int, Mapping[str, object]] = {}
+
+    def _combine_props(
+        base_props: Mapping[str, object], tile
+    ) -> dict[str, object]:
+        combined: dict[str, object] = dict(base_props)
+        if tile is not None and getattr(tile, "properties", None):
+            combined.update(tile.properties)
+        return combined
+
     for firstgid, tileset in tiled_map.tilesets.items():
         tileset_props = tileset.properties or {}
         tile_entries = tileset.tiles or {}
         tile_count = tileset.tile_count or 0
+
         for offset in range(tile_count):
-            combined: dict[str, object] = dict(tileset_props)
             tile = tile_entries.get(offset)
-            if tile is not None and tile.properties:
-                combined.update(tile.properties)
-            gid_properties[firstgid + offset] = combined
+            gid_properties[firstgid + offset] = _combine_props(tileset_props, tile)
+
         for local_id, tile in tile_entries.items():
-            combined = dict(tileset_props)
-            if tile.properties:
-                combined.update(tile.properties)
-            gid_properties[firstgid + local_id] = combined
+            gid_properties[firstgid + local_id] = _combine_props(tileset_props, tile)
+
     return gid_properties
 
 
@@ -214,6 +220,9 @@ def _apply_object_layer(
     cell_size_x: int,
     cell_size_y: int,
 ) -> None:
+    if cell_size_x <= 0 or cell_size_y <= 0:
+        raise ValueError("Cell size must be positive when applying object layers")
+
     if descriptor not in TERRAIN_CATALOG:
         logger.warning("Unknown terrain descriptor '%s' for object layer", descriptor)
         return
@@ -225,15 +234,15 @@ def _apply_object_layer(
         if not tiled_object.visible:
             continue
 
-        x0 = tiled_object.coordinates.x / cell_size_x if cell_size_x else 0
-        y0 = tiled_object.coordinates.y / cell_size_y if cell_size_y else 0
-        width = tiled_object.size.width / cell_size_x if cell_size_x else 0
-        height = tiled_object.size.height / cell_size_y if cell_size_y else 0
+        x0 = tiled_object.coordinates.x / cell_size_x
+        y0 = tiled_object.coordinates.y / cell_size_y
+        width = tiled_object.size.width / cell_size_x
+        height = tiled_object.size.height / cell_size_y
 
         min_x = max(0, int(math.floor(x0)))
         min_y = max(0, int(math.floor(y0)))
-        max_x = min(grid_width, int(math.ceil(x0 + width))) if grid_width else 0
-        max_y = min(grid_height, int(math.ceil(y0 + height))) if grid_height else 0
+        max_x = min(grid_width, int(math.ceil(x0 + width))) if grid_width > 0 else 0
+        max_y = min(grid_height, int(math.ceil(y0 + height))) if grid_height > 0 else 0
 
         if max_x <= min_x:
             max_x = min(min_x + 1, grid_width)
@@ -275,7 +284,7 @@ class TiledImporter:
 
         def process_tile_layer(name: str, mapper) -> None:
             layer = layers_by_name.get(name)
-            if not isinstance(layer, TileLayer):
+            if not isinstance(layer, TileLayer) or layer.visible is False:
                 return
             for x, y, raw_gid in _iter_tile_data(layer):
                 gid = _normalise_gid(raw_gid)
@@ -293,11 +302,12 @@ class TiledImporter:
         process_tile_layer(tile_layer_keys["collision"], _collision_descriptors)
 
         object_layer_keys = TILED_KEYS["object_layers"]
-        for key in ("walls", "doors"):
+        object_layer_descriptors = {"walls": "wall", "doors": "door"}
+        for key, descriptor in object_layer_descriptors.items():
             name = object_layer_keys.get(key)
             layer = layers_by_name.get(name)
-            if isinstance(layer, ObjectLayer):
-                _apply_object_layer(cells, layer, "wall", tile_width, tile_height)
+            if isinstance(layer, ObjectLayer) and layer.visible is not False:
+                _apply_object_layer(cells, layer, descriptor, tile_width, tile_height)
 
         properties = tiled_map.properties or {}
         name = str(properties.get("name", source.stem))
