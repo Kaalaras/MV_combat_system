@@ -30,6 +30,8 @@ class MapLoaderSystem:
     """Listen for :class:`LoadMapFromTiled` requests and create map entities."""
 
     MAX_ENTITY_ID_ATTEMPTS = 1000
+    WARNING_THRESHOLD_OFFSET = 10
+    INFO_THRESHOLD_DIVISOR = 10
 
     def __init__(
         self,
@@ -97,7 +99,7 @@ class MapLoaderSystem:
                 )
             suffix += 1
             candidate = f"map:{base}:{suffix}"
-        warning_threshold = max(1, self.MAX_ENTITY_ID_ATTEMPTS - 10)
+        warning_threshold = max(1, self.MAX_ENTITY_ID_ATTEMPTS - self.WARNING_THRESHOLD_OFFSET)
         if attempts >= warning_threshold:
             logger.warning(
                 "Map entity id generation for '%s' consumed %s attempts (limit %s); "
@@ -107,7 +109,7 @@ class MapLoaderSystem:
                 self.MAX_ENTITY_ID_ATTEMPTS,
             )
         elif attempts:
-            info_threshold = max(1, self.MAX_ENTITY_ID_ATTEMPTS // 10)
+            info_threshold = max(1, self.MAX_ENTITY_ID_ATTEMPTS // self.INFO_THRESHOLD_DIVISOR)
             log = logger.info if attempts >= info_threshold else logger.debug
             log(
                 "Map entity id generation for '%s' succeeded after %s attempts "
