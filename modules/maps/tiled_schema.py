@@ -42,8 +42,8 @@ TILED_DEFAULTS: Final[dict[str, Any]] = {
 }
 
 
-_BOOL_TRUE = {"1", "true", "yes", "on"}
-_BOOL_FALSE = {"0", "false", "no", "off"}
+_BOOL_TRUE: Final[frozenset[str]] = frozenset({"1", "true", "yes", "on"})
+_BOOL_FALSE: Final[frozenset[str]] = frozenset({"0", "false", "no", "off"})
 
 _COVER_FLAGS: Final[dict[str, TerrainFlags]] = {
     "none": TerrainFlags(0),
