@@ -1,7 +1,8 @@
 """Conventions partagées pour la lecture des cartes Tiled (TMX/TSX)."""
 from __future__ import annotations
 
-from typing import Any, Final, Mapping
+import math
+from typing import Any, Final, Mapping, cast
 
 from modules.maps.terrain_types import HazardTiming, TerrainFlags
 
@@ -28,13 +29,16 @@ TILED_KEYS: Final[dict[str, Mapping[str, str]]] = {
     },
 }
 
+HAZARD_DEFAULT_TIMING: Final[HazardTiming] = "on_enter"
+
+
 TILED_DEFAULTS: Final[dict[str, Any]] = {
     "move_cost": 1,
     "blocks_move": False,
     "blocks_los": False,
     "cover": "none",
     "hazard": "none",
-    "hazard_timing": "on_enter",
+    "hazard_timing": HAZARD_DEFAULT_TIMING,
 }
 
 
@@ -57,11 +61,17 @@ _HAZARD_SPECS: Final[dict[str, tuple[TerrainFlags, int]]] = {
     ),
 }
 
-_HAZARD_TIMINGS: Final[set[HazardTiming]] = {"on_enter", "end_of_turn", "per_tile"}
+_HAZARD_TIMINGS: Final[frozenset[HazardTiming]] = frozenset(
+    {
+        cast(HazardTiming, "on_enter"),
+        cast(HazardTiming, "end_of_turn"),
+        cast(HazardTiming, "per_tile"),
+    }
+)
 
 
 def parse_move_cost(value: Any, *, default: int | None = None) -> int:
-    """Normalise la valeur ``move_cost`` en entier positif."""
+    """Normalise la valeur ``move_cost`` en entier non négatif."""
 
     if value is None:
         if default is not None:
@@ -72,16 +82,23 @@ def parse_move_cost(value: Any, *, default: int | None = None) -> int:
         raise ValueError("move_cost ne peut pas être un booléen")
 
     if isinstance(value, (int, float)):
-        cost = int(value)
+        numeric = float(value)
     else:
         value_str = str(value).strip()
         if not value_str:
             return TILED_DEFAULTS["move_cost"]
-        cost = int(value_str)
+        try:
+            numeric = float(value_str)
+        except ValueError as exc:
+            raise ValueError("move_cost doit être un nombre") from exc
 
-    if cost < 0:
+    if not math.isfinite(numeric):
+        raise ValueError("move_cost doit être un nombre fini")
+    if numeric < 0:
         raise ValueError("move_cost doit être >= 0")
-    return cost
+    if not numeric.is_integer():
+        raise ValueError("move_cost doit être un entier")
+    return int(numeric)
 
 
 def parse_bool_flag(value: Any, *, default: bool) -> bool:
@@ -133,13 +150,13 @@ def parse_hazard_timing(value: Any) -> HazardTiming:
     """Valide la propriété ``hazard_timing`` et retourne le libellé normalisé."""
 
     if value is None:
-        return TILED_DEFAULTS["hazard_timing"]
+        return HAZARD_DEFAULT_TIMING
     timing = str(value).strip().lower()
     if not timing:
-        return TILED_DEFAULTS["hazard_timing"]
+        return HAZARD_DEFAULT_TIMING
     if timing not in _HAZARD_TIMINGS:
         raise ValueError(f"hazard_timing inconnu: {value!r}")
-    return timing  # type: ignore[return-value]
+    return cast(HazardTiming, timing)
 
 
 def apply_tile_defaults(properties: Mapping[str, Any]) -> dict[str, Any]:
