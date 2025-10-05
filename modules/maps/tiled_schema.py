@@ -61,11 +61,11 @@ _HAZARD_SPECS: Final[dict[str, tuple[TerrainFlags, int]]] = {
     ),
 }
 
-_HAZARD_TIMINGS: Final[frozenset[HazardTiming]] = frozenset(
+_HAZARD_TIMINGS: Final[frozenset[str]] = frozenset(
     {
-        cast(HazardTiming, "on_enter"),
-        cast(HazardTiming, "end_of_turn"),
-        cast(HazardTiming, "per_tile"),
+        "on_enter",
+        "end_of_turn",
+        "per_tile",
     }
 )
 
