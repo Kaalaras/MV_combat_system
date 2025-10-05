@@ -166,27 +166,28 @@ def _generate_bsp(params: MapGenParams, rng) -> BSPNode:
 
 
 def _create_room(rect: Rect, rng) -> Rect:
-    min_width = min(rect.width, _MIN_ROOM_SIZE)
-    max_width = max(min_width, rect.width - 2 * _ROOM_MARGIN)
-    room_width = min(rect.width, _rand_within(rng, min_width, max_width))
+    def _pick_span(span: int) -> int:
+        min_span = max(1, min(span, _MIN_ROOM_SIZE))
+        interior_limit = span - 2 * _ROOM_MARGIN
+        max_span = interior_limit if interior_limit >= min_span else min_span
+        return min(span, _rand_within(rng, min_span, max_span))
 
-    min_height = min(rect.height, _MIN_ROOM_SIZE)
-    max_height = max(min_height, rect.height - 2 * _ROOM_MARGIN)
-    room_height = min(rect.height, _rand_within(rng, min_height, max_height))
+    def _pick_position(coord: int, span: int, size: int) -> int:
+        margin = _ROOM_MARGIN
+        min_pos = coord + margin
+        max_pos = coord + span - margin - size
+        if max_pos < min_pos:
+            min_pos = coord
+            max_pos = coord + span - size
+        if max_pos < min_pos:
+            max_pos = min_pos
+        return _rand_within(rng, min_pos, max_pos)
 
-    x_min = rect.x + _ROOM_MARGIN
-    x_max = rect.x + rect.width - _ROOM_MARGIN - room_width
-    if x_max < x_min:
-        x_min = rect.x
-        x_max = rect.x + rect.width - room_width
-    room_x = _rand_within(rng, x_min, x_max)
+    room_width = _pick_span(rect.width)
+    room_height = _pick_span(rect.height)
 
-    y_min = rect.y + _ROOM_MARGIN
-    y_max = rect.y + rect.height - _ROOM_MARGIN - room_height
-    if y_max < y_min:
-        y_min = rect.y
-        y_max = rect.y + rect.height - room_height
-    room_y = _rand_within(rng, y_min, y_max)
+    room_x = _pick_position(rect.x, rect.width, room_width)
+    room_y = _pick_position(rect.y, rect.height, room_height)
 
     return Rect(room_x, room_y, room_width, room_height)
 
