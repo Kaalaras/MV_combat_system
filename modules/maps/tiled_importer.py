@@ -201,7 +201,7 @@ def _collision_descriptors(_gid: int, resolved: _ResolvedProperties) -> list[str
         and resolved.move_cost == 0
     ):
         return ["void"]
-    if "wall" in TERRAIN_CATALOG:
+    if "wall" in TERRAIN_CATALOG and resolved.blocks_move:
         return ["wall"]
     return []
 
