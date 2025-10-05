@@ -181,6 +181,13 @@ def _create_room(rect: Rect, rng) -> Rect:
             max_pos = coord + span - size
         if max_pos < min_pos:
             max_pos = min_pos
+        # Clamp to ensure the room stays within the partition boundary
+        min_allowed = coord
+        max_allowed = coord + span - size
+        min_pos = max(min_pos, min_allowed)
+        max_pos = min(max_pos, max_allowed)
+        if max_pos < min_pos:
+            max_pos = min_pos
         return _rand_within(rng, min_pos, max_pos)
 
     room_width = _pick_span(rect.width)
