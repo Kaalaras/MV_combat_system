@@ -167,8 +167,8 @@ def _generate_bsp(params: MapGenParams, rng) -> BSPNode:
 
 def _create_room(rect: Rect, rng) -> Rect:
     def _pick_span(span: int) -> int:
-        min_span = max(1, min(span, _MIN_ROOM_SIZE))
         interior_limit = span - 2 * _ROOM_MARGIN
+        min_span = max(_MIN_ROOM_SIZE, min(span, interior_limit))
         max_span = interior_limit if interior_limit >= min_span else min_span
         return min(span, _rand_within(rng, min_span, max_span))
 
