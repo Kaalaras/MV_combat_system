@@ -10,7 +10,7 @@
 
 ### Calques d'objets
 - `objects.props` : décor non bloquant (information purement visuelle).
-- `objects.walls` : volumes bloquant déplacement et ligne de vue.
+- `objects.walls` : volumes bloquant le déplacement et la ligne de vue.
 - `objects.doors` : volumes ouvrables ; se comportent comme des murs tant qu'ils sont fermés.
 
 ## Propriétés de tuiles
@@ -19,8 +19,8 @@ Les propriétés peuvent être définies au niveau du tileset ou d'une tuile ind
 Propriété       | Type | Valeurs autorisées                                | Valeur de repli | Effet gameplay
 ----------------|------|----------------------------------------------------|-----------------|----------------
 `move_cost`     | int  | ≥ 0 (`None` réservé aux murs/void internes)        | `1`             | Coût standard du sol.
-`blocks_move`   | bool | `true` / `false`                                   | `false`         | Bloque le déplacement.
-`blocks_los`    | bool | `true` / `false`                                   | `false`         | Bloque la ligne de vue.
+`blocks_move`   | bool | `true` / `false` (`1` / `0`, `yes` / `no`, `on` / `off` acceptés) | `false`         | Bloque le déplacement.
+`blocks_los`    | bool | `true` / `false` (`1` / `0`, `yes` / `no`, `on` / `off` acceptés) | `false`         | Bloque la ligne de vue.
 `cover`         | str  | `"none"`, `"light"`, `"heavy"`, `"fortification"` | `"none"`       | Flags de couvert appliqués.
 `hazard`        | str  | `"none"`, `"dangerous"`, `"very_dangerous"`      | `"none"`       | Flags + dégâts de terrain.
 `hazard_timing` | str  | `"on_enter"`, `"end_of_turn"`, `"per_tile"`      | `"on_enter"`   | Moment d'application des dégâts.

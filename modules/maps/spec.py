@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Sequence
 
 import json
+import logging
 
 from modules.maps.components import MapComponent, MapGrid, MapMeta
 from modules.maps.terrain_types import (
@@ -15,6 +16,9 @@ from modules.maps.terrain_types import (
     TerrainFlags,
     combine,
 )
+
+
+logger = logging.getLogger(__name__)
 
 
 CellSpec = str | list[str]
@@ -275,8 +279,8 @@ def load_json(path: str | Path) -> MapSpec:
     except json.JSONDecodeError as exc:
         # Add the file path to the message while preserving original metadata.
         message = f"{exc.msg} (file: {source})"
-        print(f"Error parsing JSON in file '{source}': {exc.msg}")
-        raise json.JSONDecodeError(message, exc.doc, exc.pos) from exc
+        logger.error("Error parsing JSON in file '%s': %s", source, exc.msg)
+        raise exc.__class__(message, exc.doc, exc.pos) from exc
     meta_data = data.get("meta", {})
     meta = MapMeta(
         name=meta_data.get("name", ""),
