@@ -350,7 +350,6 @@ def _apply_symmetry(cells: list[list[str]], symmetry: MapSymmetry) -> None:
         raise ValueError(
             f"Unknown symmetry mode '{symmetry}'. Supported modes: none, mirror_x, mirror_y, rot_180"
         )
-
 def generate_layout(params: MapGenParams) -> MapSpec:
     """Generate a :class:`MapSpec` using a BSP layout algorithm."""
 
