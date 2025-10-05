@@ -147,7 +147,7 @@ def parse_hazard_str(value: Any) -> tuple[TerrainFlags, int]:
     try:
         return _HAZARD_SPECS[key]
     except KeyError as exc:
-        valid = ', '.join(sorted(_HAZARD_SPECS))
+        valid = ", ".join(sorted(_HAZARD_SPECS))
         raise ValueError(f"hazard inconnu: {value!r} (attendu: {valid})") from exc
 
 
