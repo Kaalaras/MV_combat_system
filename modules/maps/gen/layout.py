@@ -318,7 +318,6 @@ def _ensure_border_walls(cells: list[list[str]]) -> None:
     for y in range(height):
         cells[y][0] = "wall"
         cells[y][width - 1] = "wall"
-
 def _apply_symmetry(cells: list[list[str]], symmetry: MapSymmetry) -> None:
     if symmetry == "none":
         return
