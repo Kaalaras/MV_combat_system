@@ -71,8 +71,18 @@ _HAZARD_TIMINGS: Final[frozenset[str]] = frozenset(
 
 
 def parse_move_cost(value: Any, *, default: int | None = None) -> int:
-    """Normalise la valeur ``move_cost`` en entier non négatif."""
+    """
+    Normalise la valeur ``move_cost`` en entier non négatif.
 
+    Si ``value`` est ``None``, retourne ``default`` s'il est fourni, sinon
+    ``TILED_DEFAULTS['move_cost']``. Les chaînes vides sont traitées comme
+    absentes et déclenchent également la valeur par défaut.
+
+    :param value: Valeur à normaliser (int, float, str, ou None).
+    :param default: Valeur de repli à utiliser si ``value`` est ``None``.
+    :return: Un entier non négatif représentant le coût de déplacement.
+    :raises ValueError: Si la valeur n'est pas un nombre entier non négatif.
+    """
     if value is None:
         if default is not None:
             return parse_move_cost(default, default=None)
