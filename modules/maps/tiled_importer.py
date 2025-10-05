@@ -31,6 +31,12 @@ logger = logging.getLogger(__name__)
 _FLIP_FLAGS_MASK = 0xE0000000
 
 
+OBJECT_LAYER_DESCRIPTORS: Mapping[str, str] = {
+    "walls": "wall",
+    "doors": "door",
+}
+
+
 @dataclass(slots=True)
 class _ResolvedProperties:
     move_cost: int
@@ -45,6 +51,8 @@ class _ResolvedProperties:
 def _iter_layers(layers: Iterable[Layer]) -> Iterator[Layer]:
     for layer in layers:
         if isinstance(layer, LayerGroup):
+            if layer.visible is False:
+                continue
             nested = layer.layers or []
             yield from _iter_layers(nested)
         else:
@@ -235,10 +243,10 @@ def _apply_object_layer(
         if not tiled_object.visible:
             continue
 
-        x0 = tiled_object.coordinates.x / cell_size_x
-        y0 = tiled_object.coordinates.y / cell_size_y
-        width = tiled_object.size.width / cell_size_x
-        height = tiled_object.size.height / cell_size_y
+        x0 = float(tiled_object.coordinates.x) / cell_size_x
+        y0 = float(tiled_object.coordinates.y) / cell_size_y
+        width = float(tiled_object.size.width) / cell_size_x
+        height = float(tiled_object.size.height) / cell_size_y
 
         min_x = max(0, int(math.floor(x0)))
         min_y = max(0, int(math.floor(y0)))
@@ -306,8 +314,7 @@ class TiledImporter:
         process_tile_layer(tile_layer_keys["collision"], _collision_descriptors)
 
         object_layer_keys = TILED_KEYS["object_layers"]
-        object_layer_descriptors = {"walls": "wall", "doors": "door"}
-        for key, descriptor in object_layer_descriptors.items():
+        for key, descriptor in OBJECT_LAYER_DESCRIPTORS.items():
             name = object_layer_keys.get(key)
             layer = layers_by_name.get(name)
             if isinstance(layer, ObjectLayer) and layer.visible is not False:
@@ -320,8 +327,11 @@ class TiledImporter:
         seed: int | None
         if isinstance(seed_value, int):
             seed = seed_value
-        elif isinstance(seed_value, str) and seed_value.isdigit():
-            seed = int(seed_value)
+        elif isinstance(seed_value, str):
+            try:
+                seed = int(seed_value)
+            except ValueError:
+                seed = None
         else:
             seed = None
 
