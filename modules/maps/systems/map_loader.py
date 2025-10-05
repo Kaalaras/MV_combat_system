@@ -114,6 +114,9 @@ class MapLoaderSystem:
                 self.MAX_ENTITY_ID_ATTEMPTS,
             )
         elif attempts:
+            if self.INFO_THRESHOLD_DIVISOR <= 0:
+                logger.error("INFO_THRESHOLD_DIVISOR must be positive at runtime.")
+                raise ValueError("INFO_THRESHOLD_DIVISOR must be positive.")
             info_threshold = max(1, self.MAX_ENTITY_ID_ATTEMPTS // self.INFO_THRESHOLD_DIVISOR)
             log = logger.info if attempts >= info_threshold else logger.debug
             log(
