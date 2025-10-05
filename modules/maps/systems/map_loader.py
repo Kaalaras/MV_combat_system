@@ -97,7 +97,8 @@ class MapLoaderSystem:
                 )
             suffix += 1
             candidate = f"map:{base}:{suffix}"
-        if attempts >= self.MAX_ENTITY_ID_ATTEMPTS - 1:
+        warning_threshold = max(1, self.MAX_ENTITY_ID_ATTEMPTS - 10)
+        if attempts >= warning_threshold:
             logger.warning(
                 "Map entity id generation for '%s' consumed %s attempts (limit %s); "
                 "consider increasing the limit.",
@@ -106,7 +107,9 @@ class MapLoaderSystem:
                 self.MAX_ENTITY_ID_ATTEMPTS,
             )
         elif attempts:
-            logger.info(
+            info_threshold = max(1, self.MAX_ENTITY_ID_ATTEMPTS // 10)
+            log = logger.info if attempts >= info_threshold else logger.debug
+            log(
                 "Map entity id generation for '%s' succeeded after %s attempts "
                 "(limit %s).",
                 path,
