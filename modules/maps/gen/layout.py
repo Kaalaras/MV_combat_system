@@ -125,12 +125,7 @@ def _estimate_room_target(params: MapGenParams) -> int:
     return estimate
 
 
-def _rand_within(rng, start: int, stop: int) -> int:
-    if start >= stop:
-        return start
-    return rand_int(rng, start, stop)
-
-
+# _rand_within removed; use rand_int directly and handle edge case at call sites.
 def _generate_bsp(params: MapGenParams, rng) -> BSPNode:
     width, height = params.dimensions
     root_rect = Rect(1, 1, width - 2, height - 2)
