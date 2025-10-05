@@ -307,7 +307,6 @@ def _connect_tree(
 
         _connect_tree(node.left, cells, rng, corridor_width)
         _connect_tree(node.right, cells, rng, corridor_width)
-
 def _ensure_border_walls(cells: list[list[str]]) -> None:
     if not cells:
         return
