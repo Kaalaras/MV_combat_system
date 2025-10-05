@@ -163,9 +163,18 @@ def _generate_bsp(params: MapGenParams, rng) -> BSPNode:
 def _create_room(rect: Rect, rng) -> Rect:
     def _pick_span(span: int) -> int:
         interior_limit = span - 2 * _ROOM_MARGIN
-        min_span = max(_MIN_ROOM_SIZE, min(span, interior_limit))
-        max_span = interior_limit if interior_limit >= min_span else min_span
-        return min(span, _rand_within(rng, min_span, max_span))
+        if interior_limit < 1:
+            # Not enough space to honour the requested margins; fall back to the
+            # full span while keeping the size positive when possible.
+            if span <= 0:
+                return 0
+            return rand_int(rng, 1, span)
+
+        min_span = min(_MIN_ROOM_SIZE, interior_limit)
+        max_span = interior_limit
+        if min_span > max_span:
+            min_span = max_span
+        return rand_int(rng, min_span, max_span)
 
     def _pick_position(coord: int, span: int, size: int) -> int:
         margin = _ROOM_MARGIN
@@ -183,7 +192,7 @@ def _create_room(rect: Rect, rng) -> Rect:
         max_pos = min(max_pos, max_allowed)
         if max_pos < min_pos:
             max_pos = min_pos
-        return _rand_within(rng, min_pos, max_pos)
+        return rand_int(rng, min_pos, max_pos)
 
     room_width = _pick_span(rect.width)
     room_height = _pick_span(rect.height)
@@ -346,6 +355,8 @@ def _apply_symmetry(cells: list[list[str]], symmetry: MapSymmetry) -> None:
         raise ValueError(
             f"Unknown symmetry mode '{symmetry}'. Supported modes: none, mirror_x, mirror_y, rot_180"
         )
+
+
 def generate_layout(params: MapGenParams) -> MapSpec:
     """Generate a :class:`MapSpec` using a BSP layout algorithm."""
 
