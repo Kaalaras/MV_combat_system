@@ -284,7 +284,7 @@ def _carve_corridor(
     x1, y1 = start_point
     x2, y2 = end_point
 
-    if rng.choice([True, False]):
+    if rng.random() < 0.5:
         _carve_horizontal(cells, y1, x1, x2, width)
         _carve_vertical(cells, x2, y1, y2, width)
     else:
