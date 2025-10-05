@@ -80,7 +80,7 @@ class MapLoaderSystem:
             base = "map"
 
         candidate = f"map:{base}"
-        suffix = 1
+        suffix = 0
         attempts = 0
         while self._ecs.resolve_entity(candidate) is not None:
             attempts += 1
