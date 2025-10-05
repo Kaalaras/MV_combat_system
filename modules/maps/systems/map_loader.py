@@ -1,6 +1,7 @@
 """Event-driven system responsible for importing maps into the ECS."""
 from __future__ import annotations
 
+import re
 from pathlib import Path
 from typing import Callable, Optional, Protocol
 
@@ -72,10 +73,15 @@ class MapLoaderSystem:
 
         candidate = f"map:{base}"
         suffix = 1
-        while True:
-            existing = self._ecs.resolve_entity(candidate)
-            if existing is None:
-                break
+        max_attempts = 1000
+        attempts = 0
+        while self._ecs.resolve_entity(candidate) is not None:
+            attempts += 1
+            if attempts >= max_attempts:
+                raise RuntimeError(
+                    "Failed to generate a unique map entity ID after "
+                    f"{max_attempts} attempts (base='{base}')."
+                )
             suffix += 1
             candidate = f"map:{base}:{suffix}"
         return candidate
@@ -85,13 +91,7 @@ class MapLoaderSystem:
         if not raw:
             return ""
         lowered = raw.lower()
-        normalised = [
-            ch if ch.isalnum() else "_"
-            for ch in lowered
-        ]
-        collapsed = "".join(normalised).strip("_")
-        while "__" in collapsed:
-            collapsed = collapsed.replace("__", "_")
+        collapsed = re.sub(r"[^a-z0-9]+", "_", lowered).strip("_")
         return collapsed
 
     # Public API -------------------------------------------------------
