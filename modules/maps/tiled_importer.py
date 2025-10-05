@@ -71,12 +71,13 @@ def _gather_tile_properties(tiled_map) -> dict[int, Mapping[str, object]]:
         tile_entries = tileset.tiles or {}
         tile_count = tileset.tile_count or 0
 
-        for offset in range(tile_count):
+        indices: set[int] = set(tile_entries.keys())
+        if tile_count:
+            indices.update(range(tile_count))
+
+        for offset in sorted(indices):
             tile = tile_entries.get(offset)
             gid_properties[firstgid + offset] = _combine_props(tileset_props, tile)
-
-        for local_id, tile in tile_entries.items():
-            gid_properties[firstgid + local_id] = _combine_props(tileset_props, tile)
 
     return gid_properties
 
@@ -244,6 +245,9 @@ def _apply_object_layer(
         max_x = min(grid_width, int(math.ceil(x0 + width))) if grid_width > 0 else 0
         max_y = min(grid_height, int(math.ceil(y0 + height))) if grid_height > 0 else 0
 
+        if min_x >= grid_width or min_y >= grid_height or max_x <= 0 or max_y <= 0:
+            continue
+
         if max_x <= min_x:
             max_x = min(min_x + 1, grid_width)
         if max_y <= min_y:
@@ -323,9 +327,15 @@ class TiledImporter:
 
         meta = MapMeta(name=name, biome=biome, seed=seed)
 
-        default_descriptor = (
-            "floor" if "floor" in TERRAIN_CATALOG else next(iter(TERRAIN_CATALOG))
-        )
+        if "floor" in TERRAIN_CATALOG:
+            default_descriptor = "floor"
+        elif TERRAIN_CATALOG:
+            default_descriptor = next(iter(TERRAIN_CATALOG))
+        else:
+            logger.warning(
+                "Terrain catalog is empty; using fallback default descriptor 'floor'"
+            )
+            default_descriptor = "floor"
 
         normalised_cells: list[list[str | list[str]]] = []
         for row in cells:
