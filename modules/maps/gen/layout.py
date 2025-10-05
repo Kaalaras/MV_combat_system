@@ -171,9 +171,7 @@ def _create_room(rect: Rect, rng) -> Rect:
             return rand_int(rng, 1, span)
 
         min_span = min(_MIN_ROOM_SIZE, interior_limit)
-        max_span = interior_limit
-        if min_span > max_span:
-            min_span = max_span
+        max_span = max(min_span, interior_limit)
         return rand_int(rng, min_span, max_span)
 
     def _pick_position(coord: int, span: int, size: int) -> int:
