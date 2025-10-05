@@ -40,6 +40,9 @@ class MapLoaderSystem:
         event_bus: _EventBus,
         importer: Optional[TiledImporter] = None,
     ) -> None:
+        if self.INFO_THRESHOLD_DIVISOR <= 0:
+            raise ValueError("INFO_THRESHOLD_DIVISOR must be positive.")
+
         self._ecs = ecs_manager
         self._bus = event_bus
         self._importer = importer or TiledImporter()
@@ -99,11 +102,9 @@ class MapLoaderSystem:
                 )
             suffix += 1
             candidate = f"map:{base}:{suffix}"
-        if self.WARNING_THRESHOLD_OFFSET >= self.MAX_ENTITY_ID_ATTEMPTS:
-            warning_threshold = 1
-        else:
-            warning_threshold = self.MAX_ENTITY_ID_ATTEMPTS - self.WARNING_THRESHOLD_OFFSET
-        warning_threshold = max(1, warning_threshold)
+        warning_threshold = max(
+            1, self.MAX_ENTITY_ID_ATTEMPTS - self.WARNING_THRESHOLD_OFFSET
+        )
         if attempts >= warning_threshold:
             logger.warning(
                 "Map entity id generation for '%s' consumed %s attempts (limit %s); "
@@ -113,8 +114,6 @@ class MapLoaderSystem:
                 self.MAX_ENTITY_ID_ATTEMPTS,
             )
         elif attempts:
-            if self.INFO_THRESHOLD_DIVISOR <= 0:
-                raise ValueError("INFO_THRESHOLD_DIVISOR must be positive.")
             info_threshold = max(1, self.MAX_ENTITY_ID_ATTEMPTS // self.INFO_THRESHOLD_DIVISOR)
             log = logger.info if attempts >= info_threshold else logger.debug
             log(
