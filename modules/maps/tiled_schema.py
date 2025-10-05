@@ -113,7 +113,10 @@ def parse_bool_flag(value: Any, *, default: bool) -> bool:
         return True
     if value_str in _BOOL_FALSE:
         return False
-    raise ValueError(f"valeur booléenne invalide: {value!r}")
+    expected = ", ".join(sorted(_BOOL_TRUE | _BOOL_FALSE))
+    raise ValueError(
+        f"valeur booléenne invalide: {value!r} (attendu: {expected})"
+    )
 
 
 def parse_cover_str(value: Any) -> TerrainFlags:
