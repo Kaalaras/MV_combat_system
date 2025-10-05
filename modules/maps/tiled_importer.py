@@ -5,7 +5,7 @@ import logging
 import math
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Iterable, Iterator, Mapping
+from typing import Callable, Iterable, Iterator, Mapping
 
 from pytiled_parser import parse_map
 from pytiled_parser.layer import Layer, LayerGroup, ObjectLayer, TileLayer
@@ -121,36 +121,50 @@ def _resolve_properties(mapping: Mapping[str, object]) -> _ResolvedProperties:
 
 def _terrain_descriptors(_gid: int, resolved: _ResolvedProperties) -> list[str]:
     names: list[str] = []
+    names_set: set[str] = set()
     if resolved.blocks_move:
         names.append("wall")
+        names_set.add("wall")
         return names
 
     move_cost = resolved.move_cost
     if move_cost <= 1:
         names.append("floor")
+        names_set.add("floor")
     elif move_cost == 2 and "difficult" in TERRAIN_CATALOG:
         names.append("difficult")
+        names_set.add("difficult")
     elif move_cost >= 3 and "very_difficult" in TERRAIN_CATALOG:
         names.append("very_difficult")
+        names_set.add("very_difficult")
     else:
         names.append("floor")
+        names_set.add("floor")
 
     cover_flags = resolved.cover_flags
     if cover_flags & TerrainFlags.FORTIFICATION and "fortification" in TERRAIN_CATALOG:
-        names.append("fortification")
+        if "fortification" not in names_set:
+            names.append("fortification")
+            names_set.add("fortification")
     elif cover_flags & TerrainFlags.COVER_HEAVY and "heavy_cover" in TERRAIN_CATALOG:
-        names.append("heavy_cover")
+        if "heavy_cover" not in names_set:
+            names.append("heavy_cover")
+            names_set.add("heavy_cover")
     elif cover_flags & TerrainFlags.COVER_LIGHT and "light_cover" in TERRAIN_CATALOG:
-        names.append("light_cover")
+        if "light_cover" not in names_set:
+            names.append("light_cover")
+            names_set.add("light_cover")
 
     hazard_names = _hazard_descriptors(_gid, resolved)
     for name in hazard_names:
-        if name not in names:
+        if name not in names_set:
             names.append(name)
+            names_set.add(name)
 
     if resolved.blocks_los and len(names) == 1 and names[0] == "floor":
-        if "light_cover" in TERRAIN_CATALOG:
+        if "light_cover" in TERRAIN_CATALOG and "light_cover" not in names_set:
             names.append("light_cover")
+            names_set.add("light_cover")
 
     return names
 
@@ -294,7 +308,9 @@ class TiledImporter:
             layer.name: layer for layer in _iter_layers(tiled_map.layers)
         }
 
-        def process_tile_layer(name: str, mapper) -> None:
+        def process_tile_layer(
+            name: str, mapper: Callable[[int, _ResolvedProperties], list[str]]
+        ) -> None:
             layer = layers_by_name.get(name)
             if not isinstance(layer, TileLayer) or layer.visible is False:
                 return
@@ -324,16 +340,14 @@ class TiledImporter:
         name = str(properties.get("name", source.stem))
         biome = str(properties.get("biome", ""))
         seed_value = properties.get("seed")
-        seed: int | None
+        seed: int | None = None
         if isinstance(seed_value, int):
             seed = seed_value
         elif isinstance(seed_value, str):
             try:
                 seed = int(seed_value)
             except ValueError:
-                seed = None
-        else:
-            seed = None
+                pass
 
         meta = MapMeta(name=name, biome=biome, seed=seed)
 
