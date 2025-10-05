@@ -327,7 +327,7 @@ def _apply_symmetry(cells: list[list[str]], symmetry: MapSymmetry) -> None:
         limit = (height + 1) // 2
         for y in range(limit):
             mirror_y = height - 1 - y
-            cells[mirror_y] = original[y][:]
+            cells[mirror_y][:] = original[y]
     elif symmetry == "mirror_y":
         limit = (width + 1) // 2
         for y in range(height):
