@@ -79,7 +79,7 @@ def _collision_properties(names: Iterable[str]) -> Mapping[str, object] | None:
     if "void" in names:
         return {"blocks_move": True, "blocks_los": True, "move_cost": 0}
     if "wall" in names:
-        return {"blocks_move": True, "blocks_los": True, "move_cost": 1}
+        return {"blocks_move": True, "blocks_los": True, "move_cost": 0}
     return None
 
 
@@ -288,11 +288,29 @@ def export_to_tiled(spec: MapSpec, out_path: str | Path) -> None:
 
     Path(out_path).parent.mkdir(parents=True, exist_ok=True)
     tree = ET.ElementTree(map_elem)
-    try:
+
+    if hasattr(ET, "indent"):
         ET.indent(tree, space="  ")  # type: ignore[attr-defined]
-    except AttributeError:  # pragma: no cover - Python < 3.9 fallback
-        pass
+    else:  # pragma: no cover - legacy fallback for Python < 3.9
+        _indent_xml(map_elem)
+
     tree.write(out_path, encoding="utf-8", xml_declaration=True)
+
+
+def _indent_xml(elem: ET.Element, level: int = 0, space: str = "  ") -> None:
+    """Fallback pretty printer for XML trees on Python < 3.9."""
+
+    indent = "\n" + level * space
+    if len(elem):
+        if not elem.text or not elem.text.strip():
+            elem.text = indent + space
+        for child in elem:
+            _indent_xml(child, level + 1, space)
+        if not elem.tail or not elem.tail.strip():
+            elem.tail = indent
+    else:
+        if level and (not elem.tail or not elem.tail.strip()):
+            elem.tail = indent
 
 
 __all__ = ["export_to_tiled"]

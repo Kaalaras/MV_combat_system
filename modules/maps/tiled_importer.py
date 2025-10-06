@@ -241,6 +241,11 @@ def _add_descriptors(cells: list[list[list[str]]], x: int, y: int, names: list[s
         if name not in TERRAIN_CATALOG:
             logger.warning("Unknown terrain descriptor '%s' ignored during import", name)
             continue
+        if name == "void" and "wall" in cell:
+            # Walls take precedence over the auxiliary void descriptor emitted by
+            # the collision layer. Retain the existing wall entry to preserve the
+            # original MapSpec semantics.
+            continue
         if name not in cell:
             cell.append(name)
 
