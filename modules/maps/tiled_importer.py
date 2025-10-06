@@ -120,58 +120,52 @@ def _resolve_properties(mapping: Mapping[str, object]) -> _ResolvedProperties:
     )
 
 
+def _append_name(names: list[str], names_set: set[str], name: str) -> None:
+    if name in names_set:
+        return
+    names.append(name)
+    names_set.add(name)
+
+
+def _append_name_if_available(names: list[str], names_set: set[str], name: str) -> None:
+    if name not in TERRAIN_CATALOG:
+        return
+    _append_name(names, names_set, name)
+
+
 def _terrain_descriptors(_gid: int, resolved: _ResolvedProperties) -> list[str]:
     names: list[str] = []
     names_set: set[str] = set()
     if resolved.blocks_move:
-        names.append("wall")
-        names_set.add("wall")
+        _append_name(names, names_set, "wall")
         return names
 
     move_cost = resolved.move_cost
     if move_cost <= 1:
-        names.append("floor")
-        names_set.add("floor")
+        _append_name(names, names_set, "floor")
     elif move_cost == 2 and "difficult" in TERRAIN_CATALOG:
-        if "floor" in TERRAIN_CATALOG:
-            names.append("floor")
-            names_set.add("floor")
-        names.append("difficult")
-        names_set.add("difficult")
+        _append_name_if_available(names, names_set, "floor")
+        _append_name(names, names_set, "difficult")
     elif move_cost >= 3 and "very_difficult" in TERRAIN_CATALOG:
-        if "floor" in TERRAIN_CATALOG:
-            names.append("floor")
-            names_set.add("floor")
-        names.append("very_difficult")
-        names_set.add("very_difficult")
+        _append_name_if_available(names, names_set, "floor")
+        _append_name(names, names_set, "very_difficult")
     else:
-        names.append("floor")
-        names_set.add("floor")
+        _append_name(names, names_set, "floor")
 
     cover_flags = resolved.cover_flags
     if cover_flags & TerrainFlags.FORTIFICATION and "fortification" in TERRAIN_CATALOG:
-        if "fortification" not in names_set:
-            names.append("fortification")
-            names_set.add("fortification")
+        _append_name_if_available(names, names_set, "fortification")
     elif cover_flags & TerrainFlags.COVER_HEAVY and "heavy_cover" in TERRAIN_CATALOG:
-        if "heavy_cover" not in names_set:
-            names.append("heavy_cover")
-            names_set.add("heavy_cover")
+        _append_name_if_available(names, names_set, "heavy_cover")
     elif cover_flags & TerrainFlags.COVER_LIGHT and "light_cover" in TERRAIN_CATALOG:
-        if "light_cover" not in names_set:
-            names.append("light_cover")
-            names_set.add("light_cover")
+        _append_name_if_available(names, names_set, "light_cover")
 
     hazard_names = _hazard_descriptors(_gid, resolved)
     for name in hazard_names:
-        if name not in names_set:
-            names.append(name)
-            names_set.add(name)
+        _append_name(names, names_set, name)
 
     if resolved.blocks_los and len(names) == 1 and names[0] == "floor":
-        if "light_cover" in TERRAIN_CATALOG and "light_cover" not in names_set:
-            names.append("light_cover")
-            names_set.add("light_cover")
+        _append_name_if_available(names, names_set, "light_cover")
 
     return names
 

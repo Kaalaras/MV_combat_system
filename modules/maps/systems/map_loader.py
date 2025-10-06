@@ -110,7 +110,7 @@ class MapLoaderSystem:
                     "MapLoaderSystem.MAX_ENTITY_ID_ATTEMPTS or cleaning up stale map entities.",
                     base,
                     self.MAX_ENTITY_ID_ATTEMPTS,
-                    path,
+                    origin_hint or base,
                 )
                 raise RuntimeError(
                     "Failed to generate a unique map entity ID after "
@@ -122,13 +122,13 @@ class MapLoaderSystem:
             1, self.MAX_ENTITY_ID_ATTEMPTS - self.WARNING_THRESHOLD_OFFSET
         )
         if attempts >= warning_threshold:
-                logger.warning(
-                    "Map entity id generation for '%s' consumed %s attempts (limit %s); "
-                    "consider increasing the limit.",
-                    origin_hint or base,
-                    attempts,
-                    self.MAX_ENTITY_ID_ATTEMPTS,
-                )
+            logger.warning(
+                "Map entity id generation for '%s' consumed %s attempts (limit %s); "
+                "consider increasing the limit.",
+                origin_hint or base,
+                attempts,
+                self.MAX_ENTITY_ID_ATTEMPTS,
+            )
         elif attempts:
             if self.INFO_THRESHOLD_DIVISOR <= 0:
                 logger.error("INFO_THRESHOLD_DIVISOR must be positive at runtime.")
