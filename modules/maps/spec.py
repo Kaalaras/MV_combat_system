@@ -9,7 +9,7 @@ from typing import Sequence
 import json
 import logging
 
-from modules.maps.components import MapComponent, MapGrid, MapMeta
+from modules.maps.components import MapComponent, MapGrid, MapMeta, SpawnZone
 from modules.maps.terrain_types import (
     TERRAIN_CATALOG,
     TerrainDescriptor,
@@ -108,6 +108,10 @@ def _cell_to_descriptor(cell: CellSpec) -> TerrainDescriptor:
     return combine(*names)
 
 
+def _clone_spawn_zones(spawn_zones: dict[str, SpawnZone]) -> dict[str, SpawnZone]:
+    return {label: zone.clone() for label, zone in spawn_zones.items()}
+
+
 def to_map_component(spec: MapSpec) -> MapComponent:
     """Instantiate a :class:`MapComponent` from a :class:`MapSpec`."""
 
@@ -117,7 +121,12 @@ def to_map_component(spec: MapSpec) -> MapComponent:
             descriptor = _cell_to_descriptor(spec.cells[y][x])
             grid.set_cell(x, y, descriptor)
 
-    meta = MapMeta(name=spec.meta.name, biome=spec.meta.biome, seed=spec.meta.seed)
+    meta = MapMeta(
+        name=spec.meta.name,
+        biome=spec.meta.biome,
+        seed=spec.meta.seed,
+        spawn_zones=_clone_spawn_zones(spec.meta.spawn_zones),
+    )
     return MapComponent(grid=grid, meta=meta)
 
 
@@ -240,6 +249,7 @@ def from_map_component(
         name=map_component.meta.name,
         biome=map_component.meta.biome,
         seed=map_component.meta.seed,
+        spawn_zones=_clone_spawn_zones(map_component.meta.spawn_zones),
     )
 
     return MapSpec(
@@ -262,6 +272,18 @@ def save_json(spec: MapSpec, path: str | Path) -> None:
             "name": spec.meta.name,
             "biome": spec.meta.biome,
             "seed": spec.meta.seed,
+            "spawn_zones": {
+                label: {
+                    "x": zone.position[0],
+                    "y": zone.position[1],
+                    "width": zone.footprint[0],
+                    "height": zone.footprint[1],
+                    "safe_radius": zone.safe_radius,
+                    "allow_decor": zone.allow_decor,
+                    "allow_hazard": zone.allow_hazard,
+                }
+                for label, zone in spec.meta.spawn_zones.items()
+            },
         },
         "cells": spec.cells,
     }
@@ -282,10 +304,33 @@ def load_json(path: str | Path) -> MapSpec:
         logger.exception("Erreur lors de l'analyse du JSON dans le fichier '%s'", source)
         raise exc.__class__(message, exc.doc, exc.pos) from exc
     meta_data = data.get("meta", {})
+    spawn_data = meta_data.get("spawn_zones", {})
+    spawn_zones: dict[str, SpawnZone] = {}
+    for label, data in spawn_data.items():
+        try:
+            x = int(data["x"])
+            y = int(data["y"])
+        except (KeyError, TypeError, ValueError):
+            continue
+        width = int(data.get("width", 1)) if data.get("width") is not None else 1
+        height = int(data.get("height", 1)) if data.get("height") is not None else 1
+        safe_radius = int(data.get("safe_radius", 1)) if data.get("safe_radius") is not None else 1
+        allow_decor = bool(data.get("allow_decor", False))
+        allow_hazard = bool(data.get("allow_hazard", False))
+        spawn_zones[label] = SpawnZone(
+            label=label,
+            position=(x, y),
+            footprint=(max(1, width), max(1, height)),
+            safe_radius=safe_radius,
+            allow_decor=allow_decor,
+            allow_hazard=allow_hazard,
+        )
+
     meta = MapMeta(
         name=meta_data.get("name", ""),
         biome=meta_data.get("biome", ""),
         seed=meta_data.get("seed"),
+        spawn_zones=spawn_zones,
     )
     cells_data = data.get("cells", [])
     cells: list[list[CellSpec]] = []

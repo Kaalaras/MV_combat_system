@@ -1,8 +1,8 @@
 """Map-related ECS components and supporting data structures."""
 from __future__ import annotations
 
-from dataclasses import dataclass
-from typing import List, TypeVar, Union
+from dataclasses import dataclass, field
+from typing import Dict, List, Tuple, TypeVar, Union
 
 from modules.maps.terrain_types import TerrainDescriptor, TerrainFlags
 
@@ -122,6 +122,7 @@ class MapMeta:
     name: str
     biome: str
     seed: int | None = None
+    spawn_zones: Dict[str, SpawnZone] = field(default_factory=dict)
 
 
 @dataclass(slots=True)
@@ -132,5 +133,28 @@ class MapComponent:
     meta: MapMeta
 
 
-__all__ = ["MapGrid", "MapMeta", "MapComponent"]
+__all__ = ["MapGrid", "MapMeta", "MapComponent", "SpawnZone"]
+
+@dataclass(slots=True)
+class SpawnZone:
+    """Represents a deployment area used as a spawn location."""
+
+    label: str
+    position: Tuple[int, int]
+    footprint: Tuple[int, int] = (1, 1)
+    safe_radius: int = 1
+    allow_decor: bool = False
+    allow_hazard: bool = False
+
+    def clone(self) -> "SpawnZone":
+        """Return a shallow copy of the spawn zone."""
+
+        return SpawnZone(
+            label=self.label,
+            position=self.position,
+            footprint=self.footprint,
+            safe_radius=self.safe_radius,
+            allow_decor=self.allow_decor,
+            allow_hazard=self.allow_hazard,
+        )
 

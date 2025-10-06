@@ -7,6 +7,8 @@ from typing import Optional
 from modules.maps.components import MapMeta
 from modules.maps.gen.params import MapGenParams, MapSymmetry
 from modules.maps.gen.random import get_rng, rand_choice, rand_int
+from modules.maps.gen.spawns import assign_spawn_zones
+from modules.maps.gen.validate import ensure_valid_map
 from modules.maps.spec import MapSpec
 
 
@@ -349,10 +351,7 @@ def _apply_symmetry(cells: list[list[str]], symmetry: MapSymmetry) -> None:
         raise ValueError(
             f"Unknown symmetry mode '{symmetry}'. Supported modes: none, mirror_x, mirror_y, rot_180"
         )
-def generate_layout(params: MapGenParams) -> MapSpec:
-    """Generate a :class:`MapSpec` using a BSP layout algorithm."""
-
-    rng = get_rng(params.seed)
+def _build_raw_spec(params: MapGenParams, rng) -> MapSpec:
     width, height = params.dimensions
     cells: list[list[str]] = [["wall" for _ in range(width)] for _ in range(height)]
 
@@ -368,6 +367,28 @@ def generate_layout(params: MapGenParams) -> MapSpec:
 
     meta = MapMeta(name="generated", biome=params.biome, seed=params.seed)
     return MapSpec(width=width, height=height, cell_size=1, meta=meta, cells=cells)
+
+
+def generate_layout(params: MapGenParams) -> MapSpec:
+    """Generate a :class:`MapSpec` using a BSP layout algorithm."""
+
+    rng = get_rng(params.seed)
+    attempts = 0
+    max_attempts = 3
+    while attempts < max_attempts:
+        spec = _build_raw_spec(params, rng)
+        try:
+            spec = assign_spawn_zones(spec, max_spawns=2)
+            spec = ensure_valid_map(
+                spec,
+                reassign_spawns=lambda current: assign_spawn_zones(current, max_spawns=2),
+                max_fixups=3,
+            )
+            return spec
+        except RuntimeError:
+            attempts += 1
+            continue
+    raise RuntimeError("failed to generate a valid map layout after multiple attempts")
 
 
 __all__ = ["generate_layout"]
