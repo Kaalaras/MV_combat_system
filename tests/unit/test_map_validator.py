@@ -45,3 +45,30 @@ def test_validator_widens_single_chokepoint():
         spec.cells[mid_y - 1][corridor_x] == "floor"
         or spec.cells[mid_y + 1][corridor_x] == "floor"
     )
+
+
+def test_validator_detects_chokepoint_for_larger_footprints():
+    spec = _chokepoint_map()
+    assign_spawn_zones(spec, footprint=(2, 2), enforce_fairness=False)
+    validator = MapValidator(spec)
+    assert not validator.is_valid()
+    spec = ensure_valid_map(
+        spec,
+        reassign_spawns=lambda current: assign_spawn_zones(
+            current, footprint=(2, 2), enforce_fairness=False
+        ),
+    )
+    validator = MapValidator(spec)
+    assert validator.is_valid()
+    mid_y = spec.height // 2
+    corridor_x = spec.width // 2
+    assert spec.cells[mid_y][corridor_x] == "floor"
+    assert (
+        spec.cells[mid_y - 1][corridor_x] == "floor"
+        or spec.cells[mid_y + 1][corridor_x] == "floor"
+    )
+    assert any(
+        spec.cells[row][corridor_x] == "floor" and spec.cells[row + 1][corridor_x] == "floor"
+        for row in range(mid_y - 1, mid_y + 1)
+        if 0 <= row < spec.height - 1
+    )

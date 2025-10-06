@@ -195,7 +195,15 @@ def _pick_spawn_pair(
                 best_distance = pair_distance
                 best_ratio = ratio
     if best_pair is None:
-        raise RuntimeError("unable to find two disjoint spawn positions")
+        grid_width = getattr(grid, "width", "?")
+        grid_height = getattr(grid, "height", "?")
+        raise RuntimeError(
+            "Unable to find two disjoint spawn positions: "
+            f"{len(candidates)} candidate(s) found for footprint {footprint} "
+            f"on grid size ({grid_width}x{grid_height}). "
+            "This may be due to insufficient safe areas, the footprint being too large for the map, "
+            "or the map being too small."
+        )
     return [best_pair[0], best_pair[1]], best_ratio
 
 
@@ -423,7 +431,7 @@ def assign_spawn_zones(
     for idx, current in enumerate(spawn_positions):
         for other in spawn_positions[idx + 1 :]:
             if _rectangles_overlap(current, footprint, other, footprint):
-                raise RuntimeError("spawn zones overlap after optimisation")
+                raise RuntimeError("spawn zones overlap after optimization")
 
     labels = ["spawn_A", "spawn_B", "spawn_C", "spawn_D"]
     zones = {

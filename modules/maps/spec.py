@@ -324,13 +324,20 @@ def load_json(path: str | Path) -> MapSpec:
             continue
         width = _int_with_default(data, "width", 1)
         height = _int_with_default(data, "height", 1)
+        if width < 1 or height < 1:
+            raise ValueError(
+                (
+                    f"Invalid spawn zone dimensions for '{label}' in file '{source}': "
+                    f"width={width}, height={height} (must be >= 1)"
+                )
+            )
         safe_radius = _int_with_default(data, "safe_radius", 1)
         allow_decor = bool(data.get("allow_decor", False))
         allow_hazard = bool(data.get("allow_hazard", False))
         spawn_zones[label] = SpawnZone(
             label=label,
             position=(x, y),
-            footprint=(max(1, width), max(1, height)),
+            footprint=(width, height),
             safe_radius=safe_radius,
             allow_decor=allow_decor,
             allow_hazard=allow_hazard,
