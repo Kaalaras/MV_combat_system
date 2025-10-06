@@ -33,6 +33,10 @@ _SIZE_BUDGETS = {
     "l": 5.00,
 }
 _TOTAL_RUN_BUDGET = 300.0  # 10 runs should complete well under 300 seconds
+_TEST_RUNS = 10
+_TOLERANCE = 0.10
+# Allow a tiny slack for rounding-induced differences on small samples.
+_ROUNDING_SLACK = 1e-3
 
 
 def _pick_corridor_width(rng: random.Random) -> tuple[int, int]:
@@ -124,11 +128,8 @@ def _fairness_delta(spec: MapSpec) -> float:
 
 def test_generated_maps_preserve_invariants_and_budget() -> None:
     rng = random.Random(0xCAFE_BABE)
-    runs = 10
+    runs = _TEST_RUNS
     durations: dict[str, list[float]] = {"m": [], "l": []}
-    tolerance = 0.10
-    # Allow a tiny slack for rounding-induced differences on small samples.
-    rounding_slack = 1e-3
 
     for _ in range(runs):
         params = _random_params(rng)
@@ -151,12 +152,12 @@ def test_generated_maps_preserve_invariants_and_budget() -> None:
             ):
                 delta = abs(actual[key] - target)
                 assert (
-                    delta <= tolerance + rounding_slack
+                    delta <= _TOLERANCE + _ROUNDING_SLACK
                 ), f"{key} ratio deviates by {delta:.3%} from target {target:.3%}"
 
         # Fairness between the two spawn zones should remain within ±10 %.
         fairness = _fairness_delta(spec)
-        assert fairness <= tolerance + 1e-6, f"spawn fairness delta too high: {fairness:.3%}"
+        assert fairness <= _TOLERANCE + 1e-6, f"spawn fairness delta too high: {fairness:.3%}"
 
         # Ensure we keep allocating exactly two spawn zones without leaks.
         assert len(spec.meta.spawn_zones) == 2
