@@ -127,10 +127,13 @@ def _append_name(names: list[str], names_set: set[str], name: str) -> None:
     names_set.add(name)
 
 
-def _append_name_if_available(names: list[str], names_set: set[str], name: str) -> None:
+def _append_name_if_available(
+    names: list[str], names_set: set[str], name: str
+) -> bool:
     if name not in TERRAIN_CATALOG:
-        return
+        return False
     _append_name(names, names_set, name)
+    return True
 
 
 def _terrain_descriptors(_gid: int, resolved: _ResolvedProperties) -> list[str]:
@@ -143,12 +146,16 @@ def _terrain_descriptors(_gid: int, resolved: _ResolvedProperties) -> list[str]:
     move_cost = resolved.move_cost
     if move_cost <= 1:
         _append_name(names, names_set, "floor")
-    elif move_cost == 2 and "difficult" in TERRAIN_CATALOG:
-        _append_name_if_available(names, names_set, "floor")
-        _append_name(names, names_set, "difficult")
-    elif move_cost >= 3 and "very_difficult" in TERRAIN_CATALOG:
-        _append_name_if_available(names, names_set, "floor")
-        _append_name(names, names_set, "very_difficult")
+    elif move_cost == 2:
+        if _append_name_if_available(names, names_set, "difficult"):
+            _append_name_if_available(names, names_set, "floor")
+        else:
+            _append_name(names, names_set, "floor")
+    elif move_cost >= 3:
+        if _append_name_if_available(names, names_set, "very_difficult"):
+            _append_name_if_available(names, names_set, "floor")
+        else:
+            _append_name(names, names_set, "floor")
     else:
         _append_name(names, names_set, "floor")
 
