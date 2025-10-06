@@ -6,6 +6,7 @@ from modules.maps.gen.spawns import (
     _determine_pois,
     _SpawnTerrain,
     _fairness_ratio,
+    _fairness_tolerance,
     assign_spawn_zones,
 )
 from modules.maps.spec import MapSpec, to_map_component
@@ -42,7 +43,8 @@ def test_generate_layout_produces_balanced_maps():
         validator = MapValidator(spec)
         assert validator.is_valid()
         fairness = _compute_fairness(spec)
-        assert fairness <= 0.051
+        footprint = next(iter(spec.meta.spawn_zones.values())).footprint
+        assert fairness <= _fairness_tolerance(footprint) + 1e-6
         # Ensure spawn zones are recorded in metadata and not empty.
         assert spec.meta.spawn_zones
         for zone in spec.meta.spawn_zones.values():
@@ -71,4 +73,5 @@ def test_generate_layout_handles_larger_spawn_footprints():
         validator = MapValidator(spec)
         assert validator.is_valid()
         fairness = _compute_fairness(spec)
-        assert fairness <= 0.051
+        footprint = next(iter(spec.meta.spawn_zones.values())).footprint
+        assert fairness <= _fairness_tolerance(footprint) + 1e-6

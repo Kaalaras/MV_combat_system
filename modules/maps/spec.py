@@ -4,7 +4,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from itertools import combinations
 from pathlib import Path
-from typing import Sequence
+from typing import Mapping, Sequence
 
 import json
 import logging
@@ -19,6 +19,16 @@ from modules.maps.terrain_types import (
 
 
 logger = logging.getLogger(__name__)
+
+
+def _int_with_default(data: Mapping[str, object], key: str, default: int) -> int:
+    value = data.get(key)
+    if value is None:
+        return default
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return default
 
 
 CellSpec = str | list[str]
@@ -312,9 +322,9 @@ def load_json(path: str | Path) -> MapSpec:
             y = int(data["y"])
         except (KeyError, TypeError, ValueError):
             continue
-        width = int(data.get("width", 1)) if data.get("width") is not None else 1
-        height = int(data.get("height", 1)) if data.get("height") is not None else 1
-        safe_radius = int(data.get("safe_radius", 1)) if data.get("safe_radius") is not None else 1
+        width = _int_with_default(data, "width", 1)
+        height = _int_with_default(data, "height", 1)
+        safe_radius = _int_with_default(data, "safe_radius", 1)
         allow_decor = bool(data.get("allow_decor", False))
         allow_hazard = bool(data.get("allow_hazard", False))
         spawn_zones[label] = SpawnZone(

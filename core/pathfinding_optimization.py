@@ -542,6 +542,11 @@ class OptimizedPathfinding:
         if len(self.path_cache) > self.MAX_CACHE_SIZE:
             self.path_cache.popitem(last=False)
 
+    def find_path(self, start: Tuple[int, int], end: Tuple[int, int]) -> List[Tuple[int, int]]:
+        """Return an optimal path between ``start`` and ``end``."""
+
+        return self._compute_path_astar(start, end)
+
     def _astar_search_global(self, start: Tuple[int, int], end: Tuple[int, int]) -> List[Tuple[int, int]]:
         """Fallback global A* search across entire terrain."""
         if not (0 <= start[0] < self.width and 0 <= start[1] < self.height):

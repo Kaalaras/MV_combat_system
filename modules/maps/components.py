@@ -116,26 +116,6 @@ class MapGrid:
 
 
 @dataclass(slots=True)
-class MapMeta:
-    """Metadata describing a map instance."""
-
-    name: str
-    biome: str
-    seed: int | None = None
-    spawn_zones: Dict[str, SpawnZone] = field(default_factory=dict)
-
-
-@dataclass(slots=True)
-class MapComponent:
-    """ECS component storing a map grid and its metadata."""
-
-    grid: MapGrid
-    meta: MapMeta
-
-
-__all__ = ["MapGrid", "MapMeta", "MapComponent", "SpawnZone"]
-
-@dataclass(slots=True)
 class SpawnZone:
     """Represents a deployment area used as a spawn location."""
 
@@ -157,4 +137,25 @@ class SpawnZone:
             allow_decor=self.allow_decor,
             allow_hazard=self.allow_hazard,
         )
+
+
+@dataclass(slots=True)
+class MapMeta:
+    """Metadata describing a map instance."""
+
+    name: str
+    biome: str
+    seed: int | None = None
+    spawn_zones: Dict[str, SpawnZone] = field(default_factory=dict)
+
+
+@dataclass(slots=True)
+class MapComponent:
+    """ECS component storing a map grid and its metadata."""
+
+    grid: MapGrid
+    meta: MapMeta
+
+
+__all__ = ["MapGrid", "MapMeta", "MapComponent", "SpawnZone"]
 

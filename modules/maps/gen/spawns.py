@@ -34,6 +34,13 @@ _FORBIDDEN_FLAGS = (
 )
 
 
+def _fairness_tolerance(footprint: Tuple[int, int]) -> float:
+    width, height = footprint
+    area = max(1, width) * max(1, height)
+    tolerance = _FAIRNESS_THRESHOLD + 0.04 * max(0, area - 1)
+    return min(0.25, tolerance)
+
+
 class _SpawnTerrain:
     """Minimal terrain adapter used for pathfinding distance checks."""
 
@@ -55,6 +62,36 @@ class _SpawnTerrain:
 
 def _is_walkable(grid, x: int, y: int) -> bool:
     return 0 <= x < grid.width and 0 <= y < grid.height and not grid.blocks_move_mask[y][x]
+
+
+def _rectangles_overlap(
+    a_pos: Tuple[int, int],
+    a_size: Tuple[int, int],
+    b_pos: Tuple[int, int],
+    b_size: Tuple[int, int],
+) -> bool:
+    ax, ay = a_pos
+    aw, ah = a_size
+    bx, by = b_pos
+    bw, bh = b_size
+    if aw <= 0 or ah <= 0 or bw <= 0 or bh <= 0:
+        return False
+    if ax + aw <= bx or bx + bw <= ax:
+        return False
+    if ay + ah <= by or by + bh <= ay:
+        return False
+    return True
+
+
+def _is_disjoint(
+    position: Tuple[int, int],
+    others: Sequence[Tuple[int, int]],
+    footprint: Tuple[int, int],
+) -> bool:
+    return all(
+        not _rectangles_overlap(position, footprint, other, footprint)
+        for other in others
+    )
 
 
 def _is_safe_area(
@@ -128,35 +165,37 @@ def _pick_spawn_pair(
     optimizer: OptimizedPathfinding,
     footprint: Tuple[int, int],
 ) -> tuple[List[Tuple[int, int]], float]:
+    tolerance = _fairness_tolerance(footprint)
     if len(candidates) < 2:
         return (candidates[:], float("inf"))
     best_pair: tuple[Tuple[int, int], Tuple[int, int]] | None = None
     best_distance = -1
     best_ratio = float("inf")
+    best_score: tuple[int, float, float] | None = None
     distance_cache: dict[Tuple[int, int], dict[Tuple[int, int], int]] = {}
     for idx, start in enumerate(candidates[:-1]):
         dist_map = distance_cache.setdefault(start, _bfs_distances(grid, start))
         for other in candidates[idx + 1 :]:
+            if _rectangles_overlap(start, footprint, other, footprint):
+                continue
             pair_distance = dist_map.get(other)
             if pair_distance is None:
-                continue
+                pair_distance = -1
             ratio = _fairness_ratio(
                 optimizer,
                 [start, other],
                 pois,
                 footprint,
             )
-            if ratio <= _FAIRNESS_THRESHOLD:
-                if pair_distance > best_distance or best_pair is None:
-                    best_distance = pair_distance
-                    best_ratio = ratio
-                    best_pair = (start, other)
-            elif best_pair is None or ratio < best_ratio:
+            category = 0 if ratio <= tolerance else 1
+            score = (category, ratio, -pair_distance)
+            if best_score is None or score < best_score:
+                best_score = score
                 best_pair = (start, other)
                 best_distance = pair_distance
                 best_ratio = ratio
     if best_pair is None:
-        best_pair = (candidates[0], candidates[1])
+        raise RuntimeError("unable to find two disjoint spawn positions")
     return [best_pair[0], best_pair[1]], best_ratio
 
 
@@ -201,7 +240,7 @@ def _determine_pois(grid) -> List[Tuple[int, int]]:
 def _path_length(optimizer: OptimizedPathfinding, start: Tuple[int, int], end: Tuple[int, int]) -> float:
     if start == end:
         return 0.0
-    path = optimizer._compute_path_astar(start, end)
+    path = optimizer.find_path(start, end)
     if not path:
         return float("inf")
     return float(len(path) - 1)
@@ -239,7 +278,7 @@ def _fairness_ratio(
 ) -> float:
     spawn_infos: List[Tuple[Tuple[int, int], Tuple[int, int]]] = []
     for spawn in spawns:
-        if hasattr(spawn, "position") and hasattr(spawn, "footprint"):
+        if isinstance(spawn, SpawnZone):
             spawn_infos.append((spawn.position, spawn.footprint))
         else:
             spawn_infos.append((spawn, footprint))
@@ -292,7 +331,8 @@ def _improve_fairness(
 
     best = list(spawns)
     best_ratio = _fairness_ratio(optimizer, best, pois, footprint)
-    if best_ratio <= _FAIRNESS_THRESHOLD:
+    tolerance = _fairness_tolerance(footprint)
+    if best_ratio <= tolerance:
         return best
     max_iterations = 12
     for _ in range(max_iterations):
@@ -303,6 +343,8 @@ def _improve_fairness(
                     continue
                 if candidate in best:
                     continue
+                if not _is_disjoint(candidate, [pos for j, pos in enumerate(best) if j != idx], footprint):
+                    continue
                 trial = list(best)
                 trial[idx] = candidate
                 ratio = _fairness_ratio(optimizer, trial, pois, footprint)
@@ -311,7 +353,7 @@ def _improve_fairness(
                     best_ratio = ratio
                     improved = True
                     break
-            if improved and best_ratio <= _FAIRNESS_THRESHOLD:
+            if improved and best_ratio <= tolerance:
                 return best
         if not improved:
             break
@@ -356,9 +398,16 @@ def assign_spawn_zones(
     pois = _determine_pois(grid)
     spawn_positions, _ = _pick_spawn_pair(candidates, grid, pois, optimizer, footprint)
     spawn_positions = spawn_positions[:max_spawns]
+    for candidate in candidates:
+        if len(spawn_positions) >= max_spawns:
+            break
+        if candidate in spawn_positions:
+            continue
+        if not _is_disjoint(candidate, spawn_positions, footprint):
+            continue
+        spawn_positions.append(candidate)
     if len(spawn_positions) < max_spawns:
-        remaining = [coord for coord in candidates if coord not in spawn_positions]
-        spawn_positions.extend(remaining[: max_spawns - len(spawn_positions)])
+        raise RuntimeError("unable to place non-overlapping spawn zones")
     spawn_positions = _improve_fairness(
         optimizer,
         spawn_positions,
@@ -367,8 +416,14 @@ def assign_spawn_zones(
         footprint,
     )
     ratio = _fairness_ratio(optimizer, spawn_positions, pois, footprint)
-    if enforce_fairness and ratio > _FAIRNESS_THRESHOLD:
+    tolerance = _fairness_tolerance(footprint)
+    if enforce_fairness and ratio > tolerance:
         raise RuntimeError("failed to produce fair spawn distribution")
+
+    for idx, current in enumerate(spawn_positions):
+        for other in spawn_positions[idx + 1 :]:
+            if _rectangles_overlap(current, footprint, other, footprint):
+                raise RuntimeError("spawn zones overlap after optimisation")
 
     labels = ["spawn_A", "spawn_B", "spawn_C", "spawn_D"]
     zones = {

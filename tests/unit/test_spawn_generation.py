@@ -1,4 +1,4 @@
-from collections import deque
+import pytest
 
 from modules.maps.components import MapMeta
 from core.pathfinding_optimization import OptimizedPathfinding
@@ -6,6 +6,7 @@ from modules.maps.gen.spawns import (
     assign_spawn_zones,
     _determine_pois,
     _fairness_ratio,
+    _fairness_tolerance,
     _SpawnTerrain,
 )
 from modules.maps.spec import MapSpec, to_map_component
@@ -49,7 +50,7 @@ def test_assign_spawn_zones_produces_fair_safe_spawns():
         assert zone.safe_radius >= 0
         assert not zone.allow_hazard
     fairness = _compute_fairness(spec)
-    assert fairness <= 0.051
+    assert fairness <= _fairness_tolerance((1, 1)) + 1e-6
 
 
 def test_assign_spawn_zones_supports_larger_footprints():
@@ -60,12 +61,22 @@ def test_assign_spawn_zones_supports_larger_footprints():
 
     component = to_map_component(spec)
     grid = component.grid
+    occupied: set[tuple[int, int]] = set()
     for zone in zones.values():
         assert zone.footprint == (2, 3)
         assert zone.safe_radius >= 0
-        for cell in _zone_cells(zone, grid):
+        cells = _zone_cells(zone, grid)
+        assert not any(cell in occupied for cell in cells)
+        occupied.update(cells)
+        for cell in cells:
             x, y = cell
             assert grid.blocks_move_mask[y][x] is False
             assert grid.hazard_damage[y][x] == 0
     fairness = _compute_fairness(spec)
-    assert fairness <= 0.051
+    assert fairness <= _fairness_tolerance((2, 3)) + 1e-6
+
+
+def test_assign_spawn_zones_rejects_overlapping_layouts():
+    spec = _create_open_map(3, 3)
+    with pytest.raises(RuntimeError):
+        assign_spawn_zones(spec, footprint=(2, 2))

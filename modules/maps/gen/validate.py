@@ -3,7 +3,8 @@ from __future__ import annotations
 
 from collections import deque
 from dataclasses import dataclass
-from typing import Callable, List, Sequence, Set, Tuple
+from itertools import combinations
+from typing import Callable, Iterable, List, Sequence, Set, Tuple
 
 from modules.maps.spec import MapSpec, to_map_component
 
@@ -154,9 +155,23 @@ class MapValidator:
         positions = self._spawn_positions()
         if len(positions) < 2:
             return True
+        if required <= 1:
+            return True
         start, goal = positions[0], positions[1]
-        critical = self._critical_points(start, goal)
-        return len(critical) < required - 1
+        if required == 2:
+            return not self._critical_points(start, goal)
+        reachable = self._flood_fill(start, set())
+        if goal not in reachable:
+            return False
+        candidates = [node for node in reachable if node not in (start, goal)]
+        max_blockers = min(required - 1, len(candidates))
+        for size in range(1, required):
+            if size > max_blockers:
+                break
+            for blocked in combinations(candidates, size):
+                if self._disconnects(start, goal, blocked):
+                    return False
+        return True
 
     def _critical_points(
         self,
@@ -172,7 +187,7 @@ class MapValidator:
         for point in articulation:
             if point in (start, goal):
                 continue
-            if self._disconnects(start, goal, point):
+            if self._disconnects(start, goal, [point]):
                 critical.append(point)
         return critical
 
@@ -227,12 +242,14 @@ class MapValidator:
         self,
         start: Tuple[int, int],
         goal: Tuple[int, int],
-        blocked: Tuple[int, int],
+        blocked: Iterable[Tuple[int, int]],
     ) -> bool:
-        if blocked == start or blocked == goal:
+        blocked_set = set(blocked)
+        if start in blocked_set or goal in blocked_set:
             return False
         queue: deque[Tuple[int, int]] = deque([start])
-        visited: Set[Tuple[int, int]] = {start, blocked}
+        visited: Set[Tuple[int, int]] = set(blocked_set)
+        visited.add(start)
         while queue:
             x, y = queue.popleft()
             if (x, y) == goal:
