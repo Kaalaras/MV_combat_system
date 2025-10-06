@@ -136,6 +136,11 @@ def _append_name_if_available(
     return True
 
 
+def _append_floor_overlay(names: list[str], names_set: set[str]) -> None:
+    if not _append_name_if_available(names, names_set, "floor"):
+        _append_name(names, names_set, "floor")
+
+
 def _terrain_descriptors(_gid: int, resolved: _ResolvedProperties) -> list[str]:
     names: list[str] = []
     names_set: set[str] = set()
@@ -145,19 +150,15 @@ def _terrain_descriptors(_gid: int, resolved: _ResolvedProperties) -> list[str]:
 
     move_cost = resolved.move_cost
     if move_cost <= 1:
-        _append_name(names, names_set, "floor")
+        _append_floor_overlay(names, names_set)
     elif move_cost == 2:
-        if _append_name_if_available(names, names_set, "difficult"):
-            _append_name_if_available(names, names_set, "floor")
-        else:
-            _append_name(names, names_set, "floor")
+        _append_name_if_available(names, names_set, "difficult")
+        _append_floor_overlay(names, names_set)
     elif move_cost >= 3:
-        if _append_name_if_available(names, names_set, "very_difficult"):
-            _append_name_if_available(names, names_set, "floor")
-        else:
-            _append_name(names, names_set, "floor")
+        _append_name_if_available(names, names_set, "very_difficult")
+        _append_floor_overlay(names, names_set)
     else:
-        _append_name(names, names_set, "floor")
+        _append_floor_overlay(names, names_set)
 
     cover_flags = resolved.cover_flags
     if cover_flags & TerrainFlags.FORTIFICATION and "fortification" in TERRAIN_CATALOG:
