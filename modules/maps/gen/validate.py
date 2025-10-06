@@ -435,7 +435,6 @@ def ensure_valid_map(
         spec = reassign_spawns(validator.spec)
         validator = MapValidator(spec)
         attempts += 1
-    validator = MapValidator(validator.spec)
     final_valid = validator.is_valid()
     if final_valid:
         return validator.spec

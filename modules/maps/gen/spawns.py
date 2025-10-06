@@ -174,8 +174,8 @@ def _pick_spawn_pair(
             evaluated.append((score, start, other, ratio))
     evaluated.sort(key=lambda item: item[0])
     if not evaluated:
-        grid_width = getattr(grid, "width", "unknown")
-        grid_height = getattr(grid, "height", "unknown")
+        grid_width = grid.width
+        grid_height = grid.height
         raise RuntimeError(
             "Unable to find two disjoint spawn positions: "
             f"{len(candidates)} candidate(s) found for footprint {footprint} "
@@ -523,7 +523,17 @@ def assign_spawn_zones(
             if _rectangles_overlap(current, footprint, other, footprint):
                 raise RuntimeError("spawn zones overlap after optimization")
 
-    labels = ["spawn_A", "spawn_B", "spawn_C", "spawn_D"]
+    def _spawn_label(idx: int) -> str:
+        label = ""
+        n = idx
+        while True:
+            label = chr(ord("A") + (n % 26)) + label
+            n = n // 26 - 1
+            if n < 0:
+                break
+        return f"spawn_{label}"
+
+    labels = [_spawn_label(i) for i in range(max_spawns)]
     zones = {
         label: SpawnZone(
             label=label,

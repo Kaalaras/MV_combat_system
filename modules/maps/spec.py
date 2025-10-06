@@ -316,14 +316,14 @@ def load_json(path: str | Path) -> MapSpec:
     meta_data = data.get("meta", {})
     spawn_data = meta_data.get("spawn_zones", {})
     spawn_zones: dict[str, SpawnZone] = {}
-    for label, data in spawn_data.items():
+    for label, zone_data in spawn_data.items():
         try:
-            x = int(data["x"])
-            y = int(data["y"])
+            x = int(zone_data["x"])
+            y = int(zone_data["y"])
         except (KeyError, TypeError, ValueError):
             continue
-        width = _int_with_default(data, "width", 1)
-        height = _int_with_default(data, "height", 1)
+        width = _int_with_default(zone_data, "width", 1)
+        height = _int_with_default(zone_data, "height", 1)
         if width < 1 or height < 1:
             raise ValueError(
                 (
@@ -331,9 +331,9 @@ def load_json(path: str | Path) -> MapSpec:
                     f"width={width}, height={height} (must be >= 1)"
                 )
             )
-        safe_radius = _int_with_default(data, "safe_radius", 1)
-        allow_decor = bool(data.get("allow_decor", False))
-        allow_hazard = bool(data.get("allow_hazard", False))
+        safe_radius = _int_with_default(zone_data, "safe_radius", 1)
+        allow_decor = bool(zone_data.get("allow_decor", False))
+        allow_hazard = bool(zone_data.get("allow_hazard", False))
         spawn_zones[label] = SpawnZone(
             label=label,
             position=(x, y),
