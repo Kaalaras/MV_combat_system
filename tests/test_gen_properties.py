@@ -4,6 +4,7 @@ from __future__ import annotations
 import random
 import statistics
 import time
+from typing import Literal
 
 from modules.maps.gen import MapGenParams
 from modules.maps.gen.spawns import _determine_pois, _fairness_ratio
@@ -28,11 +29,16 @@ _SAFE_SYMMETRIES = ("none", "mirror_x", "mirror_y", "rot_180")
 # account for the slower execution environment used in CI.  The ratios still
 # guarantee that the generator comfortably meets the original limits on faster
 # developer machines while avoiding flakiness.
+_MapSize = Literal["m", "l"]
+
 _SIZE_BUDGETS = {
     "m": 1.25,
     "l": 2.50,
 }
 _TOTAL_RUN_BUDGET = 150.0  # 50 runs should complete well under 150 seconds
+_TERRAIN_RATIO_TOLERANCE = 0.10
+# Allow a tiny slack for rounding-induced differences on small samples.
+_ROUNDING_SLACK = 1e-3
 
 
 def _pick_corridor_width(rng: random.Random) -> tuple[int, int]:
@@ -41,7 +47,7 @@ def _pick_corridor_width(rng: random.Random) -> tuple[int, int]:
     return minimum, maximum
 
 
-def _pick_room_count(rng: random.Random, size: str) -> int | None:
+def _pick_room_count(rng: random.Random, size: _MapSize) -> int | None:
     if rng.random() < 0.35:
         return None
     base = 6 if size == "m" else 8
@@ -49,7 +55,7 @@ def _pick_room_count(rng: random.Random, size: str) -> int | None:
 
 
 def _random_params(rng: random.Random) -> MapGenParams:
-    size = rng.choice(("m", "l"))
+    size: _MapSize = rng.choice(("m", "l"))
     cover_ratio = rng.uniform(0.12, 0.32)
     hazard_ratio = rng.uniform(0.02, 0.14)
     difficult_ratio = rng.uniform(0.05, 0.22)
@@ -125,10 +131,7 @@ def _fairness_delta(spec: MapSpec) -> float:
 def test_generated_maps_preserve_invariants_and_budget() -> None:
     rng = random.Random(0xCAFE_BABE)
     runs = 50
-    durations: dict[str, list[float]] = {"m": [], "l": []}
-    tolerance = 0.10
-    # Allow a tiny slack for rounding-induced differences on small samples.
-    rounding_slack = 1e-3
+    durations: dict[_MapSize, list[float]] = {"m": [], "l": []}
 
     for _ in range(runs):
         params = _random_params(rng)
@@ -151,12 +154,14 @@ def test_generated_maps_preserve_invariants_and_budget() -> None:
             ):
                 delta = abs(actual[key] - target)
                 assert (
-                    delta <= tolerance + rounding_slack
+                    delta <= _TERRAIN_RATIO_TOLERANCE + _ROUNDING_SLACK
                 ), f"{key} ratio deviates by {delta:.3%} from target {target:.3%}"
 
         # Fairness between the two spawn zones should remain within ±10 %.
         fairness = _fairness_delta(spec)
-        assert fairness <= tolerance + 1e-6, f"spawn fairness delta too high: {fairness:.3%}"
+        assert (
+            fairness <= _TERRAIN_RATIO_TOLERANCE + 1e-6
+        ), f"spawn fairness delta too high: {fairness:.3%}"
 
         # Ensure we keep allocating exactly two spawn zones without leaks.
         assert len(spec.meta.spawn_zones) == 2
