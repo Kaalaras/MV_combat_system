@@ -276,16 +276,19 @@ def decorate(spec: MapSpec, params: MapGenParams, rng) -> MapSpec:
         difficult_count += 1
 
     # --- Hazard placement ------------------------------------------------
-    hazard_candidates: list[Coord] = [
+    hazard_candidates_set: set[Coord] = {
         coord for coord in classified["room_interior"] if coord not in used
-    ]
-    if len(hazard_candidates) < hazard_target:
-        extras = [coord for coord in classified["room_edge"] if coord not in used]
-        hazard_candidates.extend([coord for coord in extras if coord not in hazard_candidates])
-    if len(hazard_candidates) < hazard_target:
-        extras = [coord for coord in classified["corridor"] if coord not in used]
-        hazard_candidates.extend([coord for coord in extras if coord not in hazard_candidates])
+    }
+    if len(hazard_candidates_set) < hazard_target:
+        hazard_candidates_set.update(
+            coord for coord in classified["room_edge"] if coord not in used
+        )
+    if len(hazard_candidates_set) < hazard_target:
+        hazard_candidates_set.update(
+            coord for coord in classified["corridor"] if coord not in used
+        )
 
+    hazard_candidates: list[Coord] = list(hazard_candidates_set)
     shuffle(rng, hazard_candidates)
     hazard_set: set[Coord] = set(hazard_candidates)
 
