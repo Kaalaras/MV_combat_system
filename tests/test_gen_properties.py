@@ -38,7 +38,7 @@ _TOTAL_RUN_BUDGET = 150.0  # 50 runs should complete well under 150 seconds
 def _pick_corridor_width(rng: random.Random) -> tuple[int, int]:
     minimum = rng.choice((1, 2))
     maximum = minimum + rng.choice((0, 1, 2))
-    return minimum, max(minimum, maximum)
+    return minimum, maximum
 
 
 def _pick_room_count(rng: random.Random, size: str) -> int | None:
