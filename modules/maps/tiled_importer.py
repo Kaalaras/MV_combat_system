@@ -1,6 +1,7 @@
 """Utilities to import Tiled maps (TMX) into :class:`MapSpec` objects."""
 from __future__ import annotations
 
+import json
 import logging
 import math
 from dataclasses import dataclass
@@ -10,7 +11,7 @@ from typing import Callable, Iterable, Iterator, Mapping
 from pytiled_parser import parse_map
 from pytiled_parser.layer import Layer, LayerGroup, ObjectLayer, TileLayer
 
-from modules.maps.components import MapMeta
+from modules.maps.components import MapMeta, SpawnZone
 from modules.maps.spec import MapSpec
 from modules.maps.terrain_types import TERRAIN_CATALOG, TerrainFlags
 from modules.maps.tiled_schema import (
@@ -132,9 +133,15 @@ def _terrain_descriptors(_gid: int, resolved: _ResolvedProperties) -> list[str]:
         names.append("floor")
         names_set.add("floor")
     elif move_cost == 2 and "difficult" in TERRAIN_CATALOG:
+        if "floor" in TERRAIN_CATALOG:
+            names.append("floor")
+            names_set.add("floor")
         names.append("difficult")
         names_set.add("difficult")
     elif move_cost >= 3 and "very_difficult" in TERRAIN_CATALOG:
+        if "floor" in TERRAIN_CATALOG:
+            names.append("floor")
+            names_set.add("floor")
         names.append("very_difficult")
         names_set.add("very_difficult")
     else:
@@ -349,7 +356,36 @@ class TiledImporter:
             except ValueError:
                 pass
 
-        meta = MapMeta(name=name, biome=biome, seed=seed)
+        spawn_property = properties.get("spawn_zones")
+        spawn_zones: dict[str, SpawnZone] = {}
+        if isinstance(spawn_property, str) and spawn_property:
+            try:
+                raw_spawn = json.loads(spawn_property)
+            except json.JSONDecodeError:
+                logger.warning("Invalid spawn_zones JSON in TMX properties; ignoring value")
+            else:
+                for label, entry in raw_spawn.items():
+                    try:
+                        x = int(entry["x"])
+                        y = int(entry["y"])
+                        zone_width = int(entry.get("width", 1))
+                        zone_height = int(entry.get("height", 1))
+                    except (KeyError, TypeError, ValueError):
+                        logger.debug("Ignoring malformed spawn zone '%s' in TMX metadata", label)
+                        continue
+                    safe_radius = int(entry.get("safe_radius", 1))
+                    allow_decor = bool(entry.get("allow_decor", False))
+                    allow_hazard = bool(entry.get("allow_hazard", False))
+                    spawn_zones[label] = SpawnZone(
+                        label=label,
+                        position=(x, y),
+                        footprint=(zone_width, zone_height),
+                        safe_radius=max(0, safe_radius),
+                        allow_decor=allow_decor,
+                        allow_hazard=allow_hazard,
+                    )
+
+        meta = MapMeta(name=name, biome=biome, seed=seed, spawn_zones=spawn_zones)
 
         if "floor" in TERRAIN_CATALOG:
             default_descriptor = "floor"

@@ -96,6 +96,9 @@ class MapSpec:
     def save_json(self, path: str | Path) -> None:
         save_json(self, path)
 
+    def save_tmx(self, path: str | Path) -> None:
+        save_tmx(self, path)
+
     @staticmethod
     def load_json(path: str | Path) -> "MapSpec":
         return load_json(path)
@@ -372,11 +375,20 @@ def load_json(path: str | Path) -> MapSpec:
     )
 
 
+def save_tmx(spec: MapSpec, path: str | Path) -> None:
+    """Serialise a :class:`MapSpec` to a TMX file using the shared schema."""
+
+    from modules.maps.tiled_exporter import export_to_tiled
+
+    export_to_tiled(spec, path)
+
+
 __all__ = [
     "MapSpec",
     "to_map_component",
     "from_map_component",
     "save_json",
     "load_json",
+    "save_tmx",
 ]
 
