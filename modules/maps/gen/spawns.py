@@ -4,7 +4,6 @@ from __future__ import annotations
 from collections import deque
 from typing import Iterable, List, Sequence, Tuple
 
-from core.pathfinding_optimization import OptimizedPathfinding
 from modules.maps.components import SpawnZone
 from modules.maps.spec import MapSpec, to_map_component
 from modules.maps.terrain_types import TerrainFlags
@@ -39,25 +38,6 @@ def _fairness_tolerance(footprint: Tuple[int, int]) -> float:
     area = max(1, width) * max(1, height)
     tolerance = _FAIRNESS_THRESHOLD + 0.04 * max(0, area - 1)
     return min(0.25, tolerance)
-
-
-class _SpawnTerrain:
-    """Minimal terrain adapter used for pathfinding distance checks."""
-
-    def __init__(self, grid) -> None:
-        self.width = grid.width
-        self.height = grid.height
-        wall_list: List[Tuple[int, int]] = []
-        for y in range(self.height):
-            for x in range(self.width):
-                if grid.blocks_move_mask[y][x]:
-                    wall_list.append((x, y))
-        self.walls = set(wall_list)
-        self.path_cache = None
-        self.reachable_tiles_cache = None
-
-    def is_walkable(self, x: int, y: int) -> bool:
-        return 0 <= x < self.width and 0 <= y < self.height and (x, y) not in self.walls
 
 
 def _is_walkable(grid, x: int, y: int) -> bool:
@@ -162,17 +142,18 @@ def _pick_spawn_pair(
     candidates: List[Tuple[int, int]],
     grid,
     pois: Sequence[Tuple[int, int]],
-    optimizer: OptimizedPathfinding,
     footprint: Tuple[int, int],
+    require_reachability: bool = True,
 ) -> tuple[List[Tuple[int, int]], float]:
     tolerance = _fairness_tolerance(footprint)
     if len(candidates) < 2:
         return (candidates[:], float("inf"))
-    best_pair: tuple[Tuple[int, int], Tuple[int, int]] | None = None
-    best_distance = -1
-    best_ratio = float("inf")
-    best_score: tuple[int, float, float] | None = None
     distance_cache: dict[Tuple[int, int], dict[Tuple[int, int], int]] = {}
+    fairness_cache: dict[
+        tuple[Tuple[int, int], Tuple[int, int], Tuple[int, int]],
+        float,
+    ] = {}
+    evaluated: List[tuple[tuple[int, float, float], Tuple[int, int], Tuple[int, int], float]] = []
     for idx, start in enumerate(candidates[:-1]):
         dist_map = distance_cache.setdefault(start, _bfs_distances(grid, start))
         for other in candidates[idx + 1 :]:
@@ -182,21 +163,19 @@ def _pick_spawn_pair(
             if pair_distance is None:
                 pair_distance = -1
             ratio = _fairness_ratio(
-                optimizer,
+                grid,
                 [start, other],
                 pois,
                 footprint,
+                fairness_cache,
             )
             category = 0 if ratio <= tolerance else 1
             score = (category, ratio, -pair_distance)
-            if best_score is None or score < best_score:
-                best_score = score
-                best_pair = (start, other)
-                best_distance = pair_distance
-                best_ratio = ratio
-    if best_pair is None:
-        grid_width = getattr(grid, "width", "?")
-        grid_height = getattr(grid, "height", "?")
+            evaluated.append((score, start, other, ratio))
+    evaluated.sort(key=lambda item: item[0])
+    if not evaluated:
+        grid_width = getattr(grid, "width", "unknown")
+        grid_height = getattr(grid, "height", "unknown")
         raise RuntimeError(
             "Unable to find two disjoint spawn positions: "
             f"{len(candidates)} candidate(s) found for footprint {footprint} "
@@ -204,7 +183,24 @@ def _pick_spawn_pair(
             "This may be due to insufficient safe areas, the footprint being too large for the map, "
             "or the map being too small."
         )
-    return [best_pair[0], best_pair[1]], best_ratio
+    reachable_entry: tuple[tuple[int, float, float], Tuple[int, int], Tuple[int, int], float] | None = None
+    for entry in evaluated:
+        _, first, second, ratio = entry
+        if _spawns_are_mutually_reachable(
+            grid,
+            [first, second],
+            footprint,
+            fairness_cache,
+        ):
+            reachable_entry = entry
+            break
+    if reachable_entry is not None:
+        _, first, second, ratio = reachable_entry
+        return [first, second], ratio
+    if not require_reachability:
+        _, first, second, ratio = evaluated[0]
+        return [first, second], ratio
+    raise RuntimeError("unable to find mutually reachable spawn positions")
 
 
 def _nearest_walkable(grid, target: Tuple[int, int]) -> Tuple[int, int] | None:
@@ -245,16 +241,25 @@ def _determine_pois(grid) -> List[Tuple[int, int]]:
     return pois
 
 
-def _path_length(optimizer: OptimizedPathfinding, start: Tuple[int, int], end: Tuple[int, int]) -> float:
-    if start == end:
-        return 0.0
-    path = optimizer.find_path(start, end)
-    if not path:
-        return float("inf")
-    return float(len(path) - 1)
+def _is_footprint_valid(grid, top_left: Tuple[int, int], footprint: Tuple[int, int]) -> bool:
+    x, y = top_left
+    width, height = footprint
+    if width <= 0 or height <= 0:
+        return False
+    if x < 0 or y < 0:
+        return False
+    if x + width > grid.width:
+        return False
+    if y + height > grid.height:
+        return False
+    for dy in range(height):
+        for dx in range(width):
+            if not _is_walkable(grid, x + dx, y + dy):
+                return False
+    return True
 
 
-def _spawn_cells(position: Tuple[int, int], footprint: Tuple[int, int]) -> List[Tuple[int, int]]:
+def _footprint_cells(position: Tuple[int, int], footprint: Tuple[int, int]) -> List[Tuple[int, int]]:
     x, y = position
     width, height = footprint
     return [
@@ -264,25 +269,43 @@ def _spawn_cells(position: Tuple[int, int], footprint: Tuple[int, int]) -> List[
     ]
 
 
-def _spawn_distance(
-    optimizer: OptimizedPathfinding,
-    position: Tuple[int, int],
+def _footprint_path_length(
+    grid,
+    start: Tuple[int, int],
     footprint: Tuple[int, int],
     poi: Tuple[int, int],
 ) -> float:
-    best = float("inf")
-    for cell in _spawn_cells(position, footprint):
-        length = _path_length(optimizer, cell, poi)
-        if length < best:
-            best = length
-    return best
+    if not _is_footprint_valid(grid, start, footprint):
+        return float("inf")
+    width, height = footprint
+    queue: deque[Tuple[int, int, int]] = deque([(start[0], start[1], 0)])
+    seen = {start}
+    goal_offsets = [(dx, dy) for dy in range(height) for dx in range(width)]
+    while queue:
+        x, y, dist = queue.popleft()
+        if any(x + dx == poi[0] and y + dy == poi[1] for dx, dy in goal_offsets):
+            return float(dist)
+        for dx, dy in _CARDINALS:
+            nx, ny = x + dx, y + dy
+            candidate = (nx, ny)
+            if candidate in seen:
+                continue
+            if not _is_footprint_valid(grid, candidate, footprint):
+                continue
+            seen.add(candidate)
+            queue.append((nx, ny, dist + 1))
+    return float("inf")
 
 
 def _fairness_ratio(
-    optimizer: OptimizedPathfinding,
+    grid,
     spawns: Sequence[SpawnZone | Tuple[int, int]],
     pois: Sequence[Tuple[int, int]],
     footprint: Tuple[int, int] = (1, 1),
+    distance_cache: dict[
+        tuple[Tuple[int, int], Tuple[int, int], Tuple[int, int]],
+        float,
+    ] | None = None,
 ) -> float:
     spawn_infos: List[Tuple[Tuple[int, int], Tuple[int, int]]] = []
     for spawn in spawns:
@@ -291,17 +314,26 @@ def _fairness_ratio(
         else:
             spawn_infos.append((spawn, footprint))
 
+    if distance_cache is None:
+        distance_cache = {}
+
     worst = 0.0
     for poi in pois:
         distances: List[float] = []
         unreachable = False
         for position, spawn_footprint in spawn_infos:
-            length = _spawn_distance(optimizer, position, spawn_footprint, poi)
+            key = (position, spawn_footprint, poi)
+            length = distance_cache.get(key)
+            if length is None:
+                length = _footprint_path_length(grid, position, spawn_footprint, poi)
+                distance_cache[key] = length
             if length == float("inf"):
                 unreachable = True
                 break
             distances.append(length)
-        if unreachable or not distances:
+        if unreachable:
+            continue
+        if not distances:
             continue
         avg = sum(distances) / len(distances)
         if avg == 0:
@@ -328,17 +360,21 @@ def _neighbourhood_candidates(
 
 
 def _improve_fairness(
-    optimizer: OptimizedPathfinding,
     spawns: List[Tuple[int, int]],
     pois: Sequence[Tuple[int, int]],
     candidates: set[Tuple[int, int]],
+    grid,
     footprint: Tuple[int, int],
 ) -> List[Tuple[int, int]]:
     if not candidates:
         return list(spawns)
 
     best = list(spawns)
-    best_ratio = _fairness_ratio(optimizer, best, pois, footprint)
+    distance_cache: dict[
+        tuple[Tuple[int, int], Tuple[int, int], Tuple[int, int]],
+        float,
+    ] = {}
+    best_ratio = _fairness_ratio(grid, best, pois, footprint, distance_cache)
     tolerance = _fairness_tolerance(footprint)
     if best_ratio <= tolerance:
         return best
@@ -355,7 +391,7 @@ def _improve_fairness(
                     continue
                 trial = list(best)
                 trial[idx] = candidate
-                ratio = _fairness_ratio(optimizer, trial, pois, footprint)
+                ratio = _fairness_ratio(grid, trial, pois, footprint, distance_cache)
                 if ratio < best_ratio:
                     best = trial
                     best_ratio = ratio
@@ -366,6 +402,51 @@ def _improve_fairness(
         if not improved:
             break
     return best
+
+
+def _spawns_are_mutually_reachable(
+    grid,
+    spawns: Sequence[Tuple[int, int]],
+    footprint: Tuple[int, int],
+    distance_cache: dict[
+        tuple[Tuple[int, int], Tuple[int, int], Tuple[int, int]],
+        float,
+    ],
+) -> bool:
+    if len(spawns) < 2:
+        return True
+    target_offsets = _footprint_cells((0, 0), footprint)
+    for idx, start in enumerate(spawns[:-1]):
+        for other in spawns[idx + 1 :]:
+            if not _can_reach_target(grid, start, other, footprint, target_offsets, distance_cache):
+                return False
+            if not _can_reach_target(grid, other, start, footprint, target_offsets, distance_cache):
+                return False
+    return True
+
+
+def _can_reach_target(
+    grid,
+    start: Tuple[int, int],
+    target: Tuple[int, int],
+    footprint: Tuple[int, int],
+    target_offsets: Sequence[Tuple[int, int]],
+    distance_cache: dict[
+        tuple[Tuple[int, int], Tuple[int, int], Tuple[int, int]],
+        float,
+    ],
+) -> bool:
+    tx, ty = target
+    for dx, dy in target_offsets:
+        poi = (tx + dx, ty + dy)
+        key = (start, footprint, poi)
+        length = distance_cache.get(key)
+        if length is None:
+            length = _footprint_path_length(grid, start, footprint, poi)
+            distance_cache[key] = length
+        if length != float("inf"):
+            return True
+    return False
 
 
 def assign_spawn_zones(
@@ -398,13 +479,14 @@ def assign_spawn_zones(
     if len(candidates) < max_spawns:
         raise RuntimeError("unable to place spawn zones: insufficient safe tiles")
 
-    terrain = _SpawnTerrain(grid)
-    optimizer = OptimizedPathfinding(terrain)
-    optimizer.min_region_size = max(8, min(grid.width, grid.height) // 2)
-    optimizer.precompute_paths()
-
     pois = _determine_pois(grid)
-    spawn_positions, _ = _pick_spawn_pair(candidates, grid, pois, optimizer, footprint)
+    spawn_positions, _ = _pick_spawn_pair(
+        candidates,
+        grid,
+        pois,
+        footprint,
+        require_reachability=enforce_fairness,
+    )
     spawn_positions = spawn_positions[:max_spawns]
     for candidate in candidates:
         if len(spawn_positions) >= max_spawns:
@@ -417,13 +499,21 @@ def assign_spawn_zones(
     if len(spawn_positions) < max_spawns:
         raise RuntimeError("unable to place non-overlapping spawn zones")
     spawn_positions = _improve_fairness(
-        optimizer,
         spawn_positions,
         pois,
         set(candidates),
+        grid,
         footprint,
     )
-    ratio = _fairness_ratio(optimizer, spawn_positions, pois, footprint)
+    distance_cache: dict[
+        tuple[Tuple[int, int], Tuple[int, int], Tuple[int, int]],
+        float,
+    ] = {}
+    if enforce_fairness and not _spawns_are_mutually_reachable(
+        grid, spawn_positions, footprint, distance_cache
+    ):
+        raise RuntimeError("spawn zones are mutually unreachable")
+    ratio = _fairness_ratio(grid, spawn_positions, pois, footprint, distance_cache)
     tolerance = _fairness_tolerance(footprint)
     if enforce_fairness and ratio > tolerance:
         raise RuntimeError("failed to produce fair spawn distribution")

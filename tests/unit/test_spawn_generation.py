@@ -1,13 +1,11 @@
 import pytest
 
 from modules.maps.components import MapMeta
-from core.pathfinding_optimization import OptimizedPathfinding
 from modules.maps.gen.spawns import (
     assign_spawn_zones,
     _determine_pois,
     _fairness_ratio,
     _fairness_tolerance,
-    _SpawnTerrain,
 )
 from modules.maps.spec import MapSpec, to_map_component
 
@@ -21,13 +19,9 @@ def _create_open_map(width: int, height: int) -> MapSpec:
 def _compute_fairness(spec: MapSpec) -> float:
     component = to_map_component(spec)
     grid = component.grid
-    terrain = _SpawnTerrain(grid)
-    optimizer = OptimizedPathfinding(terrain)
-    optimizer.min_region_size = max(8, min(grid.width, grid.height) // 2)
-    optimizer.precompute_paths()
     spawns = list(spec.meta.spawn_zones.values())
     pois = _determine_pois(grid)
-    return _fairness_ratio(optimizer, spawns, pois)
+    return _fairness_ratio(grid, spawns, pois)
 
 
 def _zone_cells(zone, grid):

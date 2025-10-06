@@ -73,7 +73,7 @@ class MapValidator:
         visited: Set[Tuple[int, int]],
     ) -> Set[Tuple[int, int]]:
         queue: deque[Tuple[int, int]] = deque([start])
-        component: Set[Tuple[int, int]] = set([start])
+        component: Set[Tuple[int, int]] = {start}
         visited.add(start)
         while queue:
             x, y = queue.popleft()
@@ -126,7 +126,7 @@ class MapValidator:
         footprint: Tuple[int, int],
     ) -> Set[Tuple[int, int]]:
         queue: deque[Tuple[int, int]] = deque([start])
-        component: Set[Tuple[int, int]] = set([start])
+        component: Set[Tuple[int, int]] = {start}
         visited.add(start)
         while queue:
             x, y = queue.popleft()
@@ -366,12 +366,13 @@ class MapValidator:
             return False
         start_zone, goal_zone = pair
         start, goal = start_zone.position, goal_zone.position
+        fixed_any = False
         for footprint in self._spawn_footprints():
             critical = self._critical_points(start, goal, footprint)
             for point in critical:
                 if self._widen_corridor(point, footprint):
-                    return True
-        return False
+                    fixed_any = True
+        return fixed_any
 
     def _widen_corridor(self, point: Tuple[int, int], footprint: Tuple[int, int]) -> bool:
         x, y = point
@@ -398,9 +399,13 @@ class MapValidator:
                 for ox in range(width):
                     if self._carve_if_wall(x + ox - dy, y + oy + dx):
                         return True
-                    if self._carve_if_wall(x + ox + dy, y + oy - dx):
-                        return True
-        return False
+        # Final fallback: clear a buffer around the corridor to guarantee additional space.
+        carved = False
+        for dy in range(-1, height + 1):
+            for dx in range(-1, width + 1):
+                if self._carve_if_wall(x + dx, y + dy):
+                    carved = True
+        return carved
 
     def _carve_if_wall(self, x: int, y: int) -> bool:
         if not (0 <= x < self.width and 0 <= y < self.height):
@@ -415,7 +420,7 @@ def ensure_valid_map(
     spec: MapSpec,
     *,
     reassign_spawns: Callable[[MapSpec], MapSpec],
-    max_fixups: int = 3,
+    max_fixups: int = 6,
 ) -> MapSpec:
     """Validate ``spec`` and attempt fix-ups when necessary."""
 

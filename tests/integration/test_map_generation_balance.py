@@ -1,10 +1,8 @@
-from core.pathfinding_optimization import OptimizedPathfinding
 from modules.maps.gen.layout import generate_layout
 from modules.maps.gen.params import MapGenParams
 from modules.maps.gen.validate import MapValidator
 from modules.maps.gen.spawns import (
     _determine_pois,
-    _SpawnTerrain,
     _fairness_ratio,
     _fairness_tolerance,
     assign_spawn_zones,
@@ -15,13 +13,9 @@ from modules.maps.spec import MapSpec, to_map_component
 def _compute_fairness(spec: MapSpec) -> float:
     component = to_map_component(spec)
     grid = component.grid
-    terrain = _SpawnTerrain(grid)
-    optimizer = OptimizedPathfinding(terrain)
-    optimizer.min_region_size = max(8, min(grid.width, grid.height) // 2)
-    optimizer.precompute_paths()
     spawns = list(spec.meta.spawn_zones.values())
     pois = _determine_pois(grid)
-    return _fairness_ratio(optimizer, spawns, pois)
+    return _fairness_ratio(grid, spawns, pois)
 
 
 def test_generate_layout_produces_balanced_maps():
