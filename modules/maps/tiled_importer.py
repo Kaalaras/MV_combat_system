@@ -1,6 +1,7 @@
 """Utilities to import Tiled maps (TMX) into :class:`MapSpec` objects."""
 from __future__ import annotations
 
+import json
 import logging
 import math
 from dataclasses import dataclass
@@ -10,7 +11,7 @@ from typing import Callable, Iterable, Iterator, Mapping
 from pytiled_parser import parse_map
 from pytiled_parser.layer import Layer, LayerGroup, ObjectLayer, TileLayer
 
-from modules.maps.components import MapMeta
+from modules.maps.components import MapMeta, SpawnZone
 from modules.maps.spec import MapSpec
 from modules.maps.terrain_types import TERRAIN_CATALOG, TerrainFlags
 from modules.maps.tiled_schema import (
@@ -119,52 +120,60 @@ def _resolve_properties(mapping: Mapping[str, object]) -> _ResolvedProperties:
     )
 
 
+def _append_name(names: list[str], names_set: set[str], name: str) -> None:
+    if name in names_set:
+        return
+    names.append(name)
+    names_set.add(name)
+
+
+def _append_name_if_available(
+    names: list[str], names_set: set[str], name: str
+) -> bool:
+    if name not in TERRAIN_CATALOG:
+        return False
+    _append_name(names, names_set, name)
+    return True
+
+
+def _append_floor_overlay(names: list[str], names_set: set[str]) -> None:
+    if not _append_name_if_available(names, names_set, "floor"):
+        _append_name(names, names_set, "floor")
+
+
 def _terrain_descriptors(_gid: int, resolved: _ResolvedProperties) -> list[str]:
     names: list[str] = []
     names_set: set[str] = set()
     if resolved.blocks_move:
-        names.append("wall")
-        names_set.add("wall")
+        _append_name(names, names_set, "wall")
         return names
 
     move_cost = resolved.move_cost
     if move_cost <= 1:
-        names.append("floor")
-        names_set.add("floor")
-    elif move_cost == 2 and "difficult" in TERRAIN_CATALOG:
-        names.append("difficult")
-        names_set.add("difficult")
-    elif move_cost >= 3 and "very_difficult" in TERRAIN_CATALOG:
-        names.append("very_difficult")
-        names_set.add("very_difficult")
+        _append_floor_overlay(names, names_set)
+    elif move_cost == 2:
+        _append_name_if_available(names, names_set, "difficult")
+        _append_floor_overlay(names, names_set)
+    elif move_cost >= 3:
+        _append_name_if_available(names, names_set, "very_difficult")
+        _append_floor_overlay(names, names_set)
     else:
-        names.append("floor")
-        names_set.add("floor")
+        _append_floor_overlay(names, names_set)
 
     cover_flags = resolved.cover_flags
     if cover_flags & TerrainFlags.FORTIFICATION and "fortification" in TERRAIN_CATALOG:
-        if "fortification" not in names_set:
-            names.append("fortification")
-            names_set.add("fortification")
+        _append_name_if_available(names, names_set, "fortification")
     elif cover_flags & TerrainFlags.COVER_HEAVY and "heavy_cover" in TERRAIN_CATALOG:
-        if "heavy_cover" not in names_set:
-            names.append("heavy_cover")
-            names_set.add("heavy_cover")
+        _append_name_if_available(names, names_set, "heavy_cover")
     elif cover_flags & TerrainFlags.COVER_LIGHT and "light_cover" in TERRAIN_CATALOG:
-        if "light_cover" not in names_set:
-            names.append("light_cover")
-            names_set.add("light_cover")
+        _append_name_if_available(names, names_set, "light_cover")
 
     hazard_names = _hazard_descriptors(_gid, resolved)
     for name in hazard_names:
-        if name not in names_set:
-            names.append(name)
-            names_set.add(name)
+        _append_name(names, names_set, name)
 
     if resolved.blocks_los and len(names) == 1 and names[0] == "floor":
-        if "light_cover" in TERRAIN_CATALOG and "light_cover" not in names_set:
-            names.append("light_cover")
-            names_set.add("light_cover")
+        _append_name_if_available(names, names_set, "light_cover")
 
     return names
 
@@ -231,6 +240,11 @@ def _add_descriptors(cells: list[list[list[str]]], x: int, y: int, names: list[s
     for name in names:
         if name not in TERRAIN_CATALOG:
             logger.warning("Unknown terrain descriptor '%s' ignored during import", name)
+            continue
+        if name == "void" and "wall" in cell:
+            # Walls take precedence over the auxiliary void descriptor emitted by
+            # the collision layer. Retain the existing wall entry to preserve the
+            # original MapSpec semantics.
             continue
         if name not in cell:
             cell.append(name)
@@ -349,7 +363,36 @@ class TiledImporter:
             except ValueError:
                 pass
 
-        meta = MapMeta(name=name, biome=biome, seed=seed)
+        spawn_property = properties.get("spawn_zones")
+        spawn_zones: dict[str, SpawnZone] = {}
+        if isinstance(spawn_property, str) and spawn_property:
+            try:
+                raw_spawn = json.loads(spawn_property)
+            except json.JSONDecodeError:
+                logger.warning("Invalid spawn_zones JSON in TMX properties; ignoring value")
+            else:
+                for label, entry in raw_spawn.items():
+                    try:
+                        x = int(entry["x"])
+                        y = int(entry["y"])
+                        zone_width = int(entry.get("width", 1))
+                        zone_height = int(entry.get("height", 1))
+                    except (KeyError, TypeError, ValueError):
+                        logger.debug("Ignoring malformed spawn zone '%s' in TMX metadata", label)
+                        continue
+                    safe_radius = int(entry.get("safe_radius", 1))
+                    allow_decor = bool(entry.get("allow_decor", False))
+                    allow_hazard = bool(entry.get("allow_hazard", False))
+                    spawn_zones[label] = SpawnZone(
+                        label=label,
+                        position=(x, y),
+                        footprint=(zone_width, zone_height),
+                        safe_radius=max(0, safe_radius),
+                        allow_decor=allow_decor,
+                        allow_hazard=allow_hazard,
+                    )
+
+        meta = MapMeta(name=name, biome=biome, seed=seed, spawn_zones=spawn_zones)
 
         if "floor" in TERRAIN_CATALOG:
             default_descriptor = "floor"

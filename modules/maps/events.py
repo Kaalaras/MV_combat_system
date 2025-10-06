@@ -5,6 +5,8 @@ from dataclasses import dataclass
 from typing import ClassVar, Protocol, runtime_checkable
 
 from modules.maps.components import MapMeta
+from modules.maps.spec import MapSpec
+from modules.maps.gen.params import MapGenParams
 
 
 LOAD_MAP_FROM_TILED = "maps.load_from_tiled"
@@ -12,6 +14,12 @@ LOAD_MAP_FROM_TILED = "maps.load_from_tiled"
 
 MAP_LOADED = "maps.loaded"
 """Event topic emitted when a map entity has been created."""
+
+GENERATE_MAP = "maps.generate"
+"""Event topic requesting a procedural map to be generated."""
+
+MAP_GENERATED = "maps.generated"
+"""Event topic emitted once a procedural :class:`MapSpec` is available."""
 
 
 @runtime_checkable
@@ -51,9 +59,37 @@ class MapLoaded:
         bus.publish(self.topic, map_entity_id=self.map_entity_id, meta=self.meta)
 
 
+@dataclass(frozen=True, slots=True)
+class GenerateMap:
+    """Request procedural map generation using ``params``."""
+
+    params: MapGenParams
+
+    topic: ClassVar[str] = GENERATE_MAP
+
+    def publish(self, bus: _PublishesEvents) -> None:
+        bus.publish(self.topic, params=self.params)
+
+
+@dataclass(frozen=True, slots=True)
+class MapGenerated:
+    """Notification containing the freshly generated :class:`MapSpec`."""
+
+    spec: MapSpec
+
+    topic: ClassVar[str] = MAP_GENERATED
+
+    def publish(self, bus: _PublishesEvents) -> None:
+        bus.publish(self.topic, spec=self.spec)
+
+
 __all__ = [
     "LoadMapFromTiled",
     "MapLoaded",
     "MAP_LOADED",
     "LOAD_MAP_FROM_TILED",
+    "GenerateMap",
+    "MapGenerated",
+    "GENERATE_MAP",
+    "MAP_GENERATED",
 ]

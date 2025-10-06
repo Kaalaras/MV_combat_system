@@ -8,8 +8,8 @@ from typing import Callable, Optional, Protocol
 
 from ecs.components.entity_id import EntityIdComponent
 from modules.maps.components import MapComponent, MapMeta
-from modules.maps.events import LoadMapFromTiled, MapLoaded
-from modules.maps.spec import to_map_component
+from modules.maps.events import LoadMapFromTiled, MapGenerated, MapLoaded
+from modules.maps.spec import MapSpec, to_map_component
 from modules.maps.tiled_importer import TiledImporter
 
 
@@ -50,15 +50,22 @@ class MapLoaderSystem:
         self._active_entity_id: Optional[str] = None
 
         self._bus.subscribe(LoadMapFromTiled.topic, self._on_load_requested)
+        self._bus.subscribe(MapGenerated.topic, self._on_map_generated)
 
     # ------------------------------------------------------------------
     def _on_load_requested(self, *, path: str, **_: object) -> None:
         spec = self._importer.load(path)
+        self._activate_spec(spec, origin_hint=path)
+
+    def _on_map_generated(self, *, spec: MapSpec, **_: object) -> None:
+        self._activate_spec(spec, origin_hint=spec.meta.name)
+
+    def _activate_spec(self, spec: MapSpec, *, origin_hint: str | None) -> None:
         map_component = to_map_component(spec)
 
         self._despawn_active_map()
 
-        entity_id = self._derive_entity_id(spec.meta, path)
+        entity_id = self._derive_entity_id(map_component.meta, origin_hint=origin_hint)
         internal_id = self._ecs.create_entity(
             EntityIdComponent(entity_id),
             map_component,
@@ -75,10 +82,19 @@ class MapLoaderSystem:
         self._active_internal_id = None
         self._active_entity_id = None
 
-    def _derive_entity_id(self, meta: MapMeta, path: str) -> str:
-        base = self._normalise_identifier(meta.name)
-        if not base:
-            base = self._normalise_identifier(Path(path).stem)
+    def _derive_entity_id(self, meta: MapMeta, *, origin_hint: str | None) -> str:
+        candidates = [meta.name]
+        if origin_hint:
+            candidates.append(origin_hint)
+            candidates.append(Path(origin_hint).stem)
+
+        base = ""
+        for candidate in candidates:
+            if not candidate:
+                continue
+            base = self._normalise_identifier(candidate)
+            if base:
+                break
         if not base:
             base = "map"
 
@@ -94,7 +110,7 @@ class MapLoaderSystem:
                     "MapLoaderSystem.MAX_ENTITY_ID_ATTEMPTS or cleaning up stale map entities.",
                     base,
                     self.MAX_ENTITY_ID_ATTEMPTS,
-                    path,
+                    origin_hint or base,
                 )
                 raise RuntimeError(
                     "Failed to generate a unique map entity ID after "
@@ -109,7 +125,7 @@ class MapLoaderSystem:
             logger.warning(
                 "Map entity id generation for '%s' consumed %s attempts (limit %s); "
                 "consider increasing the limit.",
-                path,
+                origin_hint or base,
                 attempts,
                 self.MAX_ENTITY_ID_ATTEMPTS,
             )
@@ -122,14 +138,14 @@ class MapLoaderSystem:
             log(
                 "Map entity id generation for '%s' succeeded after %s attempts "
                 "(limit %s).",
-                path,
+                origin_hint or base,
                 attempts,
                 self.MAX_ENTITY_ID_ATTEMPTS,
             )
         else:
             logger.debug(
                 "Map entity id generation for '%s' succeeded without collisions (limit %s).",
-                path,
+                origin_hint or base,
                 self.MAX_ENTITY_ID_ATTEMPTS,
             )
         return candidate
