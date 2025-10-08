@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Iterable, Optional, Sequence, Tuple, TYPE_CHECKING
+from typing import Iterable, Mapping, Optional, Sequence, Tuple, TYPE_CHECKING
 
 from modules.maps.components import MapGrid
 from modules.maps.resolver import ActiveMapResolver
@@ -137,7 +137,7 @@ class CoverSystem:
                 max_x = max(max_x, int(wx))
                 max_y = max(max_y, int(wy))
         grid_map = getattr(terrain, "grid", None)
-        if isinstance(grid_map, dict):
+        if isinstance(grid_map, Mapping):
             for gx, gy in grid_map.keys():
                 max_x = max(max_x, int(gx))
                 max_y = max(max_y, int(gy))

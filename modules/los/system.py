@@ -36,16 +36,16 @@ try:  # pragma: no cover - tcod optional dependency
         from tcod import libtcodpy as _libtcod  # type: ignore[import]
 
         FOV_PERMISSIVE_8 = _libtcod.FOV_PERMISSIVE_8  # type: ignore[attr-defined]
-    except Exception:  # pragma: no cover - fallbacks for new tcod layouts
+    except (ImportError, AttributeError):  # pragma: no cover - fallbacks for new tcod layouts
         try:
             from tcod import constants as _tcod_constants  # type: ignore[import]
 
             FOV_PERMISSIVE_8 = _tcod_constants.FOV_PERMISSIVE_8  # type: ignore[attr-defined]
-        except Exception:
+        except (ImportError, AttributeError):
             FOV_PERMISSIVE_8 = getattr(tcod, "FOV_PERMISSIVE_8", 0)  # type: ignore[attr-defined]
     _TcodMap: Any = None
     _HAS_TCOD: bool = True
-except Exception:  # pragma: no cover - tcod unavailable
+except (ImportError, AttributeError):  # pragma: no cover - tcod unavailable
     tcod = None  # type: ignore[assignment]  # noqa: F401
     FOV_PERMISSIVE_8 = 0  # type: ignore[assignment]  # noqa: F401
     _TcodMap = None  # noqa: F401
@@ -100,9 +100,7 @@ class _Occupant:
             return False
         if self.has_character_ref:
             return True
-        if self.cover is not None and not self.is_cover_destroyed:
-            return True
-        if self.structure is not None and not self.is_structure_destroyed:
+        if self.structure is not None and self.cover is None and not self.is_structure_destroyed:
             return True
         return False
 
@@ -460,10 +458,7 @@ class LineOfSightSystem:
         terrain = self._terrain_provider
         if not terrain:
             return False
-        effect_key = {
-            "dark_total": "dark_total",
-            "dark_low": "dark_low",
-        }.get(effect_name, effect_name)
+        effect_key = effect_name
         checker = getattr(terrain, "has_effect", None)
         if callable(checker):
             try:
@@ -562,10 +557,6 @@ class LineOfSightSystem:
             width = max(max_x + 1, 8) if max_x >= 0 else 8
         if height <= 0:
             height = max(max_y + 1, 8) if max_y >= 0 else 8
-        if width <= 0:
-            width = 1
-        if height <= 0:
-            height = 1
         grid = MapGrid(width, height, cell_size)
         if isinstance(walls, Iterable):
             for wx, wy in walls:
@@ -630,25 +621,27 @@ class LineOfSightSystem:
             )
 
         tile_occupants = self._get_tile_occupants()
-        self._current_tile_occupants = tile_occupants
         cover_ids: List[str] = []
         cover_sum = 0
         cover_seen: Set[str] = set()
         intervening: List[GridCoord] = []
         walls_present = False
         clear_between = False
+        dynamic_blockers_present = False
 
+        self._current_tile_occupants = tile_occupants
         try:
             for cell in line[1:-1]:
                 intervening.append(cell)
                 cx, cy = cell
                 if not (0 <= cy < grid.height and 0 <= cx < grid.width):
                     continue
-                if grid.blocks_los_mask[cy][cx]:
-                    walls_present = True
-                else:
-                    clear_between = True
 
+                cell_has_wall = bool(grid.blocks_los_mask[cy][cx])
+                if cell_has_wall:
+                    walls_present = True
+
+                cell_blocked_by_entity = False
                 for occupant in tile_occupants.get(cell, []):
                     if (
                         occupant.entity_id not in cover_seen
@@ -658,12 +651,18 @@ class LineOfSightSystem:
                         cover_seen.add(occupant.entity_id)
                         cover_ids.append(occupant.entity_id)
                         cover_sum += getattr(occupant.cover, "bonus", 0)
-                    if not grid.blocks_los_mask[cy][cx]:
-                        clear_between = True
+                    if not cell_blocked_by_entity and occupant.blocks_visibility():
+                        cell_blocked_by_entity = True
+                        dynamic_blockers_present = True
+
+                if not cell_has_wall and not cell_blocked_by_entity:
+                    clear_between = True
         finally:
             self._current_tile_occupants = None
 
-        if walls_present and not clear_between:
+        any_blockers_present = walls_present or dynamic_blockers_present
+
+        if any_blockers_present and not clear_between:
             self.stats["fastpath_skips"] += 1
             total_cover = cover_sum
             return VisibilityEntry(
@@ -681,6 +680,7 @@ class LineOfSightSystem:
             )
 
         partial_wall_candidate = walls_present and clear_between
+        raycast_needed = partial_wall_candidate or dynamic_blockers_present
         wall_bonus = 0
         has_los = True
         total_rays = 0
@@ -689,8 +689,7 @@ class LineOfSightSystem:
         start_offsets = list(self._get_los_points(origin))
         end_offsets = list(self._get_los_points(target))
 
-        if partial_wall_candidate:
-            tile_occupants = self._get_tile_occupants()
+        if raycast_needed:
             self._current_tile_occupants = tile_occupants
             try:
                 if self.sampling_mode == "full":
