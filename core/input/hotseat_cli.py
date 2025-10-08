@@ -6,13 +6,16 @@ from typing import Any, Callable, Iterable, Mapping, Optional, Protocol
 
 from core.actions.intent import ActionIntent, TargetSpec
 from core.events import topics
+from core.event_bus import Topic
 
 
 class EventBusLike(Protocol):
-    def subscribe(self, event_type: str, handler: Callable[..., None]) -> None:
+    def subscribe(self, event_type: Topic, handler: Callable[..., None]) -> None:
         ...
 
-    def publish(self, event_type: str, /, **payload: Any) -> None:
+    def publish(
+        self, event_type: Topic, payload: Mapping[str, Any] | None = None, /, **kwargs: Any
+    ) -> None:
         ...
 
 
@@ -233,7 +236,7 @@ class HotSeatCLIController:
                 "Invalid radius. Please enter an integer value (e.g., 3,4;2)."
             ) from exc
 
-    def _publish(self, topic: str, payload: Mapping[str, Any]) -> None:
+    def _publish(self, topic: Topic, payload: Mapping[str, Any]) -> None:
         if not self._event_bus:
             raise RuntimeError("Controller must be bound to an event bus before use.")
         self._event_bus.publish(topic, **payload)

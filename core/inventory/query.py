@@ -2,16 +2,19 @@
 
 from __future__ import annotations
 
-from typing import Any, Optional, Protocol, Sequence, TypeAlias
+from typing import Any, Mapping, Optional, Protocol, Sequence, TypeAlias
 
 from core.events import topics
+from core.event_bus import Topic
 
 
 ItemRef: TypeAlias = Any
 
 
 class _EventBusLike(Protocol):
-    def publish(self, event_type: str, /, **payload: Any) -> None:
+    def publish(
+        self, event_type: Topic, payload: Mapping[str, Any] | None = None, /, **kwargs: Any
+    ) -> None:
         ...
 
 

@@ -16,6 +16,7 @@ from typing import Any, Callable, Mapping, Optional, Protocol, Tuple
 from core.actions.catalog import ACTION_CATALOG, ActionDef
 from core.actions.intent import ActionIntent, CostSpec
 from core.events import topics
+from core.event_bus import Topic
 
 
 RESOURCE_GETTER_PATTERNS = (
@@ -29,10 +30,12 @@ RESOURCE_GETTER_PATTERNS = (
 class EventBusLike(Protocol):
     """Minimal protocol required to interact with the project event bus."""
 
-    def subscribe(self, topic: str, handler: Callable[..., None]) -> None:
+    def subscribe(self, topic: Topic, handler: Callable[..., None]) -> None:
         ...
 
-    def publish(self, topic: str, /, **payload: Any) -> None:
+    def publish(
+        self, topic: Topic, payload: Mapping[str, Any] | None = None, /, **kwargs: Any
+    ) -> None:
         ...
 
 

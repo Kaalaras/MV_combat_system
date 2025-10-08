@@ -8,16 +8,19 @@ from typing import Any, Callable, Iterable, Mapping, Optional, Protocol
 
 from core.actions.intent import ActionIntent, TargetSpec
 from core.events import topics
+from core.event_bus import Topic
 
 
 DEFAULT_ATTACK_DAMAGE = 1
 
 
 class EventBusLike(Protocol):
-    def subscribe(self, topic: str, handler: Callable[..., None]) -> None:
+    def subscribe(self, topic: Topic, handler: Callable[..., None]) -> None:
         ...
 
-    def publish(self, topic: str, /, **payload: Any) -> None:
+    def publish(
+        self, topic: Topic, payload: Mapping[str, Any] | None = None, /, **kwargs: Any
+    ) -> None:
         ...
 
 

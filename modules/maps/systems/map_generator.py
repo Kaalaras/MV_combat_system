@@ -1,23 +1,26 @@
 from __future__ import annotations
 
 import logging
-from typing import Callable, Protocol
+from typing import Callable, Mapping, Protocol
 
 from modules.maps.events import GenerateMap, MapGenerated
 from modules.maps.gen import MapGenParams, decorate, generate_layout, get_rng
 from modules.maps.gen.spawns import assign_spawn_zones
 from modules.maps.gen.validate import ensure_valid_map
 from modules.maps.spec import MapSpec
+from core.event_bus import Topic
 
 
 logger = logging.getLogger(__name__)
 
 
 class _EventBus(Protocol):
-    def subscribe(self, event_type: str, callback: Callable[..., None]) -> None:
+    def subscribe(self, event_type: Topic, callback: Callable[..., None]) -> None:
         ...
 
-    def publish(self, event_type: str, **payload: object) -> None:
+    def publish(
+        self, event_type: Topic, payload: Mapping[str, object] | None = None, /, **kwargs: object
+    ) -> None:
         ...
 
 
