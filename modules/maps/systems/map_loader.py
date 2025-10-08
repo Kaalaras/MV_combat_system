@@ -4,22 +4,25 @@ from __future__ import annotations
 import logging
 import re
 from pathlib import Path
-from typing import Callable, Optional, Protocol
+from typing import Callable, Mapping, Optional, Protocol
 
 from ecs.components.entity_id import EntityIdComponent
 from modules.maps.components import MapComponent, MapMeta
 from modules.maps.events import LoadMapFromTiled, MapGenerated, MapLoaded
 from modules.maps.spec import MapSpec, to_map_component
 from modules.maps.tiled_importer import TiledImporter
+from core.event_bus import Topic
 
 
 class _EventBus(Protocol):
     """Subset of the event bus interface required by :class:`MapLoaderSystem`."""
 
-    def subscribe(self, event_type: str, callback: Callable[..., None]) -> None:
+    def subscribe(self, event_type: Topic, callback: Callable[..., None]) -> None:
         ...
 
-    def publish(self, event_type: str, **payload: object) -> None:
+    def publish(
+        self, event_type: Topic, payload: Mapping[str, object] | None = None, /, **kwargs: object
+    ) -> None:
         ...
 
 

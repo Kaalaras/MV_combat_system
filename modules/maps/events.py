@@ -2,17 +2,19 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import ClassVar, Protocol, runtime_checkable
+from typing import ClassVar, Mapping, Protocol, runtime_checkable
 
 from modules.maps.components import MapMeta
 from modules.maps.spec import MapSpec
 from modules.maps.gen.params import MapGenParams
+from core.event_bus import Topic
+from core.events.topics import EventTopic
 
 
 LOAD_MAP_FROM_TILED = "maps.load_from_tiled"
 """Event topic requesting a TMX map to be imported into the ECS."""
 
-MAP_LOADED = "maps.loaded"
+MAP_LOADED = EventTopic.MAP_LOADED.value
 """Event topic emitted when a map entity has been created."""
 
 GENERATE_MAP = "maps.generate"
@@ -26,7 +28,9 @@ MAP_GENERATED = "maps.generated"
 class _PublishesEvents(Protocol):
     """Protocol capturing the subset of the event bus used here."""
 
-    def publish(self, event_type: str, **payload: object) -> None:
+    def publish(
+        self, event_type: Topic, payload: Mapping[str, object] | None = None, /, **kwargs: object
+    ) -> None:
         """Publish an event to all subscribers."""
 
 

@@ -9,13 +9,16 @@ from core.actions.catalog import ACTION_CATALOG, ActionDef
 from core.actions.intent import ActionIntent
 from core.events import topics
 from ecs.components.action_budget import ActionBudgetComponent
+from core.event_bus import Topic
 
 
 class EventBusLike(Protocol):
-    def subscribe(self, topic: str, handler: Callable[..., None]) -> None:
+    def subscribe(self, topic: Topic, handler: Callable[..., None]) -> None:
         ...
 
-    def publish(self, topic: str, /, **payload: Any) -> None:
+    def publish(
+        self, topic: Topic, payload: Mapping[str, Any] | None = None, /, **kwargs: Any
+    ) -> None:
         ...
 
 

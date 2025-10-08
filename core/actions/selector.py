@@ -8,13 +8,16 @@ from typing import Any, Callable, Iterable, Mapping, Optional, Protocol, Sequenc
 from core.actions.catalog import ACTION_CATALOG, ActionDef, iter_catalog
 from core.actions.intent import TargetSpec
 from core.events import topics
+from core.event_bus import Topic
 
 
 class EventBusLike(Protocol):
-    def subscribe(self, topic: str, handler: Callable[..., None]) -> None:
+    def subscribe(self, topic: Topic, handler: Callable[..., None]) -> None:
         ...
 
-    def publish(self, topic: str, /, **payload: Any) -> None:
+    def publish(
+        self, topic: Topic, payload: Mapping[str, Any] | None = None, /, **kwargs: Any
+    ) -> None:
         ...
 
 
