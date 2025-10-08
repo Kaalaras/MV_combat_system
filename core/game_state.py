@@ -28,9 +28,6 @@ def _emit_deprecation(api_name: str, replacement: Optional[str] = None, *, stack
         _SEEN_MESSAGES.add(message)
 
 
-_emit_deprecation("import", "ecs.ecs_manager.ECSManager")
-
-
 def _wrap_callable(name: str, func: Callable[..., Any], replacement: Optional[str]) -> Callable[..., Any]:
     @functools.wraps(func)
     def wrapper(self: "GameState", *args: Any, **kwargs: Any) -> Any:
