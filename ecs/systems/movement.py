@@ -47,6 +47,38 @@ class MovementSystem:
             return None
         return component_tuple[0]
 
+    def _can_enter_tile(
+        self,
+        terrain: Any,
+        x: int,
+        y: int,
+        width: int,
+        height: int,
+        *,
+        entity_id: str,
+    ) -> bool:
+        if not terrain.is_walkable(x, y, width, height):
+            return False
+        return not terrain.is_occupied(
+            x,
+            y,
+            width,
+            height,
+            entity_id_to_ignore=entity_id,
+        )
+
+    @staticmethod
+    def _compute_step_cost(terrain: Any, x: int, y: int) -> int:
+        raw_cost_fn = getattr(terrain, "get_movement_cost", None)
+        if not callable(raw_cost_fn):
+            return 1
+        try:
+            step_cost_val = raw_cost_fn(x, y)
+            step_cost = int(step_cost_val)
+        except (TypeError, ValueError):
+            return 1
+        return step_cost if step_cost > 0 else 1
+
     def _record_movement_usage(self, entity_id: str, distance: int) -> None:
         if distance <= 0:
             return
@@ -202,18 +234,16 @@ class MovementSystem:
                 nx, ny = x + dx, y + dy
                 if (nx, ny) in blocked:
                     continue
-                if not terrain.is_walkable(nx, ny, entity_width, entity_height) or \
-                   terrain.is_occupied(nx, ny, entity_width, entity_height, entity_id_to_ignore=entity_id):
+                if not self._can_enter_tile(
+                    terrain,
+                    nx,
+                    ny,
+                    entity_width,
+                    entity_height,
+                    entity_id=entity_id,
+                ):
                     continue
-                raw_cost_fn = getattr(terrain, 'get_movement_cost', None)
-                if callable(raw_cost_fn):
-                    try:
-                        step_cost_val = raw_cost_fn(nx, ny)
-                        step_cost = int(step_cost_val)
-                    except (TypeError, ValueError):
-                        step_cost = 1
-                else:
-                    step_cost = 1
+                step_cost = self._compute_step_cost(terrain, nx, ny)
                 nd = dist + step_cost
                 if nd > max_distance:
                     continue
@@ -263,18 +293,16 @@ class MovementSystem:
                 nx, ny = x + dx, y + dy
                 if (nx, ny) in static_occ:
                     continue
-                if not terrain.is_walkable(nx, ny, entity_width, entity_height) or \
-                   terrain.is_occupied(nx, ny, entity_width, entity_height, entity_id_to_ignore=entity_id):
+                if not self._can_enter_tile(
+                    terrain,
+                    nx,
+                    ny,
+                    entity_width,
+                    entity_height,
+                    entity_id=entity_id,
+                ):
                     continue
-                raw_cost_fn = getattr(terrain, 'get_movement_cost', None)
-                if callable(raw_cost_fn):
-                    try:
-                        step_cost_val = raw_cost_fn(nx, ny)
-                        step_cost = int(step_cost_val)
-                    except (TypeError, ValueError):
-                        step_cost = 1
-                else:
-                    step_cost = 1
+                step_cost = self._compute_step_cost(terrain, nx, ny)
                 nd = dist + step_cost
                 if (max_distance is not None) and nd > max_distance:
                     continue
@@ -417,14 +445,16 @@ class MovementSystem:
                     void_tile = (vt_res is True)
                 except Exception:
                     void_tile = False
+        step_costs: List[int] = []
         total_cost = 0
         for (x, y) in path[1:]:
-            step_cost = terrain.get_movement_cost(x, y) if hasattr(terrain, 'get_movement_cost') else 1
+            step_cost = self._compute_step_cost(terrain, x, y)
             total_cost += step_cost
             if max_steps is not None and total_cost > max_steps:
                 return False
+            step_costs.append(step_cost)
         current = start
-        for step_index, (x, y) in enumerate(path[1:], start=1):
+        for step_index, ((x, y), step_cost) in enumerate(zip(path[1:], step_costs), start=1):
             from_position = current
             to_position = (x, y)
             self._publish_movement_started(
@@ -457,8 +487,7 @@ class MovementSystem:
                 path_step=step_index,
                 path_length=len(path) - 1,
             )
-            step_distance = terrain.get_movement_cost(x, y) if hasattr(terrain, 'get_movement_cost') else 1
-            self._record_movement_usage(entity_id, step_distance)
+            self._record_movement_usage(entity_id, step_cost)
             bump_blocker = getattr(self.game_state, 'bump_blocker_version', None)
             if callable(bump_blocker):
                 has_char_ref = self._get_component(entity_id, CharacterRefComponent) is not None
