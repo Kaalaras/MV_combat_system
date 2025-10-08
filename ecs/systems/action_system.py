@@ -173,7 +173,24 @@ class ActionSystem:
     # ECS pipeline integration
     # ------------------------------------------------------------------
     def apply_intent(self, intent: ActionIntent | Dict[str, Any], **extra: Any) -> bool:
-        """Validate ``intent`` and trigger execution through the ECS pipeline."""
+        """Validate an action intent and trigger its execution through the ECS pipeline.
+
+        Args:
+            intent: The action intent to validate and apply. The helper accepts
+                either a fully constructed :class:`ActionIntent` or a mapping
+                payload matching its schema.
+            **extra: Optional keyword arguments forwarded to the published
+                event payload so callers can attach additional metadata.
+
+        Returns:
+            ``True`` when the intent passes validation and is published to the
+            event bus as :data:`topics.ACTION_VALIDATED`, ``False`` when the
+            intent is rejected and :data:`topics.INTENT_REJECTED` is emitted.
+
+        Raises:
+            RuntimeError: If the system is missing an event bus or ECS manager,
+                both of which are required to run the validation pipeline.
+        """
 
         if not self.event_bus:
             raise RuntimeError("ActionSystem requires an event bus to apply intents")

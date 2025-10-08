@@ -10,6 +10,17 @@ from ecs.components.resource_pool import ResourcePoolComponent
 
 T = TypeVar("T")
 
+MOVEMENT_RESOURCE = "movement_points"
+
+
+def _safe_int(value: Any) -> int:
+    """Best-effort conversion to ``int`` that defaults to zero on failure."""
+
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return 0
+
 
 def _resolve_internal_id(ecs: Any, entity_id: str) -> Optional[int]:
     """Best-effort resolution of ``entity_id`` to an internal ECS id."""
@@ -102,28 +113,22 @@ def get_available_resource(
     available: Optional[int]
     if pool is not None:
         pooled_value = pool.get(resource, default=0)
-        if pooled_value is None:
-            available = 0
-        else:
-            available = int(pooled_value)
+        available = _safe_int(pooled_value)
     else:
         available = None
 
-    if available is not None and resource == "movement_points":
+    if available is not None and resource == MOVEMENT_RESOURCE:
         usage = get_movement_usage(ecs, entity_id)
         if usage is not None:
             distance = getattr(usage, "distance", 0)
-            try:
-                used = int(distance)
-            except (TypeError, ValueError):
-                used = 0
+            used = _safe_int(distance)
             available = available - used
 
     if available is not None and include_pending:
         budget = get_action_budget(ecs, entity_id)
         if budget is not None:
-            reserved = int(budget.reserved.get(resource, 0))
-            pending = int(budget.pending.get(resource, 0))
+            reserved = _safe_int(budget.reserved.get(resource, 0))
+            pending = _safe_int(budget.pending.get(resource, 0))
             to_subtract = reserved + pending
             if to_subtract:
                 available = available - to_subtract
@@ -131,7 +136,7 @@ def get_available_resource(
     if available is None:
         return None
 
-    return max(int(available), 0)
+    return max(_safe_int(available), 0)
 
 
 __all__ = [
