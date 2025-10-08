@@ -1,7 +1,9 @@
-import os
-import functools
 import datetime
+import functools
+import logging
+import os
 import uuid
+from typing import Optional
 
 # Crée le dossier de logs s'il n'existe pas
 LOGS_DIR = "logs"
@@ -52,3 +54,28 @@ def log_calls(func):
         return result
 
     return wrapper
+
+
+_MIGRATION_LOGGER_NAME = "mv_combat_system.migration"
+_MIGRATION_LOGGER: Optional[logging.Logger] = None
+
+
+def get_migration_logger() -> logging.Logger:
+    """Return a shared logger dedicated to migration warnings."""
+
+    global _MIGRATION_LOGGER
+    if _MIGRATION_LOGGER is not None:
+        return _MIGRATION_LOGGER
+
+    logger = logging.getLogger(_MIGRATION_LOGGER_NAME)
+    logger.setLevel(logging.WARNING)
+
+    if not logger.handlers:
+        handler = logging.StreamHandler()
+        handler.setLevel(logging.WARNING)
+        handler.setFormatter(logging.Formatter("[migration] %(message)s"))
+        logger.addHandler(handler)
+
+    logger.propagate = True
+    _MIGRATION_LOGGER = logger
+    return logger
