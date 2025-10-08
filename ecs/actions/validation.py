@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 from typing import Any, Callable, Mapping, Optional, Protocol, Tuple
 
 from core.actions.catalog import ACTION_CATALOG, ActionDef
@@ -29,15 +28,6 @@ class EventBusLike(Protocol):
         self, topic: Topic, payload: Mapping[str, Any] | None = None, /, **kwargs: Any
     ) -> None:
         ...
-
-
-@dataclass(frozen=True)
-class ValidationResult:
-    """Container returned by :func:`validate_intent`."""
-
-    ok: bool
-    reason: Optional[str]
-    intent: ActionIntent
 
 
 def validate_intent(
@@ -376,4 +366,4 @@ def _resolve_resource(
     return None
 
 
-__all__ = ["IntentValidator", "ValidationResult", "validate_intent"]
+__all__ = ["IntentValidator", "validate_intent"]
