@@ -8,6 +8,8 @@ from typing import Iterable
 import pytest
 
 from core.actions.selector import ActionOption, compute_available_actions
+from ecs.components.resource_pool import ResourcePoolComponent
+from tests.unit.test_utils import StubECS
 
 
 @dataclass
@@ -48,21 +50,25 @@ class DummyRules:
             "vampire": (3, 0),
         }.get(entity_id)
 
-    def get_action_points(self, actor_id: str) -> int:
-        return 3
-
-    def get_ammunition(self, actor_id: str) -> int:
-        return 5
-
     def get_ranged_range(self, actor_id: str) -> int:
         return 6
 
 
-class DummyECS:
+class DummyECS(StubECS):
     def __init__(self) -> None:
+        super().__init__({"hero": 1, "ghoul": 2, "vampire": 3})
         self.positions = {"hero": (0, 0), "ghoul": (0, 1), "vampire": (3, 0)}
-        self.action_points = {"hero": 3}
-        self.ammunition = {"hero": 5}
+
+        internal_id = self.resolve_entity("hero")
+        if internal_id is not None:
+            self.add_component(
+                internal_id,
+                ResourcePoolComponent(
+                    action_points=3,
+                    movement_points=4,
+                    ammunition=5,
+                ),
+            )
 
 
 @pytest.fixture

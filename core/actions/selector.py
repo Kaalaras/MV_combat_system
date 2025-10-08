@@ -9,6 +9,7 @@ from core.actions.catalog import ACTION_CATALOG, ActionDef, iter_catalog
 from core.actions.intent import TargetSpec
 from core.events import topics
 from core.event_bus import Topic
+from ecs.actions.state import get_available_resource
 
 
 class EventBusLike(Protocol):
@@ -114,10 +115,12 @@ def _compute_move_targets(actor_id: str, ecs: Any, rules_context: Any):
     if movement_system is None:
         return [], {}, ["movement_system_unavailable"]
 
-    move_budget = _call_optional(rules_context, "get_movement_budget", actor_id)
-    move_distance = _call_optional(rules_context, "get_move_distance", actor_id)
+    move_distance = get_available_resource(actor_id, "movement_points", ecs)
     if move_distance is None:
-        move_distance = move_budget
+        move_budget = _call_optional(rules_context, "get_movement_budget", actor_id)
+        move_distance = _call_optional(rules_context, "get_move_distance", actor_id)
+        if move_distance is None:
+            move_distance = move_budget
 
     if not move_distance or move_distance <= 0:
         return [], {}, ["insufficient_movement"]
@@ -285,6 +288,10 @@ def _check_costs(action_def: ActionDef, actor_id: str, ecs: Any, rules_context: 
 
 
 def _resolve_resource(actor_id: str, resource: str, ecs: Any, rules_context: Any) -> Optional[int]:
+    component_value = get_available_resource(actor_id, resource, ecs)
+    if component_value is not None:
+        return component_value
+
     getter_name_variants = [
         f"get_{resource}",
         f"get_{resource}_points",

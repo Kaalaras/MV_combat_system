@@ -54,6 +54,11 @@ from __future__ import annotations
 from typing import Any, Callable, Dict, List, Optional
 from dataclasses import dataclass, field
 from enum import Enum
+
+from core.actions.intent import ActionIntent
+from core.actions.scheduler import ActionScheduler
+from core.actions.validation import validate_intent
+from core.events import topics
 from interface.event_constants import CoreEvents
 
 
@@ -136,6 +141,13 @@ class ActionSystem:
         self.game_state = game_state
         self.event_bus = event_bus
 
+        self._ecs_manager = getattr(game_state, "ecs_manager", None)
+        self._scheduler: ActionScheduler | None = None
+        if self._ecs_manager is not None:
+            self._scheduler = ActionScheduler(self._ecs_manager)
+            if self.event_bus:
+                self._scheduler.bind(self.event_bus)
+
         # Registered actions per entity
         self.available_actions: Dict[str, List[Action]] = {}
 
@@ -156,6 +168,55 @@ class ActionSystem:
 
         if self.event_bus:
             self.event_bus.subscribe(CoreEvents.ACTION_REQUESTED, self.handle_action_requested)
+
+    # ------------------------------------------------------------------
+    # ECS pipeline integration
+    # ------------------------------------------------------------------
+    def apply_intent(self, intent: ActionIntent | Dict[str, Any], **extra: Any) -> bool:
+        """Validate ``intent`` and trigger execution through the ECS pipeline."""
+
+        if not self.event_bus:
+            raise RuntimeError("ActionSystem requires an event bus to apply intents")
+
+        ecs_facade = self._ecs_manager or getattr(self.game_state, "ecs_manager", None)
+        if ecs_facade is None:
+            raise RuntimeError("ActionSystem requires an ECS manager to validate intents")
+
+        rules_ctx = getattr(self.game_state, "rules", self.game_state)
+        ok, reason, normalised = validate_intent(intent, ecs_facade, rules_ctx)
+        payload: Dict[str, Any] = {
+            "intent": normalised.to_dict(),
+            "intent_obj": normalised,
+        }
+        payload.update(extra)
+
+        if not ok:
+            payload["reason"] = reason
+            self.event_bus.publish(topics.INTENT_REJECTED, **payload)
+            return False
+
+        payload.setdefault("reason", None)
+        self.event_bus.publish(topics.ACTION_VALIDATED, **payload)
+
+        scheduler = self._scheduler
+        if scheduler is None:
+            ecs_facade = getattr(self.game_state, "ecs_manager", None)
+            if ecs_facade is None:
+                raise RuntimeError("ActionSystem requires an ECS manager to schedule intents")
+            scheduler = ActionScheduler(ecs_facade)
+            scheduler._bus = self.event_bus
+        else:
+            scheduler._bus = self.event_bus
+
+        scheduler_extra = {
+            key: value
+            for key, value in payload.items()
+            if key not in {"intent", "intent_obj"}
+        }
+        scheduler._handle_intent_validated(
+            intent=payload["intent"], intent_obj=normalised, **scheduler_extra
+        )
+        return True
 
     # --- Helpers for robust enum handling -----------------------------------
     def _normalize_action_type(self, at) -> str:

@@ -10,6 +10,8 @@ from core.actions.selector import (
     compute_available_actions,
 )
 from core.events import topics
+from ecs.components.resource_pool import ResourcePoolComponent
+from tests.unit.test_utils import StubECS
 
 
 @dataclass
@@ -36,12 +38,6 @@ class DummyRulesContext:
         )
         self.line_of_sight = StubLineOfSight({("hero", "ghoul"), ("hero", "vampire")})
 
-    def get_movement_budget(self, actor_id: str) -> int:
-        return 4
-
-    def get_move_distance(self, actor_id: str) -> int:
-        return 4
-
     def get_ranged_range(self, actor_id: str) -> int:
         return 6
 
@@ -56,16 +52,21 @@ class DummyRulesContext:
         }
         return positions.get(entity_id)
 
-    def get_action_points(self, actor_id: str) -> int:
-        return 2
-
-    def get_ammunition(self, actor_id: str) -> int:
-        return 5
-
-
-class DummyECS:
+class DummyECS(StubECS):
     def __init__(self) -> None:
+        super().__init__({"hero": 1, "ghoul": 2, "vampire": 3})
         self.positions = {"hero": (0, 0), "ghoul": (0, 1), "vampire": (3, 0)}
+
+        internal_id = self.resolve_entity("hero")
+        if internal_id is not None:
+            self.add_component(
+                internal_id,
+                ResourcePoolComponent(
+                    action_points=2,
+                    movement_points=4,
+                    ammunition=5,
+                ),
+            )
 
 
 def test_compute_available_actions_core_paths() -> None:
