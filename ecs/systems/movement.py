@@ -83,6 +83,7 @@ class MovementSystem:
             # Some legacy terrains still expose non-numeric costs; treat them as neutral tiles
             # rather than crashing the movement system while we migrate providers.
             # NOTE: Remove this fallback once all terrain providers return numeric movement costs.
+            #       Tracking issue: https://github.com/your-org/your-repo/issues/1234
             return DEFAULT_MOVEMENT_COST
         return step_cost if step_cost > 0 else DEFAULT_MOVEMENT_COST
 
