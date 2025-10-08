@@ -78,6 +78,7 @@ class MovementSystem:
         except (TypeError, ValueError):
             # Some legacy terrains still expose non-numeric costs; treat them as neutral tiles
             # rather than crashing the movement system while we migrate providers.
+            # TODO: Remove this fallback after the terrain cost audit planned for v2.1 (Q1 2025).
             return 1
         return step_cost if step_cost > 0 else 1
 

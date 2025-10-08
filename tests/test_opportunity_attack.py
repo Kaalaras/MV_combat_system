@@ -148,7 +148,7 @@ class TestOpportunityAttack(unittest.TestCase):
         # Assert trigger
         self.assertEqual(len(self._get_events(CombatEvents.AOO_TRIGGERED)),1)
         # Reaction event
-        reactions=self._get_events('opportunity_attack_reaction')
+        reactions=self._get_events(CombatEvents.OPPORTUNITY_ATTACK_REACTION)
         self.assertEqual(len(reactions),1)
         self.assertEqual(reactions[0][1]['attacker_id'], self.att_id)
         # Defense prompt & resolved events present
@@ -165,7 +165,7 @@ class TestOpportunityAttack(unittest.TestCase):
         self.gs.get_entity(self.mov_id)['character_ref'].character.team='X'
         self.bus.publish('action_requested', entity_id=self.mov_id, action_name='Standard Move', target_tile=(5,8))
         self.assertEqual(len(self._get_events(CombatEvents.AOO_TRIGGERED)),0)
-        self.assertEqual(len(self._get_events('opportunity_attack_reaction')),0)
+        self.assertEqual(len(self._get_events(CombatEvents.OPPORTUNITY_ATTACK_REACTION)),0)
 
     def test_no_reaction_no_melee_weapon(self):
         # Replace melee weapon with ranged weapon -> no trigger
@@ -173,7 +173,7 @@ class TestOpportunityAttack(unittest.TestCase):
         equip.weapons={'ranged':RangedWeaponStub()}
         self.bus.publish('action_requested', entity_id=self.mov_id, action_name='Standard Move', target_tile=(5,8))
         self.assertEqual(len(self._get_events(CombatEvents.AOO_TRIGGERED)),0)
-        self.assertEqual(len(self._get_events('opportunity_attack_reaction')),0)
+        self.assertEqual(len(self._get_events(CombatEvents.OPPORTUNITY_ATTACK_REACTION)),0)
 
 if __name__=='__main__':
     unittest.main()

@@ -21,7 +21,12 @@ class OpportunityAttackSystem:
     def __init__(self, game_state: Any, event_bus: Any):
         self.game_state = game_state
         self.event_bus = event_bus
-        self.ecs_manager: Optional[ECSManager] = getattr(game_state, "ecs_manager", None)
+        manager = getattr(game_state, "ecs_manager", None)
+        if manager is None:
+            raise ValueError(
+                "OpportunityAttackSystem requires a GameState with an attached ECS manager."
+            )
+        self.ecs_manager: ECSManager = manager
         if event_bus:
             event_bus.subscribe(MovementEvents.MOVEMENT_STARTED, self._on_movement_started)
             event_bus.subscribe(MovementEvents.MOVEMENT_ENDED, self._on_movement_ended)
@@ -124,8 +129,6 @@ class OpportunityAttackSystem:
         if getattr(attacker_character, "is_dead", False) or getattr(target_character, "is_dead", False):
             return
         weapon = self._select_melee_weapon(equipment)
-        if weapon is None:
-            return
         payload: Dict[str, Any] = {
             "attacker_id": attacker_id,
             "target_id": target_id,
