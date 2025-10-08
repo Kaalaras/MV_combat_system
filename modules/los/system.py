@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Dict, Iterable, List, Mapping, Optional, Sequence, Set, Tuple, TYPE_CHECKING
+from typing import Any, Dict, Iterable, List, Mapping, Optional, Sequence, Set, Tuple, TYPE_CHECKING
 
 import numpy as np
 
@@ -25,30 +25,30 @@ from utils.condition_utils import (
     NIGHT_VISION_TOTAL,
 )
 
-if TYPE_CHECKING:  # pragma: no cover - import guard for typing only
+if TYPE_CHECKING:  # pragma: no cover - typing-only imports
     from ecs.ecs_manager import ECSManager
 
 # Optional tcod integration ---------------------------------------------------
 try:  # pragma: no cover - tcod optional dependency
-    import tcod  # type: ignore
+    import tcod  # type: ignore[import]
 
     try:
-        from tcod import libtcodpy as _libtcod  # type: ignore
+        from tcod import libtcodpy as _libtcod  # type: ignore[import]
 
-        FOV_PERMISSIVE_8 = _libtcod.FOV_PERMISSIVE_8  # type: ignore
+        FOV_PERMISSIVE_8 = _libtcod.FOV_PERMISSIVE_8  # type: ignore[attr-defined]
     except Exception:  # pragma: no cover - fallbacks for new tcod layouts
         try:
-            from tcod import constants as _tcod_constants  # type: ignore
+            from tcod import constants as _tcod_constants  # type: ignore[import]
 
-            FOV_PERMISSIVE_8 = _tcod_constants.FOV_PERMISSIVE_8  # type: ignore
+            FOV_PERMISSIVE_8 = _tcod_constants.FOV_PERMISSIVE_8  # type: ignore[attr-defined]
         except Exception:
-            FOV_PERMISSIVE_8 = getattr(tcod, "FOV_PERMISSIVE_8", 0)  # type: ignore
-    _TcodMap = None  # type: ignore
+            FOV_PERMISSIVE_8 = getattr(tcod, "FOV_PERMISSIVE_8", 0)  # type: ignore[attr-defined]
+    _TcodMap: Any = None
     _HAS_TCOD: bool = True
 except Exception:  # pragma: no cover - tcod unavailable
-    tcod = None  # type: ignore  # noqa: F401
-    FOV_PERMISSIVE_8 = 0  # type: ignore  # noqa: F401
-    _TcodMap = None  # type: ignore  # noqa: F401
+    tcod = None  # type: ignore[assignment]  # noqa: F401
+    FOV_PERMISSIVE_8 = 0  # type: ignore[assignment]  # noqa: F401
+    _TcodMap = None  # noqa: F401
     _HAS_TCOD = False
 
 # Event topics ----------------------------------------------------------------
@@ -85,17 +85,26 @@ class _Occupant:
     structure: Optional[StructureComponent]
     facing: Optional[FacingComponent]
     states: Set[str]
+    has_character_ref: bool
 
     @property
     def is_cover_destroyed(self) -> bool:
+        return self.is_structure_destroyed
+
+    @property
+    def is_structure_destroyed(self) -> bool:
         return bool(self.structure and getattr(self.structure, "destroyed", False))
 
     def blocks_visibility(self) -> bool:
         if INVISIBLE in self.states:
             return False
+        if self.has_character_ref:
+            return True
         if self.cover is not None and not self.is_cover_destroyed:
             return True
-        return True
+        if self.structure is not None and not self.is_structure_destroyed:
+            return True
+        return False
 
 
 class LineOfSightSystem:
@@ -495,11 +504,15 @@ class LineOfSightSystem:
         structure = None
         facing = None
         states: Set[str] = set()
+        has_character_ref = False
 
         if manager is not None:
             cover = manager.get_component_for_entity(entity_id, CoverComponent)
             structure = manager.get_component_for_entity(entity_id, StructureComponent)
             facing = manager.get_component_for_entity(entity_id, FacingComponent)
+            has_character_ref = (
+                manager.get_component_for_entity(entity_id, CharacterRefComponent) is not None
+            )
             states.update(self._collect_entity_states(entity_id))
         elif self._game_state is not None:
             entity = getattr(self._game_state, "get_entity", lambda *_: None)(entity_id)
@@ -509,12 +522,20 @@ class LineOfSightSystem:
                 facing = entity.get("facing")
                 char_ref = entity.get("character_ref")
                 if char_ref is not None:
+                    has_character_ref = True
                     character = getattr(char_ref, "character", None)
                     if character is not None:
                         char_states = getattr(character, "states", None)
                         if isinstance(char_states, Iterable):
                             states.update(char_states)
-        return _Occupant(entity_id=entity_id, cover=cover, structure=structure, facing=facing, states=states)
+        return _Occupant(
+            entity_id=entity_id,
+            cover=cover,
+            structure=structure,
+            facing=facing,
+            states=states,
+            has_character_ref=has_character_ref,
+        )
 
     def _build_grid_from_terrain(self, terrain: object) -> MapGrid:
         if terrain is None:
@@ -629,7 +650,11 @@ class LineOfSightSystem:
                     clear_between = True
 
                 for occupant in tile_occupants.get(cell, []):
-                    if occupant.cover is not None and not occupant.is_cover_destroyed and occupant.entity_id not in cover_seen:
+                    if (
+                        occupant.entity_id not in cover_seen
+                        and occupant.cover is not None
+                        and not occupant.is_cover_destroyed
+                    ):
                         cover_seen.add(occupant.entity_id)
                         cover_ids.append(occupant.entity_id)
                         cover_sum += getattr(occupant.cover, "bonus", 0)
@@ -804,14 +829,7 @@ class LineOfSightSystem:
                     return False
             occupants = tile_occupants.get((ix1, iy1), [])
             if occupants and (ix1, iy1) not in (attacker_cell, target_cell):
-                blocking = False
-                for occupant in occupants:
-                    if INVISIBLE in occupant.states:
-                        continue
-                    if occupant.cover is not None and occupant.is_cover_destroyed:
-                        continue
-                    blocking = True
-                    break
+                blocking = any(occupant.blocks_visibility() for occupant in occupants)
                 if blocking:
                     return False
             if ix1 == ix2 and iy1 == iy2:

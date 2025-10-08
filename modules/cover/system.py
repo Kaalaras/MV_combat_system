@@ -14,7 +14,7 @@ from ecs.components.position import PositionComponent
 
 GridCoord = Tuple[int, int]
 
-if TYPE_CHECKING:  # pragma: no cover - typing only
+if TYPE_CHECKING:  # pragma: no cover - typing-only imports
     from ecs.ecs_manager import ECSManager
     from modules.los.system import LineOfSightSystem
 
