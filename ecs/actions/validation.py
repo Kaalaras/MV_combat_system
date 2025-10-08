@@ -53,10 +53,10 @@ def validate_intent(
         rules_ctx: Rules context providing rule-based predicates and helpers.
 
     Returns:
-        A tuple ``(ok, reason, normalised)`` where ``ok`` indicates whether the
-        intent passed all checks, ``reason`` carries the rejection code when
-        ``ok`` is ``False`` (``None`` otherwise), and ``normalised`` is the
-        coerced :class:`ActionIntent` instance ready for scheduling.
+        Tuple[bool, Optional[str], ActionIntent]: A tuple ``(ok, reason, normalised)`` where
+        ``ok`` (bool) indicates whether the intent passed all checks,
+        ``reason`` (Optional[str]) carries the rejection code when ``ok`` is ``False`` (``None`` otherwise),
+        and ``normalised`` (:class:`ActionIntent`) is the coerced instance ready for scheduling.
     """
 
     normalised = _coerce_intent(intent)
