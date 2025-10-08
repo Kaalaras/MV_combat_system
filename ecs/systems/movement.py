@@ -14,6 +14,10 @@ from interface.event_constants import MovementEvents
 from core.terrain_manager import EFFECT_IMPASSABLE_VOID
 
 
+DEFAULT_MOVEMENT_COST = 1
+INFINITE_COST = 10**9
+
+
 class MovementSystem:
     """System responsible for handling entity movement within the game world."""
 
@@ -71,7 +75,7 @@ class MovementSystem:
     def _compute_step_cost(terrain: Any, x: int, y: int) -> int:
         raw_cost_fn = getattr(terrain, "get_movement_cost", None)
         if not callable(raw_cost_fn):
-            return 1
+            return DEFAULT_MOVEMENT_COST
         try:
             step_cost_val = raw_cost_fn(x, y)
             step_cost = int(step_cost_val)
@@ -79,8 +83,8 @@ class MovementSystem:
             # Some legacy terrains still expose non-numeric costs; treat them as neutral tiles
             # rather than crashing the movement system while we migrate providers.
             # NOTE: Remove this fallback once all terrain providers return numeric movement costs.
-            return 1
-        return step_cost if step_cost > 0 else 1
+            return DEFAULT_MOVEMENT_COST
+        return step_cost if step_cost > 0 else DEFAULT_MOVEMENT_COST
 
     def _record_movement_usage(self, entity_id: str, distance: int) -> None:
         if distance <= 0:
@@ -250,7 +254,7 @@ class MovementSystem:
                 nd = dist + step_cost
                 if nd > max_distance:
                     continue
-                if nd < best.get((nx, ny), 10**9):
+                if nd < best.get((nx, ny), INFINITE_COST):
                     best[(nx, ny)] = nd
                     heapq.heappush(heap, (nd, (nx, ny)))
         return reachable
@@ -309,7 +313,7 @@ class MovementSystem:
                 nd = dist + step_cost
                 if (max_distance is not None) and nd > max_distance:
                     continue
-                if nd < best.get((nx, ny), 10**9):
+                if nd < best.get((nx, ny), INFINITE_COST):
                     best[(nx, ny)] = nd
                     parent[(nx, ny)] = (x, y)
                     heapq.heappush(heap, (nd, (nx, ny)))

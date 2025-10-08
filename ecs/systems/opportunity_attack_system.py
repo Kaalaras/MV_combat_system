@@ -51,12 +51,11 @@ class OpportunityAttackSystem:
         future_tiles = self._get_tiles(entity_id, anchor=to_position)
         if not future_tiles:
             return
-        meta: Dict[str, Any] = {
-            "from_position": tuple(from_position),
-            "to_position": tuple(to_position),
-            "path_step": metadata.get("path_step"),
-            "path_length": metadata.get("path_length"),
-        }
+        meta = self._build_reaction_metadata(
+            from_position=from_position,
+            to_position=to_position,
+            metadata=metadata,
+        )
         for attacker_id, (equipment, position) in attackers.items():
             attacker_tiles = self._get_tiles(attacker_id, position_component=position)
             if not attacker_tiles or self._tiles_adjacent(attacker_tiles, future_tiles):
@@ -157,6 +156,23 @@ class OpportunityAttackSystem:
     # ------------------------------------------------------------------
     # Component helpers
     # ------------------------------------------------------------------
+    @staticmethod
+    def _build_reaction_metadata(
+        *,
+        from_position: Tuple[int, int],
+        to_position: Tuple[int, int],
+        metadata: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        payload: Dict[str, Any] = {
+            "from_position": tuple(from_position),
+            "to_position": tuple(to_position),
+        }
+        for key in ("path_step", "path_length"):
+            value = metadata.get(key)
+            if value is not None:
+                payload[key] = value
+        return payload
+
     def _get_tiles(
         self,
         entity_id: str,
