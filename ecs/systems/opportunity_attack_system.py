@@ -241,11 +241,6 @@ class OpportunityAttackSystem:
         if not self.event_bus:
             return
         self.event_bus.publish(CombatEvents.AOO_TRIGGERED, **payload)
-        # Backward compatibility for legacy listeners
-        # TODO: Remove legacy event "opportunity_attack_triggered" after all consumers migrate to
-        #       CombatEvents.AOO_TRIGGERED. Migration plan: audit consumers by Q4 2024, notify
-        #       maintainers, and remove this line in v2.0.
-        self.event_bus.publish("opportunity_attack_triggered", **payload)
 
 
 __all__ = ["OpportunityAttackSystem"]
