@@ -19,6 +19,18 @@ class CoreEvents:
 
 
 @dataclass(frozen=True)
+class MovementEvents:
+    MOVEMENT_STARTED: str = "movement.started"
+    MOVEMENT_ENDED: str = "movement.ended"
+
+
+@dataclass(frozen=True)
+class CombatEvents:
+    AOO_TRIGGERED: str = "AoOTriggered"
+    OPPORTUNITY_ATTACK_REACTION: str = "opportunity_attack_reaction"
+
+
+@dataclass(frozen=True)
 class UIIntents:
     SELECT_ACTION: str = "ui.select_action"
     SELECT_TARGET: str = "ui.select_target"
@@ -37,6 +49,8 @@ ALL_EVENTS: Tuple[str, ...] = (
     CoreEvents.ROUND_START, CoreEvents.ROUND_END, CoreEvents.TURN_START, CoreEvents.TURN_END,
     CoreEvents.ACTION_REQUESTED, CoreEvents.ACTION_PERFORMED, CoreEvents.ACTION_FAILED,
     CoreEvents.REQUEST_END_TURN, CoreEvents.GAME_END,
+    MovementEvents.MOVEMENT_STARTED, MovementEvents.MOVEMENT_ENDED,
+    CombatEvents.AOO_TRIGGERED, CombatEvents.OPPORTUNITY_ATTACK_REACTION,
     UIIntents.SELECT_ACTION, UIIntents.SELECT_TARGET, UIIntents.END_TURN, UIIntents.CANCEL,
     UIIntents.READY_FOR_TURN, UIStateEvents.STATE_UPDATE, UIStateEvents.NOTIFICATION,
 )

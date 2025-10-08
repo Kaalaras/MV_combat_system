@@ -10,6 +10,7 @@ from ecs.components.position import PositionComponent
 from ecs.components.character_ref import CharacterRefComponent
 from ecs.components.equipment import EquipmentComponent
 from tests.helpers.ecs import add_entity_with_position
+from interface.event_constants import CombatEvents
 
 class Terrain:
     def __init__(self,w=20,h=20):
@@ -119,25 +120,25 @@ class TestOpportunityAttack(unittest.TestCase):
 
     def test_aoo_trigger(self):
         self.bus.publish('action_requested', entity_id=self.mov_id, action_name='Standard Move', target_tile=(5,8))
-        aoos=self._get_events('opportunity_attack_triggered')
+        aoos=self._get_events(CombatEvents.AOO_TRIGGERED)
         self.assertEqual(len(aoos),1)
         self.assertEqual(aoos[0][1]['attacker_id'], self.att_id)
 
     def test_aoo_toggle_off(self):
         self.gs.get_entity(self.att_id)['character_ref'].character.toggle_opportunity_attack=False
         self.bus.publish('action_requested', entity_id=self.mov_id, action_name='Standard Move', target_tile=(5,8))
-        aoos=self._get_events('opportunity_attack_triggered')
+        aoos=self._get_events(CombatEvents.AOO_TRIGGERED)
         self.assertEqual(len(aoos),0)
 
     def test_no_aoo_if_still_adjacent(self):
         self.bus.publish('action_requested', entity_id=self.mov_id, action_name='Standard Move', target_tile=(6,5))
-        aoos=self._get_events('opportunity_attack_triggered')
+        aoos=self._get_events(CombatEvents.AOO_TRIGGERED)
         self.assertEqual(len(aoos),0)
 
     def test_pathfind_aoo_single_trigger(self):
         moved = self.gs.movement.move(self.mov_id, (5,10), max_steps=10, pathfind=True)
         self.assertTrue(moved)
-        aoos=self._get_events('opportunity_attack_triggered')
+        aoos=self._get_events(CombatEvents.AOO_TRIGGERED)
         self.assertEqual(len(aoos),1)
         self.assertEqual(aoos[0][1]['attacker_id'], self.att_id)
 
@@ -145,9 +146,9 @@ class TestOpportunityAttack(unittest.TestCase):
         # Trigger AoO -> reaction
         self.bus.publish('action_requested', entity_id=self.mov_id, action_name='Standard Move', target_tile=(5,8))
         # Assert trigger
-        self.assertEqual(len(self._get_events('opportunity_attack_triggered')),1)
+        self.assertEqual(len(self._get_events(CombatEvents.AOO_TRIGGERED)),1)
         # Reaction event
-        reactions=self._get_events('opportunity_attack_reaction')
+        reactions=self._get_events(CombatEvents.OPPORTUNITY_ATTACK_REACTION)
         self.assertEqual(len(reactions),1)
         self.assertEqual(reactions[0][1]['attacker_id'], self.att_id)
         # Defense prompt & resolved events present
@@ -163,16 +164,16 @@ class TestOpportunityAttack(unittest.TestCase):
         self.gs.get_entity(self.att_id)['character_ref'].character.team='X'
         self.gs.get_entity(self.mov_id)['character_ref'].character.team='X'
         self.bus.publish('action_requested', entity_id=self.mov_id, action_name='Standard Move', target_tile=(5,8))
-        self.assertEqual(len(self._get_events('opportunity_attack_triggered')),0)
-        self.assertEqual(len(self._get_events('opportunity_attack_reaction')),0)
+        self.assertEqual(len(self._get_events(CombatEvents.AOO_TRIGGERED)),0)
+        self.assertEqual(len(self._get_events(CombatEvents.OPPORTUNITY_ATTACK_REACTION)),0)
 
     def test_no_reaction_no_melee_weapon(self):
         # Replace melee weapon with ranged weapon -> no trigger
         equip = self.gs.get_entity(self.att_id)['equipment']
         equip.weapons={'ranged':RangedWeaponStub()}
         self.bus.publish('action_requested', entity_id=self.mov_id, action_name='Standard Move', target_tile=(5,8))
-        self.assertEqual(len(self._get_events('opportunity_attack_triggered')),0)
-        self.assertEqual(len(self._get_events('opportunity_attack_reaction')),0)
+        self.assertEqual(len(self._get_events(CombatEvents.AOO_TRIGGERED)),0)
+        self.assertEqual(len(self._get_events(CombatEvents.OPPORTUNITY_ATTACK_REACTION)),0)
 
 if __name__=='__main__':
     unittest.main()
