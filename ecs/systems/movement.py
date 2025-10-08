@@ -456,9 +456,9 @@ class MovementSystem:
         current = start
         for step_index, (x, y) in enumerate(path[1:], start=1):
             step_cost = self._compute_step_cost(terrain, x, y)
-            total_cost += step_cost
-            if max_steps is not None and total_cost > max_steps:
+            if max_steps is not None and total_cost + step_cost > max_steps:
                 return False
+            total_cost += step_cost
             from_position = current
             to_position = (x, y)
             self._publish_movement_started(
