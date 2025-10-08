@@ -97,4 +97,8 @@ for _name, _value in list(vars(_LegacyGameState).items()):
         setattr(GameState, _name, _wrap_callable(_name, _value, replacement))
 
 
-del _name, _value, replacement
+del _name, _value
+try:
+    del replacement
+except NameError:
+    pass
