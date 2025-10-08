@@ -7,7 +7,7 @@ from typing import Iterable
 
 import pytest
 
-from core.actions.selector import ActionOption, compute_available_actions
+from ecs.actions.selector import ActionOption, compute_available_actions
 from ecs.components.resource_pool import ResourcePoolComponent
 from tests.unit.test_utils import StubECS
 

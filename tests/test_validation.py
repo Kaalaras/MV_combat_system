@@ -7,7 +7,7 @@ from dataclasses import dataclass
 import pytest
 
 from core.actions.intent import ActionIntent, TargetSpec
-from core.actions.validation import validate_intent
+from ecs.actions.validation import validate_intent
 from ecs.components.resource_pool import ResourcePoolComponent
 from tests.unit.test_utils import StubECS
 
@@ -28,7 +28,7 @@ def _set_resource_pool(ecs: StubECS, actor_id: str, **resources: int) -> None:
     if component is None:
         ecs.add_component(internal_id, ResourcePoolComponent(**resources))
         return
-    component.update({str(key): int(value) for key, value in resources.items()})
+    component.update(resources)
 
 
 class DummyRules:

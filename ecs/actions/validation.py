@@ -1,22 +1,6 @@
-"""Validation layer turning submitted intents into executable actions.
-
-This module is the single entry point between the declarative intent layer and
-the execution pipeline.  It validates the incoming :class:`ActionIntent`
-instances against lightweight rules (resources, status flags, targeting, ...)
-without mutating any game state.  When bound to an event bus it reacts to
-``INTENT_SUBMITTED`` events and publishes either ``INTENT_VALIDATED`` or
-``INTENT_REJECTED`` accordingly.
-"""
+"""Validation layer bridging declarative intents with ECS-backed execution."""
 
 from __future__ import annotations
-
-import warnings
-
-warnings.warn(
-    "'core.actions.validation' is deprecated; migrate to ECS-driven validation",
-    DeprecationWarning,
-    stacklevel=2,
-)
 
 from dataclasses import dataclass
 from typing import Any, Callable, Mapping, Optional, Protocol, Tuple
@@ -26,7 +10,6 @@ from core.actions.intent import ActionIntent, CostSpec
 from core.events import topics
 from core.event_bus import Topic
 from ecs.actions.state import get_available_resource
-
 
 RESOURCE_GETTER_PATTERNS = (
     "get_{resource}",
@@ -62,19 +45,7 @@ def validate_intent(
     ecs: Any,
     rules_ctx: Any,
 ) -> Tuple[bool, Optional[str], ActionIntent]:
-    """Validate an :class:`ActionIntent` without mutating any game state.
-
-    Parameters
-    ----------
-    intent:
-        The incoming intent or its serialised representation.
-    ecs:
-        ECS façade used for lightweight queries (component lookups, entity
-        resolution).  It is *not* mutated by this routine.
-    rules_ctx:
-        Rules helper providing convenience accessors (movement budget,
-        ownership, cooldowns, ...).
-    """
+    """Validate an :class:`ActionIntent` without mutating any game state."""
 
     normalised = _coerce_intent(intent)
     action_def = ACTION_CATALOG.get(normalised.action_id)
@@ -212,7 +183,12 @@ def _verify_action_state(
 
         if callable(prereq):
             try:
-                result = prereq(actor_id=intent.actor_id, intent=intent, ecs=ecs, rules=rules_ctx)
+                result = prereq(
+                    actor_id=intent.actor_id,
+                    intent=intent,
+                    ecs=ecs,
+                    rules=rules_ctx,
+                )
             except TypeError:
                 result = prereq(intent.actor_id)
             if not result:
@@ -235,11 +211,14 @@ def _verify_costs(
     for resource, required in costs.to_dict().items():
         if required <= 0:
             continue
+
         available = _resolve_resource(intent.actor_id, resource, ecs, rules_ctx)
         if available is None:
             continue
+
         if available < required:
             return f"insufficient_{resource}"
+
     return None
 
 
@@ -397,5 +376,4 @@ def _resolve_resource(
     return None
 
 
-__all__ = ["validate_intent", "IntentValidator", "ValidationResult"]
-
+__all__ = ["IntentValidator", "ValidationResult", "validate_intent"]

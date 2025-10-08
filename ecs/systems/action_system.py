@@ -57,7 +57,7 @@ from enum import Enum
 
 from core.actions.intent import ActionIntent
 from core.actions.scheduler import ActionScheduler
-from core.actions.validation import validate_intent
+from ecs.actions.validation import validate_intent
 from core.events import topics
 from interface.event_constants import CoreEvents
 

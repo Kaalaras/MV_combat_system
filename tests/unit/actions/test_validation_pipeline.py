@@ -1,12 +1,12 @@
 from __future__ import annotations
 from core.actions.intent import ActionIntent, TargetSpec
-from core.actions.validation import IntentValidator, validate_intent
+from ecs.actions.validation import IntentValidator, validate_intent
 from core.events import topics
 
 from ecs.components.resource_pool import ResourcePoolComponent
 from tests.unit.test_utils import DummyEventBus, StubECS, StubRules
 
-from core.actions.validation import _normalize_blocked_actions
+from ecs.actions.validation import _normalize_blocked_actions
 
 
 ENTITIES = {"hero": 1, "ghoul": 2}
