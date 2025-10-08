@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any, Dict, Iterable, Optional, Set, Tuple
+from typing import Any, Dict, Optional, Set, Tuple
 
 from ecs.actions.attack_actions import AttackAction
 from ecs.components.body_footprint import BodyFootprintComponent
@@ -211,7 +211,7 @@ class OpportunityAttackSystem:
         return getattr(character, "team", None)
 
     @staticmethod
-    def _tiles_adjacent(a: Iterable[GridCoord], b: Iterable[GridCoord]) -> bool:
+    def _tiles_adjacent(a: Set[GridCoord], b: Set[GridCoord]) -> bool:
         for ax, ay in a:
             for bx, by in b:
                 if abs(ax - bx) + abs(ay - by) == 1:
