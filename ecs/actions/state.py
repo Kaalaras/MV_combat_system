@@ -113,13 +113,10 @@ def get_available_resource(
         usage = get_movement_usage(ecs, entity_id)
         if usage is not None:
             distance = getattr(usage, "distance", 0)
-            if isinstance(distance, (int, float)):
+            try:
                 used = int(distance)
-            else:
-                try:
-                    used = int(distance)
-                except (TypeError, ValueError):
-                    used = 0
+            except (TypeError, ValueError):
+                used = 0
             available = available - used
 
     if available is not None and include_pending:

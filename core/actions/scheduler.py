@@ -42,6 +42,11 @@ class ActionScheduler:
         self._bus = bus
         bus.subscribe(topics.INTENT_VALIDATED, self._handle_intent_validated)
 
+    def is_bound_to_bus(self, bus: EventBusLike) -> bool:
+        """Return ``True`` when the scheduler is already bound to ``bus``."""
+
+        return self._bus is bus
+
     # ------------------------------------------------------------------
     # Internal handlers
     # ------------------------------------------------------------------

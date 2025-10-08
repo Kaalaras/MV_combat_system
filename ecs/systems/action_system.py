@@ -237,8 +237,7 @@ class ActionSystem:
     def _bind_scheduler_to_bus(self, scheduler: ActionScheduler) -> None:
         if not self.event_bus:
             raise RuntimeError("ActionSystem requires an event bus to schedule intents")
-        current_bus = getattr(scheduler, "_bus", None)
-        if current_bus is self.event_bus:
+        if scheduler.is_bound_to_bus(self.event_bus):
             return
         scheduler.bind(self.event_bus)
 
