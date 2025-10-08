@@ -1,4 +1,4 @@
-# core/game_state.py
+# core/_legacy_game_state.py
 import logging
 import re
 from collections.abc import Iterator, Mapping
