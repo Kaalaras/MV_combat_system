@@ -219,8 +219,6 @@ class OpportunityAttackSystem:
     def _is_melee_capable(equipment: EquipmentComponent) -> bool:
         weapons = getattr(equipment, "weapons", {})
         for weapon in weapons.values():
-            if weapon is None:
-                continue
             weapon_type = getattr(weapon, "weapon_type", None)
             base_type = getattr(weapon_type, "value", weapon_type)
             if base_type in ("melee", "brawl"):

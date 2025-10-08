@@ -76,6 +76,8 @@ class MovementSystem:
             step_cost_val = raw_cost_fn(x, y)
             step_cost = int(step_cost_val)
         except (TypeError, ValueError):
+            # Some legacy terrains still expose non-numeric costs; treat them as neutral tiles
+            # rather than crashing the movement system while we migrate providers.
             return 1
         return step_cost if step_cost > 0 else 1
 
@@ -445,16 +447,13 @@ class MovementSystem:
                     void_tile = (vt_res is True)
                 except Exception:
                     void_tile = False
-        step_costs: List[int] = []
         total_cost = 0
-        for (x, y) in path[1:]:
+        current = start
+        for step_index, (x, y) in enumerate(path[1:], start=1):
             step_cost = self._compute_step_cost(terrain, x, y)
             total_cost += step_cost
             if max_steps is not None and total_cost > max_steps:
                 return False
-            step_costs.append(step_cost)
-        current = start
-        for step_index, ((x, y), step_cost) in enumerate(zip(path[1:], step_costs), start=1):
             from_position = current
             to_position = (x, y)
             self._publish_movement_started(
