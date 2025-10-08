@@ -105,7 +105,7 @@ def get_available_resource(
     else:
         available = None
 
-    if resource == "movement_points":
+    if available is not None and resource == "movement_points":
         usage = get_movement_usage(ecs, entity_id)
         if usage is not None:
             distance = getattr(usage, "distance", 0)
@@ -116,18 +116,16 @@ def get_available_resource(
                     used = int(distance)
                 except (TypeError, ValueError):
                     used = 0
-            remaining = (available if available is not None else 0) - used
-            available = remaining
+            available = available - used
 
-    if include_pending:
+    if available is not None and include_pending:
         budget = get_action_budget(ecs, entity_id)
         if budget is not None:
             reserved = int(budget.reserved.get(resource, 0))
             pending = int(budget.pending.get(resource, 0))
             to_subtract = reserved + pending
             if to_subtract:
-                base = available if available is not None else 0
-                available = base - to_subtract
+                available = available - to_subtract
 
     if available is None:
         return None

@@ -178,7 +178,7 @@ class ActionSystem:
         if not self.event_bus:
             raise RuntimeError("ActionSystem requires an event bus to apply intents")
 
-        ecs_facade = self._ecs_manager or getattr(self.game_state, "ecs_manager", None)
+        ecs_facade = self._get_ecs_facade()
         if ecs_facade is None:
             raise RuntimeError("ActionSystem requires an ECS manager to validate intents")
 
@@ -195,7 +195,7 @@ class ActionSystem:
             self.event_bus.publish(topics.INTENT_REJECTED, **payload)
             return False
 
-        scheduler = self._ensure_scheduler(ecs_facade)
+        scheduler = self._ensure_scheduler()
         self._bind_scheduler_to_bus(scheduler)
 
         payload.setdefault("reason", None)
@@ -218,9 +218,16 @@ class ActionSystem:
             return v in ("FREE", "LIMITED_FREE")
     # ------------------------------------------------------------------------
 
-    def _ensure_scheduler(self, ecs_facade: Any) -> ActionScheduler:
+    def _get_ecs_facade(self) -> Any:
+        ecs_facade = self._ecs_manager
+        if ecs_facade is not None:
+            return ecs_facade
+        return getattr(self.game_state, "ecs_manager", None)
+
+    def _ensure_scheduler(self) -> ActionScheduler:
         scheduler = self._scheduler
         if scheduler is None:
+            ecs_facade = self._get_ecs_facade()
             if ecs_facade is None:
                 raise RuntimeError("ActionSystem requires an ECS manager to schedule intents")
             scheduler = ActionScheduler(ecs_facade)
