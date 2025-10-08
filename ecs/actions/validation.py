@@ -1,4 +1,14 @@
-"""Validation layer bridging declarative intents with ECS-backed execution."""
+"""ECS action intent validation entry point.
+
+This module exposes the canonical helpers used by the combat system to vet
+incoming action intents before they reach the execution pipeline.  It bridges
+declarative intents (usually produced by the UI or AI) with the ECS state by
+checking actor eligibility, action rules, resource costs, target validity, and
+cooldowns.  The module is event-aware: :class:`IntentValidator` subscribes to
+intent submissions and publishes either :data:`topics.INTENT_VALIDATED` or
+:data:`topics.INTENT_REJECTED` so downstream systems can react without being
+tightly coupled to the validation logic.
+"""
 
 from __future__ import annotations
 
@@ -35,7 +45,19 @@ def validate_intent(
     ecs: Any,
     rules_ctx: Any,
 ) -> Tuple[bool, Optional[str], ActionIntent]:
-    """Validate an :class:`ActionIntent` without mutating any game state."""
+    """Validate an :class:`ActionIntent` without mutating any game state.
+
+    Args:
+        intent: The raw or already constructed intent payload to validate.
+        ecs: ECS facade used to inspect components during validation.
+        rules_ctx: Rules context providing rule-based predicates and helpers.
+
+    Returns:
+        A tuple ``(ok, reason, normalised)`` where ``ok`` indicates whether the
+        intent passed all checks, ``reason`` carries the rejection code when
+        ``ok`` is ``False`` (``None`` otherwise), and ``normalised`` is the
+        coerced :class:`ActionIntent` instance ready for scheduling.
+    """
 
     normalised = _coerce_intent(intent)
     action_def = ACTION_CATALOG.get(normalised.action_id)
