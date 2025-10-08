@@ -1,23 +1,24 @@
-"""Validation layer turning submitted intents into executable actions.
+"""ECS action intent validation entry point.
 
-This module is the single entry point between the declarative intent layer and
-the execution pipeline.  It validates the incoming :class:`ActionIntent`
-instances against lightweight rules (resources, status flags, targeting, ...)
-without mutating any game state.  When bound to an event bus it reacts to
-``INTENT_SUBMITTED`` events and publishes either ``INTENT_VALIDATED`` or
-``INTENT_REJECTED`` accordingly.
+This module exposes the canonical helpers used by the combat system to vet
+incoming action intents before they reach the execution pipeline.  It bridges
+declarative intents (usually produced by the UI or AI) with the ECS state by
+checking actor eligibility, action rules, resource costs, target validity, and
+cooldowns.  The module is event-aware: :class:`IntentValidator` subscribes to
+intent submissions and publishes either :data:`topics.INTENT_VALIDATED` or
+:data:`topics.INTENT_REJECTED` so downstream systems can react without being
+tightly coupled to the validation logic.
 """
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 from typing import Any, Callable, Mapping, Optional, Protocol, Tuple
 
 from core.actions.catalog import ACTION_CATALOG, ActionDef
 from core.actions.intent import ActionIntent, CostSpec
 from core.events import topics
 from core.event_bus import Topic
-
+from ecs.actions.state import get_available_resource
 
 RESOURCE_GETTER_PATTERNS = (
     "get_{resource}",
@@ -39,15 +40,6 @@ class EventBusLike(Protocol):
         ...
 
 
-@dataclass(frozen=True)
-class ValidationResult:
-    """Container returned by :func:`validate_intent`."""
-
-    ok: bool
-    reason: Optional[str]
-    intent: ActionIntent
-
-
 def validate_intent(
     intent: ActionIntent | Mapping[str, Any],
     ecs: Any,
@@ -55,16 +47,16 @@ def validate_intent(
 ) -> Tuple[bool, Optional[str], ActionIntent]:
     """Validate an :class:`ActionIntent` without mutating any game state.
 
-    Parameters
-    ----------
-    intent:
-        The incoming intent or its serialised representation.
-    ecs:
-        ECS façade used for lightweight queries (component lookups, entity
-        resolution).  It is *not* mutated by this routine.
-    rules_ctx:
-        Rules helper providing convenience accessors (movement budget,
-        ownership, cooldowns, ...).
+    Args:
+        intent: The raw or already constructed intent payload to validate.
+        ecs: ECS facade used to inspect components during validation.
+        rules_ctx: Rules context providing rule-based predicates and helpers.
+
+    Returns:
+        Tuple[bool, Optional[str], ActionIntent]: A tuple ``(ok, reason, normalised)`` where
+        ``ok`` (bool) indicates whether the intent passed all checks,
+        ``reason`` (Optional[str]) carries the rejection code when ``ok`` is ``False`` (``None`` otherwise),
+        and ``normalised`` (:class:`ActionIntent`) is the coerced instance ready for scheduling.
     """
 
     normalised = _coerce_intent(intent)
@@ -203,7 +195,12 @@ def _verify_action_state(
 
         if callable(prereq):
             try:
-                result = prereq(actor_id=intent.actor_id, intent=intent, ecs=ecs, rules=rules_ctx)
+                result = prereq(
+                    actor_id=intent.actor_id,
+                    intent=intent,
+                    ecs=ecs,
+                    rules=rules_ctx,
+                )
             except TypeError:
                 result = prereq(intent.actor_id)
             if not result:
@@ -226,11 +223,14 @@ def _verify_costs(
     for resource, required in costs.to_dict().items():
         if required <= 0:
             continue
+
         available = _resolve_resource(intent.actor_id, resource, ecs, rules_ctx)
         if available is None:
             continue
+
         if available < required:
             return f"insufficient_{resource}"
+
     return None
 
 
@@ -361,6 +361,10 @@ def _resolve_resource(
     ecs: Any,
     rules_ctx: Any,
 ) -> Optional[int]:
+    component_value = get_available_resource(actor_id, resource, ecs)
+    if component_value is not None:
+        return component_value
+
     getter_names = tuple(pattern.format(resource=resource) for pattern in RESOURCE_GETTER_PATTERNS)
     for name in getter_names:
         accessor = getattr(rules_ctx, name, None)
@@ -384,5 +388,4 @@ def _resolve_resource(
     return None
 
 
-__all__ = ["validate_intent", "IntentValidator", "ValidationResult"]
-
+__all__ = ["IntentValidator", "validate_intent"]

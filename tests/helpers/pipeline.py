@@ -6,8 +6,8 @@ from dataclasses import dataclass, field
 from typing import Any, Dict, Iterable, Optional
 
 from core.actions.intent import ActionIntent, TargetSpec
-from core.actions.selector import ActionSelector
-from core.actions.validation import IntentValidator
+from ecs.actions.selector import ActionSelector
+from ecs.actions.validation import IntentValidator
 from core.actions.scheduler import ActionScheduler
 from core.actions.performers import ActionPerformer
 from core.event_bus import EventBus

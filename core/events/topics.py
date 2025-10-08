@@ -32,7 +32,7 @@ class EventTopic(str, Enum):
     """
 
     ACTIONS_AVAILABLE = "ActionsAvailable"
-    """Published by :class:`core.actions.selector.ActionSelector` with options.
+    """Published by :class:`ecs.actions.selector.ActionSelector` with options.
 
     Subscribers: UI layers and controller orchestrators.
     Guarantees: carries ``actor_id`` and an ``actions`` iterable payload.
@@ -46,7 +46,7 @@ class EventTopic(str, Enum):
     """
 
     ACTION_VALIDATED = "ActionValidated"
-    """Published by :class:`core.actions.validation.ValidationPipeline`.
+    """Published by :class:`ecs.actions.validation.IntentValidator`.
 
     Subscribers: schedulers and analytics sinks.
     Guarantees: includes the ``intent`` payload accepted for execution.

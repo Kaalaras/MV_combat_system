@@ -7,18 +7,28 @@ from dataclasses import dataclass
 import pytest
 
 from core.actions.intent import ActionIntent, TargetSpec
-from core.actions.validation import validate_intent
+from ecs.actions.validation import validate_intent
+from ecs.components.resource_pool import ResourcePoolComponent
+from tests.unit.test_utils import StubECS
 
 
-@dataclass
-class DummyECS:
-    entities: dict[str, object]
-
-    def resolve_entity(self, entity_id: str):
-        return self.entities.get(entity_id)
+class DummyECS(StubECS):
+    def __init__(self, entities: dict[str, int]) -> None:
+        super().__init__(entities)
 
     def has_entity(self, entity_id: str) -> bool:
-        return entity_id in self.entities
+        return self.resolve_entity(entity_id) is not None
+
+
+def _set_resource_pool(ecs: StubECS, actor_id: str, **resources: int) -> None:
+    internal_id = ecs.resolve_entity(actor_id)
+    if internal_id is None:
+        return
+    component = ecs.try_get_component(internal_id, ResourcePoolComponent)
+    if component is None:
+        ecs.add_component(internal_id, ResourcePoolComponent(**resources))
+        return
+    component.update(resources)
 
 
 class DummyRules:
@@ -58,7 +68,8 @@ class DummyRules:
 
 @pytest.fixture
 def validation_context():
-    ecs = DummyECS({"hero": object(), "ghoul": object()})
+    ecs = DummyECS({"hero": 1, "ghoul": 2})
+    _set_resource_pool(ecs, "hero", action_points=1)
     rules = DummyRules()
     rules.set_resource("hero", "action_points", 1)
     return ecs, rules
@@ -97,6 +108,7 @@ def test_validation_rejects_blocked_action(validation_context) -> None:
 def test_validation_checks_resource_cost(validation_context) -> None:
     ecs, rules = validation_context
     rules.set_resource("hero", "action_points", 0)
+    _set_resource_pool(ecs, "hero", action_points=0)
 
     intent = ActionIntent(
         actor_id="hero",

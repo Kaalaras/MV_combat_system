@@ -54,6 +54,11 @@ from __future__ import annotations
 from typing import Any, Callable, Dict, List, Optional
 from dataclasses import dataclass, field
 from enum import Enum
+
+from core.actions.intent import ActionIntent
+from core.actions.scheduler import ActionScheduler
+from ecs.actions.validation import validate_intent
+from core.events import topics
 from interface.event_constants import CoreEvents
 
 
@@ -136,6 +141,13 @@ class ActionSystem:
         self.game_state = game_state
         self.event_bus = event_bus
 
+        self._ecs_manager = getattr(game_state, "ecs_manager", None)
+        self._scheduler: ActionScheduler | None = None
+        if self._ecs_manager is not None:
+            self._scheduler = ActionScheduler(self._ecs_manager)
+            if self.event_bus:
+                self._scheduler.bind(self.event_bus)
+
         # Registered actions per entity
         self.available_actions: Dict[str, List[Action]] = {}
 
@@ -157,6 +169,56 @@ class ActionSystem:
         if self.event_bus:
             self.event_bus.subscribe(CoreEvents.ACTION_REQUESTED, self.handle_action_requested)
 
+    # ------------------------------------------------------------------
+    # ECS pipeline integration
+    # ------------------------------------------------------------------
+    def apply_intent(self, intent: ActionIntent | Dict[str, Any], **extra: Any) -> bool:
+        """Validate an action intent and trigger its execution through the ECS pipeline.
+
+        Args:
+            intent: The action intent to validate and apply. The helper accepts
+                either a fully constructed :class:`ActionIntent` or a mapping
+                payload matching its schema.
+            **extra: Optional keyword arguments forwarded to the published
+                event payload so callers can attach additional metadata.
+
+        Returns:
+            ``True`` when the intent passes validation and is published to the
+            event bus as :data:`topics.ACTION_VALIDATED`, ``False`` when the
+            intent is rejected and :data:`topics.INTENT_REJECTED` is emitted.
+
+        Raises:
+            RuntimeError: If the system is missing an event bus or ECS manager,
+                both of which are required to run the validation pipeline.
+        """
+
+        if not self.event_bus:
+            raise RuntimeError("ActionSystem requires an event bus to apply intents")
+
+        ecs_facade = self._get_ecs_facade()
+        if ecs_facade is None:
+            raise RuntimeError("ActionSystem requires an ECS manager to validate intents")
+
+        rules_ctx = getattr(self.game_state, "rules", self.game_state)
+        ok, reason, normalised = validate_intent(intent, ecs_facade, rules_ctx)
+        payload: Dict[str, Any] = {
+            "intent": normalised.to_dict(),
+            "intent_obj": normalised,
+        }
+        payload.update(extra)
+
+        if not ok:
+            payload["reason"] = reason
+            self.event_bus.publish(topics.INTENT_REJECTED, **payload)
+            return False
+
+        scheduler = self._ensure_scheduler()
+        self._bind_scheduler_to_bus(scheduler)
+
+        payload.setdefault("reason", None)
+        self.event_bus.publish(topics.ACTION_VALIDATED, **payload)
+        return True
+
     # --- Helpers for robust enum handling -----------------------------------
     def _normalize_action_type(self, at) -> str:
         """Return a stable string for an ActionType-like object (enum or str)."""
@@ -172,6 +234,29 @@ class ActionSystem:
         except Exception:
             return v in ("FREE", "LIMITED_FREE")
     # ------------------------------------------------------------------------
+
+    def _get_ecs_facade(self) -> Any:
+        ecs_facade = self._ecs_manager
+        if ecs_facade is not None:
+            return ecs_facade
+        return getattr(self.game_state, "ecs_manager", None)
+
+    def _ensure_scheduler(self) -> ActionScheduler:
+        scheduler = self._scheduler
+        if scheduler is None:
+            ecs_facade = self._get_ecs_facade()
+            if ecs_facade is None:
+                raise RuntimeError("ActionSystem requires an ECS manager to schedule intents")
+            scheduler = ActionScheduler(ecs_facade)
+            self._scheduler = scheduler
+        return scheduler
+
+    def _bind_scheduler_to_bus(self, scheduler: ActionScheduler) -> None:
+        if not self.event_bus:
+            raise RuntimeError("ActionSystem requires an event bus to schedule intents")
+        if scheduler.is_bound_to_bus(self.event_bus):
+            return
+        scheduler.bind(self.event_bus)
 
     def register_action(self, entity_id: str, action: Action):
         """
