@@ -86,7 +86,6 @@ class GameState(_LegacyGameState):
         super().__init__(*args, **kwargs)
 
 
-replacement: Optional[str] = None
 for _name, _value in list(vars(_LegacyGameState).items()):
     if _name.startswith("_") or _name == "__init__":
         continue
@@ -98,7 +97,3 @@ for _name, _value in list(vars(_LegacyGameState).items()):
 
 
 del _name, _value
-try:
-    del replacement
-except NameError:
-    pass
