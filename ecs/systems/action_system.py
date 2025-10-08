@@ -195,27 +195,11 @@ class ActionSystem:
             self.event_bus.publish(topics.INTENT_REJECTED, **payload)
             return False
 
+        scheduler = self._ensure_scheduler(ecs_facade)
+        self._bind_scheduler_to_bus(scheduler)
+
         payload.setdefault("reason", None)
         self.event_bus.publish(topics.ACTION_VALIDATED, **payload)
-
-        scheduler = self._scheduler
-        if scheduler is None:
-            ecs_facade = getattr(self.game_state, "ecs_manager", None)
-            if ecs_facade is None:
-                raise RuntimeError("ActionSystem requires an ECS manager to schedule intents")
-            scheduler = ActionScheduler(ecs_facade)
-            scheduler._bus = self.event_bus
-        else:
-            scheduler._bus = self.event_bus
-
-        scheduler_extra = {
-            key: value
-            for key, value in payload.items()
-            if key not in {"intent", "intent_obj"}
-        }
-        scheduler._handle_intent_validated(
-            intent=payload["intent"], intent_obj=normalised, **scheduler_extra
-        )
         return True
 
     # --- Helpers for robust enum handling -----------------------------------
@@ -233,6 +217,23 @@ class ActionSystem:
         except Exception:
             return v in ("FREE", "LIMITED_FREE")
     # ------------------------------------------------------------------------
+
+    def _ensure_scheduler(self, ecs_facade: Any) -> ActionScheduler:
+        scheduler = self._scheduler
+        if scheduler is None:
+            if ecs_facade is None:
+                raise RuntimeError("ActionSystem requires an ECS manager to schedule intents")
+            scheduler = ActionScheduler(ecs_facade)
+            self._scheduler = scheduler
+        return scheduler
+
+    def _bind_scheduler_to_bus(self, scheduler: ActionScheduler) -> None:
+        if not self.event_bus:
+            raise RuntimeError("ActionSystem requires an event bus to schedule intents")
+        current_bus = getattr(scheduler, "_bus", None)
+        if current_bus is self.event_bus:
+            return
+        scheduler.bind(self.event_bus)
 
     def register_action(self, entity_id: str, action: Action):
         """

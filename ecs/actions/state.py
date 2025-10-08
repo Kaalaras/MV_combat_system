@@ -108,7 +108,14 @@ def get_available_resource(
     if resource == "movement_points":
         usage = get_movement_usage(ecs, entity_id)
         if usage is not None:
-            used = int(getattr(usage, "distance", 0))
+            distance = getattr(usage, "distance", 0)
+            if isinstance(distance, (int, float)):
+                used = int(distance)
+            else:
+                try:
+                    used = int(distance)
+                except (TypeError, ValueError):
+                    used = 0
             remaining = (available if available is not None else 0) - used
             available = remaining
 

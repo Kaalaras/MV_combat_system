@@ -27,9 +27,13 @@ class ResourcePoolComponent:
     def get(self, resource: str, default: int | None = 0) -> int | None:
         """Return the stored value for ``resource`` (defaults to ``default``)."""
 
-        if default is None and resource not in self._values:
+        key = str(resource)
+        if default is None and key not in self._values:
             return None
-        return int(self._values.get(str(resource), default or 0))
+        value = self._values.get(key, default if default is not None else 0)
+        if value is None:
+            return None
+        return int(value)
 
     def update(self, mapping: Mapping[str, int]) -> None:
         """Update the pool from ``mapping`` of resource -> amount."""

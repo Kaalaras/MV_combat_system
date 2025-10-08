@@ -10,6 +10,14 @@ without mutating any game state.  When bound to an event bus it reacts to
 
 from __future__ import annotations
 
+import warnings
+
+warnings.warn(
+    "'core.actions.validation' is deprecated; migrate to ECS-driven validation",
+    DeprecationWarning,
+    stacklevel=2,
+)
+
 from dataclasses import dataclass
 from typing import Any, Callable, Mapping, Optional, Protocol, Tuple
 

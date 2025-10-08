@@ -2,6 +2,14 @@
 
 from __future__ import annotations
 
+import warnings
+
+warnings.warn(
+    "'core.actions.selector' is deprecated; migrate to ECS-driven selectors",
+    DeprecationWarning,
+    stacklevel=2,
+)
+
 from dataclasses import dataclass, field
 from typing import Any, Callable, Iterable, Mapping, Optional, Protocol, Sequence
 
