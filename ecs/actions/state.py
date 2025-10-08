@@ -101,7 +101,11 @@ def get_available_resource(
     pool = get_resource_pool(ecs, entity_id)
     available: Optional[int]
     if pool is not None:
-        available = pool.get(resource, default=None)
+        pooled_value = pool.get(resource, default=0)
+        if pooled_value is None:
+            available = 0
+        else:
+            available = int(pooled_value)
     else:
         available = None
 

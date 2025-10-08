@@ -12,14 +12,16 @@ from core.actions.validation import _normalize_blocked_actions
 ENTITIES = {"hero": 1, "ghoul": 2}
 
 
+def _seed_hero_pool(ecs: StubECS, **resources: int) -> None:
+    internal_id = ecs.resolve_entity("hero")
+    if internal_id is None:
+        return
+    ecs.add_component(internal_id, ResourcePoolComponent(**resources))
+
+
 def test_validate_intent_success() -> None:
     ecs = StubECS(ENTITIES)
-    internal_id = ecs.resolve_entity("hero")
-    if internal_id is not None:
-        ecs.add_component(
-            internal_id,
-            ResourcePoolComponent(action_points=2, movement_points=4),
-        )
+    _seed_hero_pool(ecs, action_points=2, movement_points=4)
     rules = StubRules()
     intent = ActionIntent(
         actor_id="hero",
@@ -36,9 +38,7 @@ def test_validate_intent_success() -> None:
 
 def test_validate_intent_rejects_insufficient_resources() -> None:
     ecs = StubECS(ENTITIES)
-    internal_id = ecs.resolve_entity("hero")
-    if internal_id is not None:
-        ecs.add_component(internal_id, ResourcePoolComponent(action_points=0))
+    _seed_hero_pool(ecs, action_points=0)
 
     class NoPoints(StubRules):
         def get_action_points(self, actor_id: str) -> int:
@@ -59,9 +59,7 @@ def test_validate_intent_rejects_insufficient_resources() -> None:
 
 def test_validate_intent_rejects_bad_target_kind() -> None:
     ecs = StubECS(ENTITIES)
-    internal_id = ecs.resolve_entity("hero")
-    if internal_id is not None:
-        ecs.add_component(internal_id, ResourcePoolComponent(action_points=1))
+    _seed_hero_pool(ecs, action_points=1)
     rules = StubRules()
     intent = ActionIntent(
         actor_id="hero",
@@ -77,12 +75,7 @@ def test_validate_intent_rejects_bad_target_kind() -> None:
 
 def test_intent_validator_publishes_events() -> None:
     ecs = StubECS(ENTITIES)
-    internal_id = ecs.resolve_entity("hero")
-    if internal_id is not None:
-        ecs.add_component(
-            internal_id,
-            ResourcePoolComponent(action_points=2, movement_points=4),
-        )
+    _seed_hero_pool(ecs, action_points=2, movement_points=4)
     rules = StubRules()
     validator = IntentValidator(ecs, rules)
     bus = DummyEventBus()
