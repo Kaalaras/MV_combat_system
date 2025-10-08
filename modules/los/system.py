@@ -119,6 +119,10 @@ class LineOfSightSystem:
         terrain: Optional[object] = None,
         game_state: Optional[object] = None,
     ) -> None:
+        if ecs_manager is None and map_resolver is None and terrain is None:
+            raise ValueError(
+                "LineOfSightSystem requires an ECS manager, map resolver, or terrain provider."
+            )
         self._ecs_manager = ecs_manager
         self._event_bus = event_bus
         self._resolver = map_resolver
@@ -197,6 +201,8 @@ class LineOfSightSystem:
         self._fov_map = None
         self._fov_cache.clear()
         self._legacy_grid_cache = None
+        self._tile_occupants_cache = None
+        self._tile_cache_blocker_v = -1
         self.invalidate_cache()
 
     def _mark_blockers_changed(self) -> None:
@@ -458,14 +464,13 @@ class LineOfSightSystem:
         terrain = self._terrain_provider
         if not terrain:
             return False
-        effect_key = effect_name
         checker = getattr(terrain, "has_effect", None)
-        if callable(checker):
-            try:
-                return bool(checker(coord[0], coord[1], effect_key))
-            except Exception:
-                return False
-        return False
+        if not callable(checker):
+            return False
+        try:
+            return bool(checker(coord[0], coord[1], effect_name))
+        except Exception:
+            return False
 
     def _get_tile_occupants(self) -> Dict[GridCoord, List[_Occupant]]:
         if self._tile_occupants_cache is not None and self._tile_cache_blocker_v == self._blocker_revision:
@@ -823,11 +828,12 @@ class LineOfSightSystem:
         target_cell = (int(end_coord[0]), int(end_coord[1]))
 
         while True:
+            current_cell = (ix1, iy1)
             if 0 <= iy1 < grid.height and 0 <= ix1 < grid.width:
-                if grid.blocks_los_mask[iy1][ix1] and (ix1, iy1) not in (attacker_cell, target_cell):
+                if grid.blocks_los_mask[iy1][ix1] and current_cell not in (attacker_cell, target_cell):
                     return False
-            occupants = tile_occupants.get((ix1, iy1), [])
-            if occupants and (ix1, iy1) not in (attacker_cell, target_cell):
+            occupants = tile_occupants.get(current_cell, [])
+            if occupants and current_cell not in (attacker_cell, target_cell):
                 blocking = any(occupant.blocks_visibility() for occupant in occupants)
                 if blocking:
                     return False

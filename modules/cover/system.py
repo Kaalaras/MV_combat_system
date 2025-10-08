@@ -145,10 +145,6 @@ class CoverSystem:
             width = max(max_x + 1, 8) if max_x >= 0 else 8
         if height <= 0:
             height = max(max_y + 1, 8) if max_y >= 0 else 8
-        if width <= 0:
-            width = 1
-        if height <= 0:
-            height = 1
         grid = MapGrid(width, height, cell_size)
         if isinstance(walls, Iterable):
             for wx, wy in walls:
