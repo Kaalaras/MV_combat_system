@@ -1,18 +1,19 @@
-"""Cover calculations based on :class:`MapComponent` tiles."""
+"""Cover computations driven by the ECS and :class:`MapComponent` data."""
 from __future__ import annotations
 
-from typing import Optional, Sequence, Tuple
+from typing import Final, Optional, Sequence, Tuple
 
+from ecs.components.position import PositionComponent
+from modules.los.system import LineOfSightSystem, VisibilityEntry
 from modules.maps.components import MapGrid
 from modules.maps.resolver import ActiveMapResolver, MapResolution
 from modules.maps.terrain_types import TerrainFlags
 
 GridCoord = Tuple[int, int]
 
-# Default modifier used when no cover applies.  ``-2`` mirrors the existing
-# combat balance rules documented in ``docs/combat.md`` and represents a
-# defensive penalty for being exposed.
-DEFAULT_NO_COVER_BONUS = -2
+# Default modifier used when no cover applies. ``-2`` mirrors the combat rules
+# documented in ``docs/combat.md`` and represents the penalty for being exposed.
+DEFAULT_NO_COVER_BONUS: Final[int] = -2
 _COVER_PRIORITY = (
     (TerrainFlags.FORTIFICATION, 1),
     (TerrainFlags.COVER_HEAVY, 0),
@@ -21,7 +22,7 @@ _COVER_PRIORITY = (
 
 
 class CoverSystem:
-    """Derive cover bonuses directly from map tiles."""
+    """Derive cover bonuses from terrain tiles and ECS cover entities."""
 
     def __init__(
         self,
@@ -29,11 +30,22 @@ class CoverSystem:
         *,
         event_bus: Optional[object] = None,
         map_resolver: Optional[ActiveMapResolver] = None,
+        los_system: Optional[LineOfSightSystem] = None,
         default_no_cover_bonus: int = DEFAULT_NO_COVER_BONUS,
     ) -> None:
-        self._resolver = map_resolver or ActiveMapResolver(ecs_manager, event_bus=event_bus)
+        resolver = map_resolver or ActiveMapResolver(ecs_manager, event_bus=event_bus)
+        self._resolver = resolver
+        self._los = los_system or LineOfSightSystem(
+            ecs_manager,
+            event_bus=event_bus,
+            map_resolver=resolver,
+        )
         self._default_no_cover_bonus = default_no_cover_bonus
+        self._ecs = ecs_manager
 
+    # ------------------------------------------------------------------
+    # Tile-based helpers (used by map integration tests and editor tooling)
+    # ------------------------------------------------------------------
     def _get_grid(self) -> MapGrid:
         resolution: MapResolution = self._resolver.get_active_map()
         return resolution.grid
@@ -61,12 +73,7 @@ class CoverSystem:
         edge_offsets: Optional[Sequence[GridCoord]] = None,
         default: Optional[int] = None,
     ) -> int:
-        """Return the best cover modifier available to a defender.
-
-        ``target`` is the tile occupied by the defender.  ``edge_offsets`` can be
-        used to sample neighbouring tiles (for example, half-height walls or
-        adjacent barricades) – the highest bonus encountered is returned.
-        """
+        """Return the best cover modifier available to a defender tile."""
 
         tx, ty = target
         bonuses = [self.tile_cover_bonus(tx, ty, default=default)]
@@ -77,7 +84,40 @@ class CoverSystem:
 
         return max(bonuses)
 
+    # ------------------------------------------------------------------
+    # ECS-driven ranged cover calculations
+    # ------------------------------------------------------------------
+    def compute_ranged_cover_bonus(self, attacker_id: str, defender_id: str) -> int:
+        """Return the cumulative cover modifier between two entities."""
+
+        entry = self._visibility_for_entities(attacker_id, defender_id)
+        if entry is None:
+            return 0
+        if not entry.cover_ids and not entry.partial_wall:
+            return self._default_no_cover_bonus
+        return entry.cover_sum + entry.wall_bonus
+
+    def _visibility_for_entities(
+        self, attacker_id: str, defender_id: str
+    ) -> Optional[VisibilityEntry]:
+        entry = self._los.visibility_between_entities(attacker_id, defender_id)
+        if entry is not None:
+            return entry
+        start = self._get_entity_anchor(attacker_id)
+        end = self._get_entity_anchor(defender_id)
+        if start is None or end is None:
+            return None
+        return self._los.get_visibility_entry(start, end)
+
+    def _get_entity_anchor(self, entity_id: str) -> Optional[GridCoord]:
+        components = self._ecs.get_components_for_entity(entity_id, PositionComponent)
+        if not components:
+            return None
+        position: PositionComponent = components[0]
+        return int(position.x), int(position.y)
+
 
 __all__ = [
     "CoverSystem",
+    "DEFAULT_NO_COVER_BONUS",
 ]
